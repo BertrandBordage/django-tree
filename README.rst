@@ -36,10 +36,10 @@ For the moment, django-tree is only for PostgreSQL because it uses a specific
 data type not available in other databases. It will be adapted to also use
 a standard text field in the future for other databases, but it will be slower.
 
-After installing the module, you need to add `'tree',` to your
-`INSTALLED_APPS`, then add a `PathField` to a model with a
-`ForeignKey('self')`, typically named `parent` (use the `parent_field`
-argument of `PathField` if the field has another name).
+After installing the module, you need to add ``'tree',`` to your
+``INSTALLED_APPS``, then add a ``PathField`` to a model with a
+``ForeignKey('self')``, typically named ``parent`` (use the ``parent_field``
+argument of ``PathField`` if the field has another name).
 This should give you something like this:
 
 .. code:: python
@@ -55,7 +55,7 @@ This should give you something like this:
 
 However, the model above is not ordered. The children of a same parent will be
 ordered by primary key. You can specify how children are ordered using the
-`order_by` argument of `PathField`. If needed, you can add a field for users
+``order_by`` argument of ``PathField``. If needed, you can add a field for users
 to explicitly order these objects. Example:
 
 .. code:: python
@@ -78,8 +78,8 @@ by name if the position is the same.
 Usage
 -----
 
-A `PathField` is an automatic field, you don’t need to set, modify, or even see
-its value once it is installed. But you can use the `Path` object it returns to
+A ``PathField`` is an automatic field, you don’t need to set, modify, or even see
+its value once it is installed. But you can use the ``Path`` object it returns to
 get tree information about the current instance, or make complex queries
 on the whole tree structure. Example to show you most of the possibilities:
 
