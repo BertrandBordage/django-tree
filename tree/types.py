@@ -119,6 +119,12 @@ class Path:
             return self.value.count('.') + 1
 
     @property
+    def parent(self):
+        parent_value = (None if self.value is None or self.is_root
+                        else self.value.rsplit('.', 1)[0])
+        return self.__class__(self.field, parent_value)
+
+    @property
     def is_root(self):
         if self.value is not None:
             return '.' not in self.value
