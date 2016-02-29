@@ -17,7 +17,7 @@ class Path:
         return '<Path %s>' % self.value
 
     def __str__(self):
-        return self.value
+        return str(self.value)
 
     def __eq__(self, other):
         if isinstance(other, str):
