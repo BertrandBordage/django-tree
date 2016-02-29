@@ -24,6 +24,16 @@ class Path:
             return self.value == other
         return self.value == other.value
 
+    def __lt__(self, other):
+        # We simulate the effects of a NULLS LAST.
+        if self.value is None:
+            return False
+        if isinstance(other, str):
+            return self.value < other
+        if other.value is None:
+            return True
+        return self.value < other.value
+
     def __le__(self, other):
         # We simulate the effects of a NULLS LAST.
         if self.value is None:
@@ -33,6 +43,26 @@ class Path:
         if other.value is None:
             return True
         return self.value <= other.value
+
+    def __gt__(self, other):
+        # We simulate the effects of a NULLS LAST.
+        if self.value is None:
+            return True
+        if isinstance(other, str):
+            return self.value > other
+        if other.value is None:
+            return False
+        return self.value > other.value
+
+    def __ge__(self, other):
+        # We simulate the effects of a NULLS LAST.
+        if self.value is None:
+            return True
+        if isinstance(other, str):
+            return self.value >= other
+        if other.value is None:
+            return False
+        return self.value >= other.value
 
     def get_children(self):
         if self.value is None:
