@@ -1,7 +1,5 @@
 from django.db.models import Func, IntegerField, TextField
 
-from .fields import PathField
-
 
 class SubPath(Func):
     function = 'subpath'
@@ -28,6 +26,8 @@ class TextToPath(Func):
 
     @property
     def output_field(self):
+        # We import it locally to avoid circular dependencies.
+        from .fields import PathField
         return PathField()
 
 
