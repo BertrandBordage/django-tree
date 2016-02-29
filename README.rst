@@ -78,7 +78,7 @@ by name if the position is the same.
 Usage
 -----
 
-A ``PathField`` is an automatic field, you don’t need to set, modify, or even see
+``PathField`` is an automatic field, you don’t need to set, modify, or even see
 its value once it is installed. But you can use the ``Path`` object it returns to
 get tree information about the current instance, or make complex queries
 on the whole tree structure. Example to show you most of the possibilities:
