@@ -103,6 +103,13 @@ class PathField(Field):
         siblings = set(self.model._default_manager
                        .filter(parent=parent).order_by())
         if model_instance is not None:
+            # This is different from the `add` argument of `pre_save`.
+            # If one creates an object with a specific pk, `add` will be `True`
+            # but pk will not be `None` and we would lose it when restoring it.
+            new_pk = model_instance.pk is None
+            if new_pk:
+                # FIXME: This will only work if pk is a number field.
+                model_instance.pk = -1
             siblings.add(model_instance)
         if len(siblings) > self.max_siblings:
             # TODO: Specify which command the user should run
@@ -112,24 +119,16 @@ class PathField(Field):
                 'You should increase it then rebuild the tree.'
                 % self.max_siblings)
         parent_value = self._get_parent_value(parent)
+        # FIXME: This doesn’t handle descending orders.
         siblings = sorted(siblings, key=lambda o: [getattr(o, attr)
                                                    for attr in order_by])
-        if model_instance is not None:
-            # This is different from the `add` argument of `pre_save`.
-            # If one creates an object with a specific pk, `add` will be `True`
-            # but pk will not be `None` and we would lose it when restoring it.
-            new_pk = model_instance.pk is None
-            if new_pk:
-                model_instance.pk = max([s.pk for s in siblings] or [-1])
         new_paths = {}
         for i, sibling in enumerate(siblings):
             label = to_alphanum(i).zfill(self.label_size)
             new_path = self.to_python(parent_value + label)
-            if model_instance is not None and sibling == model_instance:
-                setattr(model_instance, self.attname, new_path)
-            elif new_path != sibling.path:
+            if new_path != getattr(sibling, self.attname):
                 new_paths[sibling.pk] = new_path
-                sibling.path = new_path
+                setattr(sibling, self.attname, new_path)
                 new_paths.update(self._update_children_paths(sibling))
         if model_instance is None:
             return new_paths
