@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import QuerySet
 
 
@@ -95,14 +96,14 @@ class Path:
         return not self.get_children().exists()
 
     # FIXME: Move this method somewhere else.
+    @transaction.atomic
     def rebuild_tree(self):
         # We force update the path of the first root node, so that all its
         # children and next siblings (so all siblings) will be updated.
-        # FIXME: This method does not force all nodes to be updated.
+        self.qs.update(**{self.name: None})
         first_root_node = (
             self.qs.filter(**{self.field.parent_field_name + '__isnull': True})
             .order_by(*self.field.order_by + ('pk',)).first())
         if first_root_node is None:
             return
-        setattr(first_root_node, self.name, None)
         first_root_node.save()
