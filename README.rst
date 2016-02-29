@@ -86,8 +86,8 @@ on the whole tree structure. Example to show you most of the possibilities:
 .. code:: python
 
     obj = YourModel.objects.first()
-    obj.path.rebuild_tree()  # Rebuilds the whole tree,
-                             # typically useful after a major migration.
+    obj.path.field.rebuild_tree()  # Rebuilds the whole tree,
+                                   # typically useful after a major migration.
     obj.path.level
     obj.path.is_root
     obj.path.is_leaf

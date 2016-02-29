@@ -1,11 +1,14 @@
+from django.db import transaction, DEFAULT_DB_ALIAS, connections
 from django.db.models import Field, Case, When, Value
 from django.utils.translation import ugettext_lazy as _
-from tree.functions import TextToPath
 
+from .functions import TextToPath
+from .sql.postgresql import rebuild_tree
 from .types import Path
 
 
 # TODO: Create a migration for `CREATE EXTENSION ltree;`.
+# TODO: Create a migration for rebuilding the tree.
 # TODO: Handle ManyToManyField('self') instead of ForeignKey('self').
 # TODO: Add queryset methods like `get_descendants` in a mixin.
 # TODO: Add model methods like `get_descendants` in a mixin.
@@ -133,3 +136,19 @@ class PathField(Field):
         if new_pk:
             model_instance.pk = None
         return new_paths
+
+    @transaction.atomic
+    def rebuild_tree(self, db_alias=DEFAULT_DB_ALIAS):
+        if connections[db_alias].vendor == 'postgresql':
+            rebuild_tree(self, db_alias=db_alias)
+        else:
+            # We force update the path of the first root node, so that all its
+            # children and next siblings (so all siblings) will be updated.
+            qs = self.model._default_manager.all()
+            qs.update(**{self.attname: None})
+            first_root_node = (
+                qs.filter(**{self.field.parent_field_name + '__isnull': True})
+                .order_by(*self.field.order_by + ('pk',)).first())
+            if first_root_node is None:
+                return
+            first_root_node.save()
