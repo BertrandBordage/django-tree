@@ -85,11 +85,13 @@ class Path:
 
     @property
     def level(self):
-        return self.value.count('.') + 1
+        if self.value is not None:
+            return self.value.count('.') + 1
 
     @property
     def is_root(self):
-        return '.' not in self.value
+        if self.value is not None:
+            return '.' not in self.value
 
     @property
     def is_leaf(self):
