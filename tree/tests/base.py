@@ -485,3 +485,60 @@ class PathTest(TestCase):
             self.assertEqual(path.is_root, None)
         with self.assertNumQueries(0):
             self.assertEqual(path.is_leaf, None)
+
+    def test_comparisons(self):
+        list(self.create_test_places())
+
+        france = Place.objects.get(name='France').path
+        self.assertTrue(france == france)
+        self.assertFalse(france != france)
+        self.assertFalse(france > france)
+        self.assertTrue(france >= france)
+        self.assertFalse(france < france)
+        self.assertTrue(france <= france)
+
+        # vs None
+        self.assertFalse(france == None)
+        self.assertTrue(france != None)
+        self.assertTrue(france < None)
+        self.assertTrue(france <= None)
+        self.assertFalse(france > None)
+        self.assertFalse(france >= None)
+
+        # vs new node
+        new_node = Place().path
+        self.assertFalse(france == new_node)
+        self.assertTrue(france != new_node)
+        self.assertTrue(france < new_node)
+        self.assertTrue(france <= new_node)
+        self.assertFalse(france > new_node)
+        self.assertFalse(france >= new_node)
+
+        # Same level
+        osterreich = Place.objects.get(name='Österreich').path
+        self.assertEqual(france.level, osterreich.level)
+        self.assertFalse(france == osterreich)
+        self.assertTrue(france != osterreich)
+        self.assertTrue(france < osterreich)
+        self.assertTrue(france <= osterreich)
+        self.assertFalse(france > osterreich)
+        self.assertFalse(france >= osterreich)
+
+        # Inferior level
+        normandie = Place.objects.get(name='Normandie').path
+        self.assertLess(france.level, normandie.level)
+        self.assertFalse(france == normandie)
+        self.assertTrue(france != normandie)
+        self.assertTrue(france < normandie)
+        self.assertTrue(france <= normandie)
+        self.assertFalse(france > normandie)
+        self.assertFalse(france >= normandie)
+
+        # Superior level
+        self.assertGreater(normandie.level, osterreich.level)
+        self.assertFalse(normandie == osterreich)
+        self.assertTrue(normandie != osterreich)
+        self.assertTrue(normandie < osterreich)
+        self.assertTrue(normandie <= osterreich)
+        self.assertFalse(normandie > osterreich)
+        self.assertFalse(normandie >= osterreich)
