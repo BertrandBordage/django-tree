@@ -22,28 +22,33 @@ $$ LANGUAGE plpgsql;
 """
 
 
-REBUILD_SQL = """
+UPDATE_SQL = """
 WITH RECURSIVE generate_paths(id, path) AS ((
-    SELECT
-      "%(pk_attname)s",
-      lpad(to_alphanum(row_number() OVER (ORDER BY %(order_by)s) - 1),
-           %(label_size)s, '0')
-    FROM "%(table)s" AS t2
-    WHERE "%(parent_attname)s" IS NULL
+    %s
   ) UNION ALL (
     SELECT
-      t2."%(pk_attname)s",
+      t2."%%(pk_attname)s",
       t1.path || '.'
       || lpad(to_alphanum(row_number() OVER (PARTITION BY t1.id
-                                             ORDER BY %(order_by)s) - 1),
-              %(label_size)s, '0')
+                                             ORDER BY %%(order_by)s) - 1),
+              %%(label_size)s, '0')
     FROM generate_paths AS t1
-    INNER JOIN "%(table)s" AS t2 ON t2."%(parent_attname)s" = t1.id
+    INNER JOIN "%%(table)s" AS t2 ON t2."%%(parent_attname)s" = t1.id
   )
 )
-UPDATE "%(table)s" AS t2 SET "%(attname)s" = t1.path::ltree
+UPDATE "%%(table)s" AS t2 SET "%%(attname)s" = t1.path::ltree
 FROM generate_paths AS t1
-WHERE t2."%(pk_attname)s" = t1.id;
+WHERE t2."%%(pk_attname)s" = t1.id;
+"""
+
+
+REBUILD_SQL = UPDATE_SQL % """
+SELECT
+  "%(pk_attname)s",
+  lpad(to_alphanum(row_number() OVER (ORDER BY %(order_by)s) - 1),
+       %(label_size)s, '0')
+FROM "%(table)s" AS t2
+WHERE "%(parent_attname)s" IS NULL
 """
 
 

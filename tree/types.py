@@ -85,26 +85,31 @@ class Path:
             qs = qs.exclude(**{self.attname: self.value})
         return qs.filter(**{self.attname + '__descendant_of': self.value})
 
-    def get_siblings(self):
+    def get_siblings(self, include_self=False):
         if self.value is None:
             return self.qs.none()
+        qs = self.qs
         match = '*{1}'
         if not self.is_root:
             match = self.value.rsplit('.', 1)[0] + '.' + match
-        return self.qs.filter(**{self.attname + '__match': match})
+        if not include_self:
+            qs = qs.exclude(**{self.attname: self.value})
+        return qs.filter(**{self.attname + '__match': match})
 
-    def get_prev_siblings(self):
+    def get_prev_siblings(self, include_self=False):
         if self.value is None:
             return self.qs.none()
-        siblings = self.get_siblings()
-        return (siblings.filter(**{self.attname + '__lt': self.value})
+        siblings = self.get_siblings(include_self=include_self)
+        lookup = '__lte' if include_self else '__lt'
+        return (siblings.filter(**{self.attname + lookup: self.value})
                 .order_by('-' + self.attname))
 
-    def get_next_siblings(self):
+    def get_next_siblings(self, include_self=False):
         if self.value is None:
             return self.qs.none()
-        siblings = self.get_siblings()
-        return (siblings.filter(**{self.attname + '__gt': self.value})
+        siblings = self.get_siblings(include_self=include_self)
+        lookup = '__gte' if include_self else '__gt'
+        return (siblings.filter(**{self.attname + lookup: self.value})
                 .order_by(self.attname))
 
     def get_prev_sibling(self):

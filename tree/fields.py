@@ -80,7 +80,7 @@ class PathField(Field):
 
     def pre_save(self, model_instance, add):
         # `pre_save` is called in a transaction by Model.save_base,
-        # so we don’t have to worry about atomicity.
+        # so we don't have to worry about atomicity.
         # TODO: Try to move this whole behaviour to SQL only.
         parent = getattr(model_instance, self.parent_field_name)
         new_paths = self._update_children_paths(parent, model_instance)
@@ -119,7 +119,7 @@ class PathField(Field):
                 'You should increase it then rebuild the tree.'
                 % self.max_siblings)
         parent_value = self._get_parent_value(parent)
-        # FIXME: This doesn’t handle descending orders.
+        # FIXME: This doesn't handle descending orders.
         siblings = sorted(siblings, key=lambda o: [getattr(o, attr)
                                                    for attr in order_by])
         new_paths = {}
