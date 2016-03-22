@@ -1,0 +1,31 @@
+language: python
+
+# We say we use Python 3.5 otherwise we only access by default
+# to Python 2.7, 3.3, & 3.4
+
+python: 3.5
+
+addons:
+  postgresql: 9.5
+
+env:
+  - TOXENV=py2.7-django1.8-postgresql
+  - TOXENV=py3.3-django1.8-postgresql
+  - TOXENV=py3.4-django1.8-postgresql
+  - TOXENV=py2.7-django1.9-postgresql
+  - TOXENV=py3.4-django1.9-postgresql
+  - TOXENV=py3.5-django1.9-postgresql
+
+
+
+sudo: false
+
+install: pip install tox coveralls
+
+before_script:
+  - psql -c 'CREATE USER tree SUPERUSER;' -U postgres
+  - psql -c 'CREATE DATABASE tree OWNER tree;' -U postgres
+
+script: tox -e $TOXENV
+
+after_success: coveralls
