@@ -7,7 +7,7 @@ from .models import Place
 
 
 class PathTest(TestCase):
-    def create_place(self, name, parent=None, n_queries=4):
+    def create_place(self, name, parent=None, n_queries=2):
         with self.assertNumQueries(n_queries):
             return Place.objects.create(name=name, parent=parent)
 
@@ -17,8 +17,8 @@ class PathTest(TestCase):
         normandie = self.create_place('Normandie', france)
         yield normandie
         yield self.create_place('Seine-Maritime', normandie)
-        yield self.create_place('Eure', normandie, n_queries=5)
-        yield self.create_place('Manche', normandie, n_queries=5)
+        yield self.create_place('Eure', normandie, n_queries=4)
+        yield self.create_place('Manche', normandie, n_queries=4)
         osterreich = self.create_place('Österreich')
         yield osterreich
         vienne = self.create_place('Vienne', osterreich)
@@ -84,7 +84,7 @@ class PathTest(TestCase):
     def test_max_siblings(self):
         path_field = Place._meta.get_field('path')
         bulk = [Place(name='Anything') for _ in range(path_field.max_siblings)]
-        with self.assertNumQueries(325):
+        with self.assertNumQueries(109):
             Place.objects.bulk_create(bulk)
 
         # FIXME: Find a way to update the tree without having to call

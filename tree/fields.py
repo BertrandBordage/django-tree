@@ -104,7 +104,9 @@ class PathField(Field):
         order_by = self.order_by + ('pk',)
         siblings = set(self.model._default_manager
                        .filter(parent=parent).order_by())
-        if model_instance is not None:
+        if model_instance is None:
+            new_pk = False
+        else:
             # This is different from the `add` argument of `pre_save`.
             # If one creates an object with a specific pk, `add` will be `True`
             # but pk will not be `None` and we would lose it when restoring it.
@@ -129,8 +131,10 @@ class PathField(Field):
             label = to_alphanum(i).zfill(self.label_size)
             new_path = self.to_python(parent_value + label)
             if new_path != getattr(sibling, self.attname):
-                new_paths[sibling.pk] = new_path
                 setattr(sibling, self.attname, new_path)
+                if new_pk and sibling == model_instance:
+                    continue
+                new_paths[sibling.pk] = new_path
                 new_paths.update(self._update_children_paths(sibling))
         if model_instance is None:
             return new_paths
