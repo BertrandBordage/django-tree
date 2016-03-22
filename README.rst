@@ -3,6 +3,15 @@ Django-tree
 
 Fast and easy tree structures.
 
+.. image:: http://img.shields.io/pypi/v/django-tree.svg?style=flat-square
+   :target: https://pypi.python.org/pypi/django-tree
+
+.. image:: http://img.shields.io/travis/BertrandBordage/django-tree/master.svg?style=flat-square
+   :target: https://travis-ci.org/BertrandBordage/django-tree
+
+.. image:: http://img.shields.io/coveralls/BertrandBordage/django-tree/master.svg?style=flat-square
+   :target: https://coveralls.io/r/BertrandBordage/django-tree?branch=master
+
 **In alpha, it can’t be used yet in production.**
 
 This tool works in a very similar way to **django-mptt**
