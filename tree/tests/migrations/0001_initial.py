@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
                 ('path', PathField(order_by=('name',), max_siblings=36*3, db_index=True)),
             ],
             options={
-                'ordering': ('path',),
+                'ordering': ('path', 'name'),
             },
         ),
     ]

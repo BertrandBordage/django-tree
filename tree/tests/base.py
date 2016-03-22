@@ -81,10 +81,30 @@ class PathTest(TestCase):
             ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
             ('00.01.00.00', 'Poitiers'), ('01', 'Österreich')])
 
+    def test_rebuild_tree(self):
+        list(self.create_test_places())
+
+        Place.objects.update(path='00')
+        self.assertPlaces([
+            ('00', 'Eure'), ('00', 'France'), ('00', 'Manche'),
+            ('00', 'Normandie'), ('00', 'Österreich'), ('00', 'Poitiers'),
+            ('00', 'Poitou-Charentes'), ('00', 'Seine-Maritime'),
+            ('00', 'Vienne')])
+
+        with self.assertNumQueries(3):
+            Place._meta.get_field('path').rebuild_tree()
+
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
+            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
+            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
+            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich')])
+
     def test_max_siblings(self):
         path_field = Place._meta.get_field('path')
         bulk = [Place(name='Anything') for _ in range(path_field.max_siblings)]
-        with self.assertNumQueries(109):
+        # TODO: Find a way to `bulk_create` in a single SQL query.
+        with self.assertNumQueries(len(bulk) + 1):
             Place.objects.bulk_create(bulk)
 
         # FIXME: Find a way to update the tree without having to call

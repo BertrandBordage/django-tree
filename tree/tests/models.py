@@ -9,4 +9,4 @@ class Place(Model):
     path = PathField(order_by=('name',), max_siblings=36*3, db_index=True)
 
     class Meta:
-        ordering = ('path',)
+        ordering = ('path', 'name')
