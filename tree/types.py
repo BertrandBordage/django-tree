@@ -124,9 +124,14 @@ class Path:
         return self.get_next_siblings().first()
 
     @property
+    def depth(self):
+        if self.value is not None:
+            return self.value.count('.')
+
+    @property
     def level(self):
         if self.value is not None:
-            return self.value.count('.') + 1
+            return self.depth + 1
 
     @property
     def parent(self):

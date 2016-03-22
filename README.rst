@@ -97,6 +97,7 @@ on the whole tree structure. Example to show you most of the possibilities:
     obj = YourModel.objects.first()
     obj.path.field.rebuild_tree()  # Rebuilds the whole tree,
                                    # typically useful after a major migration.
+    obj.path.depth
     obj.path.level
     obj.path.is_root
     obj.path.is_leaf

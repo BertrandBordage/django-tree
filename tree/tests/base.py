@@ -129,14 +129,23 @@ class PathTest(TestCase):
                     % path_field.max_siblings):
                 Place.objects.create(name='Anything')
 
+    def test_depth(self):
+        list(self.create_test_places())
+
+        with self.assertNumQueries(1):
+            data = [(p.path.depth, p.name) for p in Place.objects.all()]
+            self.assertListEqual(data, [
+                (0, 'France'), (1, 'Normandie'), (2, 'Eure'), (2, 'Manche'),
+                (2, 'Seine-Maritime'), (1, 'Poitou-Charentes'), (2, 'Vienne'),
+                (3, 'Poitiers'), (0, 'Österreich')])
+
     def test_level(self):
         list(self.create_test_places())
 
-        places = [(p.path.level, p.name) for p in Place.objects.all()]
-        self.assertListEqual(places, [
-            (1, 'France'), (2, 'Normandie'), (3, 'Eure'), (3, 'Manche'),
-            (3, 'Seine-Maritime'), (2, 'Poitou-Charentes'), (3, 'Vienne'),
-            (4, 'Poitiers'), (1, 'Österreich')])
+        with self.assertNumQueries(1):
+            paths = [p.path for p in Place.objects.all()]
+            self.assertListEqual(
+                [p.level for p in paths], [p.depth + 1 for p in paths])
 
     def test_is_root(self):
         list(self.create_test_places())
@@ -480,6 +489,8 @@ class PathTest(TestCase):
         with self.assertNumQueries(0):
             self.assertEqual(path.get_next_sibling(), None)
         with self.assertNumQueries(0):
+            self.assertEqual(path.depth, None)
+        with self.assertNumQueries(0):
             self.assertEqual(path.level, None)
         with self.assertNumQueries(0):
             self.assertEqual(path.is_root, None)
@@ -514,9 +525,9 @@ class PathTest(TestCase):
         self.assertFalse(france > new_node)
         self.assertFalse(france >= new_node)
 
-        # Same level
+        # Same depth
         osterreich = Place.objects.get(name='Österreich').path
-        self.assertEqual(france.level, osterreich.level)
+        self.assertEqual(france.depth, osterreich.depth)
         self.assertFalse(france == osterreich)
         self.assertTrue(france != osterreich)
         self.assertTrue(france < osterreich)
@@ -524,9 +535,9 @@ class PathTest(TestCase):
         self.assertFalse(france > osterreich)
         self.assertFalse(france >= osterreich)
 
-        # Inferior level
+        # Inferior depth
         normandie = Place.objects.get(name='Normandie').path
-        self.assertLess(france.level, normandie.level)
+        self.assertLess(france.depth, normandie.depth)
         self.assertFalse(france == normandie)
         self.assertTrue(france != normandie)
         self.assertTrue(france < normandie)
@@ -534,8 +545,8 @@ class PathTest(TestCase):
         self.assertFalse(france > normandie)
         self.assertFalse(france >= normandie)
 
-        # Superior level
-        self.assertGreater(normandie.level, osterreich.level)
+        # Superior depth
+        self.assertGreater(normandie.depth, osterreich.depth)
         self.assertFalse(normandie == osterreich)
         self.assertTrue(normandie != osterreich)
         self.assertTrue(normandie < osterreich)
