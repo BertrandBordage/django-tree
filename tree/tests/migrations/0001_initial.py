@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('name', models.CharField(max_length=50)),
-                ('parent', models.ForeignKey(blank=True, to='self', null=True)),
+                ('parent', models.ForeignKey('self', blank=True, null=True)),
                 ('path', PathField(order_by=('name',), max_siblings=36*3, db_index=True)),
             ],
             options={

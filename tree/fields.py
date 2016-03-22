@@ -33,12 +33,13 @@ def to_alphanum(i):
 
 
 class PathField(Field):
-    description = _('Tree path (PostgreSQL-specific)')
+    description = _('Tree path')
 
     def __init__(self, *args, **kwargs):
         self.parent_field_name = kwargs.pop('parent_field', 'parent')
         self.order_by = tuple(kwargs.pop('order_by', ()))
         kwargs['editable'] = False
+        kwargs['default'] = lambda: Path(self, None)
         self.max_siblings = kwargs.pop('max_siblings', DEFAULT_MAX_SIBLINGS)
         i = self.max_siblings
         n = 0
@@ -50,6 +51,7 @@ class PathField(Field):
 
     def deconstruct(self):
         name, path, args, kwargs = super(PathField, self).deconstruct()
+        del kwargs['default']
         kwargs.update(
             parent_field=self.parent_field_name,
             order_by=self.order_by,

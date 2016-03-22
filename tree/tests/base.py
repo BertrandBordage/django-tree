@@ -439,3 +439,29 @@ class PathTest(TestCase):
         seine_maritime = Place.objects.get(name='Seine-Maritime')
         with self.assertNumQueries(1):
             self.assertEqual(seine_maritime.path.get_next_sibling(), None)
+
+    def test_new_path(self):
+        path = Place().path
+
+        with self.assertNumQueries(0):
+            self.assertListEqual(list(path.get_children()), [])
+        with self.assertNumQueries(0):
+            self.assertListEqual(list(path.get_ancestors()), [])
+        with self.assertNumQueries(0):
+            self.assertListEqual(list(path.get_descendants()), [])
+        with self.assertNumQueries(0):
+            self.assertListEqual(list(path.get_siblings()), [])
+        with self.assertNumQueries(0):
+            self.assertListEqual(list(path.get_prev_siblings()), [])
+        with self.assertNumQueries(0):
+            self.assertListEqual(list(path.get_next_siblings()), [])
+        with self.assertNumQueries(0):
+            self.assertEqual(path.get_prev_sibling(), None)
+        with self.assertNumQueries(0):
+            self.assertEqual(path.get_next_sibling(), None)
+        with self.assertNumQueries(0):
+            self.assertEqual(path.level, None)
+        with self.assertNumQueries(0):
+            self.assertEqual(path.is_root, None)
+        with self.assertNumQueries(0):
+            self.assertEqual(path.is_leaf, None)

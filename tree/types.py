@@ -136,4 +136,5 @@ class Path:
 
     @property
     def is_leaf(self):
-        return not self.get_children().exists()
+        if self.value is not None:
+            return not self.get_children().exists()
