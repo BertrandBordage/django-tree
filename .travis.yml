@@ -6,7 +6,7 @@ language: python
 python: 3.5
 
 addons:
-  postgresql: 9.5
+  postgresql: 9.4
 
 env:
   - TOXENV=py2.7-django1.8-postgresql
