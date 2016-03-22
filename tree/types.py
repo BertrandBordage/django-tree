@@ -19,49 +19,54 @@ class Path:
         return str(self.value)
 
     def __eq__(self, other):
-        if isinstance(other, str):
-            return self.value == other
-        return self.value == other.value
+        if isinstance(other, Path):
+            return self.value == other.value
+        return self.value == other
+
+    def __ne__(self, other):
+        if isinstance(other, Path):
+            return self.value != other.value
+        return self.value != other
 
     def __lt__(self, other):
         # We simulate the effects of a NULLS LAST.
         if self.value is None:
             return False
-        if isinstance(other, str):
-            return self.value < other
-        if other.value is None:
-            return True
-        return self.value < other.value
+        if isinstance(other, Path):
+            if other.value is None:
+                return True
+            return self.value < other.value
+        return self.value < other
 
     def __le__(self, other):
         # We simulate the effects of a NULLS LAST.
         if self.value is None:
             return False
-        if isinstance(other, str):
-            return self.value <= other
-        if other.value is None:
-            return True
-        return self.value <= other.value
+        if isinstance(other, Path):
+            if other.value is None:
+                return True
+            return self.value <= other.value
+        return self.value <= other
 
     def __gt__(self, other):
         # We simulate the effects of a NULLS LAST.
         if self.value is None:
             return True
-        if isinstance(other, str):
-            return self.value > other
-        if other.value is None:
-            return False
-        return self.value > other.value
+        if isinstance(other, Path):
+            if other.value is None:
+                return False
+            return self.value > other.value
+        return self.value > other
 
     def __ge__(self, other):
         # We simulate the effects of a NULLS LAST.
         if self.value is None:
             return True
-        if isinstance(other, str):
-            return self.value >= other
-        if other.value is None:
-            return False
-        return self.value >= other.value
+        if isinstance(other, Path):
+            if other.value is None:
+                return False
+            return self.value >= other.value
+        return self.value >= other
 
     def get_children(self):
         if self.value is None:
