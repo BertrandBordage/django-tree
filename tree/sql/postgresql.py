@@ -52,6 +52,7 @@ FROM generate_paths AS t1
 WHERE t2."{pk_attname}" = t1.pk AND t2."{attname}" != t1."{attname}";
 """
 
+UPDATE_SIBLINGS_SQL = UPDATE_SQL % 'VALUES (%s, %s::ltree)'
 
 REBUILD_SQL = UPDATE_SQL % """
 SELECT
@@ -73,7 +74,7 @@ def rebuild(path_field, db_alias=DEFAULT_DB_ALIAS):
             order_by.append(
                 't2."%s" %s' % (
                     field.attname,
-                    'DESC' if field_name.startswith('-') else 'ASC'))
+                    'DESC' if field_name[0] == '-' else 'ASC'))
         parent_field = meta.get_field(path_field.parent_field_name)
         cursor.execute(
             REBUILD_SQL.format(**{

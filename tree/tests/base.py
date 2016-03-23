@@ -9,6 +9,8 @@ from .models import Place
 
 # TODO: Test same order_by values.
 # TODO: Test order_by with descending orders.
+# TODO: Test what happens when we move a node after itself
+#       while staying in the same siblinghood.
 
 
 class PathTest(TestCase):
@@ -27,8 +29,8 @@ class PathTest(TestCase):
         normandie = self.create_place('Normandie', france)
         yield normandie
         yield self.create_place('Seine-Maritime', normandie)
-        yield self.create_place('Eure', normandie, n_queries=4)
-        yield self.create_place('Manche', normandie, n_queries=4)
+        yield self.create_place('Eure', normandie, n_queries=3)
+        yield self.create_place('Manche', normandie, n_queries=3)
         osterreich = self.create_place('Österreich')
         yield osterreich
         vienne = self.create_place('Vienne', osterreich)

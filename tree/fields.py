@@ -1,9 +1,8 @@
 from django.db import transaction, DEFAULT_DB_ALIAS, connections
-from django.db.models import Field, Case, When, Value
+from django.db.models import Field
 from django.utils.translation import ugettext_lazy as _
 
-from .functions import TextToPath
-from .sql.postgresql import rebuild
+from .sql.postgresql import rebuild, UPDATE_SIBLINGS_SQL
 from .types import Path
 
 
@@ -95,10 +94,7 @@ class PathField(Field):
                 raise ValueError(
                     _('Cannot set itself or a descendant as parent.'))
 
-        new_paths = self._update_children_paths(parent, model_instance)
-        self.model._default_manager.filter(pk__in=new_paths).update(
-            path=TextToPath(Case(*[When(pk=pk, then=Value(path.value))
-                                   for pk, path in new_paths.items()])))
+        self._update_siblings_paths(parent, model_instance)
         return getattr(model_instance, self.attname)
 
     def _get_parent_value(self, parent):
@@ -110,47 +106,84 @@ class PathField(Field):
             parent_value = getattr(parent, self.attname).value
         return parent_value + '.'
 
-    def _update_children_paths(self, parent, model_instance=None):
+    def _update_siblings_paths(self, parent, model_instance):
         order_by = self.order_by + ('pk',)
-        siblings = set(self.model._default_manager
-                       .filter(parent=parent).order_by())
-        if model_instance is None:
-            new_pk = False
-        else:
-            # This is different from the `add` argument of `pre_save`.
-            # If one creates an object with a specific pk, `add` will be `True`
-            # but pk will not be `None` and we would lose it when restoring it.
-            new_pk = model_instance.pk is None
-            if new_pk:
-                # FIXME: This will only work if pk is a number field.
-                model_instance.pk = -1
-            siblings.add(model_instance)
-        if len(siblings) > self.max_siblings:
-            # TODO: Specify which command the user should run
-            #       to rebuild the tree.
+        python_order_by = []
+        for attname in order_by:
+            reversed_order = attname[0] == '-'
+            if reversed_order:
+                attname = attname[1:]
+            python_order_by.append((attname, reversed_order))
+
+        parent_value = self._get_parent_value(parent)
+
+        def get_path(i):
+            return parent_value + to_alphanum(i).zfill(self.label_size)
+
+        def set_instance_path(i):
+            new_path = get_path(i)
+            if new_path != getattr(model_instance, self.attname):
+                if model_instance.pk is not None:
+                    siblings.append((model_instance.pk, new_path))
+                setattr(model_instance, self.attname, self.to_python(new_path))
+
+        i = 0
+
+        siblings = []
+        instance_located = False
+        siblings_qs = self.model._default_manager.filter(parent=parent)
+        if model_instance.pk is not None:
+            siblings_qs = siblings_qs.exclude(pk=model_instance.pk)
+        for other in siblings_qs.order_by(*order_by):
+            if not instance_located:
+                for attname, reversed_order in python_order_by:
+                    v = getattr(model_instance, attname)
+                    other_v = getattr(other, attname)
+                    if reversed_order:
+                        v, other_v = other_v, v
+                    if v is None:
+                        continue
+                    if other_v is None or v < other_v:
+                        instance_located = True
+                        break
+                if instance_located:
+                    set_instance_path(i)
+                    i += 1
+            new_path = get_path(i)
+            if new_path != getattr(other, self.attname):
+                siblings.append((other.pk, new_path))
+            i += 1
+        if not instance_located:
+            set_instance_path(i)
+            i += 1
+
+        meta = self.model._meta
+        order_by = []
+        for field_name in self.order_by + ('pk',):
+            field = (meta.pk if field_name == 'pk'
+                     else meta.get_field(field_name.lstrip('-')))
+            order_by.append(
+                't2."%s" %s' % (
+                    field.attname,
+                    'DESC' if field_name[0] == '-' else 'ASC'))
+        parent_field = meta.get_field(self.parent_field_name)
+        if i > self.max_siblings:
             raise ValueError(
                 _('`max_siblings` (%d) has been reached.\n'
                   'You should increase it then rebuild.')
                 % self.max_siblings)
-        parent_value = self._get_parent_value(parent)
-        # FIXME: This doesn't handle descending orders.
-        siblings = sorted(siblings, key=lambda o: [getattr(o, attr)
-                                                   for attr in order_by])
-        new_paths = {}
-        for i, sibling in enumerate(siblings):
-            label = to_alphanum(i).zfill(self.label_size)
-            new_path = self.to_python(parent_value + label)
-            if new_path != getattr(sibling, self.attname):
-                setattr(sibling, self.attname, new_path)
-                if new_pk and sibling == model_instance:
-                    continue
-                new_paths[sibling.pk] = new_path
-                new_paths.update(self._update_children_paths(sibling))
-        if model_instance is None:
-            return new_paths
-        if new_pk:
-            model_instance.pk = None
-        return new_paths
+        if siblings:
+            # FIXME: Fetch the database alias more cleverly.
+            with connections[DEFAULT_DB_ALIAS].cursor() as cursor:
+                cursor.executemany(
+                    UPDATE_SIBLINGS_SQL.format(**{
+                        'attname': self.attname,
+                        'pk_attname': meta.pk.attname,
+                        'label_size': self.label_size,
+                        'table': meta.db_table,
+                        'parent_attname': parent_field.attname,
+                        'order_by': ', '.join(order_by),
+                    }), siblings)
 
     @transaction.atomic
     def rebuild(self, db_alias=DEFAULT_DB_ALIAS):
