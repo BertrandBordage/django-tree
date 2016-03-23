@@ -88,15 +88,15 @@ Usage
 -----
 
 ``PathField`` is an automatic field, you don’t need to set, modify, or even see
-its value once it is installed. But you can use the ``Path`` object it returns to
-get tree information about the current instance, or make complex queries
+its value once it is installed. But you can use the ``Path`` object it returns
+to get tree information about the current instance, or make complex queries
 on the whole tree structure. Example to show you most of the possibilities:
 
 .. code:: python
 
     obj = YourModel.objects.all()[0]
-    obj.path.field.rebuild_tree()  # Rebuilds the whole tree,
-                                   # typically useful after a major migration.
+    obj.path.rebuild()  # Rebuilds all trees of this field,
+                        # typically useful after a major migration.
     obj.path.depth
     obj.path.level
     obj.path.is_root

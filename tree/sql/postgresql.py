@@ -39,17 +39,17 @@ WITH RECURSIVE generate_paths(pk, path) AS ((
   ) UNION ALL (
     SELECT
       t2."{pk_attname}",
-      t1.path || '.'
-      || lpad(to_alphanum(row_number() OVER (PARTITION BY t1.pk
-                                             ORDER BY {order_by}) - 1),
-              {label_size}, '0')
+      t1.path || lpad(
+        to_alphanum(row_number() OVER (PARTITION BY t1.pk
+                                       ORDER BY {order_by}) - 1),
+        {label_size}, '0')::ltree
     FROM generate_paths AS t1
     INNER JOIN "{table}" AS t2 ON t2."{parent_attname}" = t1.pk
   )
 )
 UPDATE "{table}" AS t2 SET "{attname}" = t1.path::ltree
 FROM generate_paths AS t1
-WHERE t2."{pk_attname}" = t1.pk;
+WHERE t2."{pk_attname}" = t1.pk AND t2."{attname}" != t1."{attname}";
 """
 
 
@@ -57,13 +57,13 @@ REBUILD_SQL = UPDATE_SQL % """
 SELECT
   "{pk_attname}",
   lpad(to_alphanum(row_number() OVER (ORDER BY {order_by}) - 1),
-       {label_size}, '0')
+       {label_size}, '0')::ltree
 FROM "{table}" AS t2
 WHERE "{parent_attname}" IS NULL
 """
 
 
-def rebuild_tree(path_field, db_alias=DEFAULT_DB_ALIAS):
+def rebuild(path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
         meta = path_field.model._meta
         order_by = []

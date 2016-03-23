@@ -17,6 +17,11 @@ class PathTest(TestCase):
             return Place.objects.create(name=name, parent=parent)
 
     def create_test_places(self):
+        self.correct_places_data = [
+            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
+            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
+            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
+            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich')]
         france = self.create_place('France')
         yield france
         normandie = self.create_place('Normandie', france)
@@ -80,13 +85,9 @@ class PathTest(TestCase):
             ('00.01', 'Poitou-Charentes'), ('01', 'Österreich'),
             ('01.00', 'Vienne'), ('01.00.00', 'Poitiers')])
         next(it)
-        self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
-            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich')])
+        self.assertPlaces(self.correct_places_data)
 
-    def test_rebuild_tree(self):
+    def test_rebuild(self):
         list(self.create_test_places())
 
         Place.objects.update(path='00')
@@ -95,15 +96,44 @@ class PathTest(TestCase):
             ('00', 'Normandie'), ('00', 'Österreich'), ('00', 'Poitiers'),
             ('00', 'Poitou-Charentes'), ('00', 'Seine-Maritime'),
             ('00', 'Vienne')])
-
         with self.assertNumQueries(3):
-            Place._meta.get_field('path').rebuild_tree()
+            Place._meta.get_field('path').rebuild()
+        self.assertPlaces(self.correct_places_data)
 
+        # Root
+        Place.objects.filter(name='France').update(path='2Z')
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
+            ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
             ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
             ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
-            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich')])
+            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
+            ('2Z', 'France')])
+        with self.assertNumQueries(3):
+            Place._meta.get_field('path').rebuild()
+        self.assertPlaces(self.correct_places_data)
+
+        # Branch
+        Place.objects.filter(name='Normandie').update(path='2Z.2Z')
+        self.assertPlaces([
+            ('00', 'France'), ('00.00.00', 'Eure'),
+            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
+            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
+            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
+            ('2Z.2Z', 'Normandie')])
+        with self.assertNumQueries(3):
+            Place._meta.get_field('path').rebuild()
+        self.assertPlaces(self.correct_places_data)
+
+        # Leaf
+        Place.objects.filter(name='Seine-Maritime').update(path='00.2Z')
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
+            ('00.00.01', 'Manche'), ('00.01', 'Poitou-Charentes'),
+            ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
+            ('00.2Z', 'Seine-Maritime'), ('01', 'Österreich')])
+        with self.assertNumQueries(3):
+            Place._meta.get_field('path').rebuild()
+        self.assertPlaces(self.correct_places_data)
 
     def test_max_siblings(self):
         path_field = Place._meta.get_field('path')
@@ -113,13 +143,13 @@ class PathTest(TestCase):
             Place.objects.bulk_create(bulk)
 
         # FIXME: Find a way to update the tree without having to call
-        # `rebuild_tree`.
+        #        `rebuild`.
         self.assertListEqual(
             list(Place.objects.order_by('-name', '-pk')
                  .values_list('path', flat=True)[:5]),
             ['00', '00', '00', '00', '00'])
 
-        path_field.rebuild_tree()
+        path_field.rebuild()
 
         self.assertListEqual(
             list(Place.objects.order_by('-name', '-pk')
@@ -130,7 +160,7 @@ class PathTest(TestCase):
             with self.assertRaisesMessage(
                     ValueError,
                     '`max_siblings` (%d) has been reached.\n'
-                    'You should increase it then rebuild the tree.'
+                    'You should increase it then rebuild.'
                     % path_field.max_siblings):
                 Place.objects.create(name='Anything')
 

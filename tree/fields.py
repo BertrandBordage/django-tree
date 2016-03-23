@@ -3,12 +3,13 @@ from django.db.models import Field, Case, When, Value
 from django.utils.translation import ugettext_lazy as _
 
 from .functions import TextToPath
-from .sql.postgresql import rebuild_tree
+from .sql.postgresql import rebuild
 from .types import Path
 
 
-# TODO: Create a migration for `CREATE EXTENSION ltree;`.
-# TODO: Create a migration for rebuilding the tree.
+# TODO: Create a database trigger instead of using Field.pre_save,
+#       in order to have a robust and faster system.
+# TODO: Create a migration for rebuilding.
 # TODO: Handle ManyToManyField('self') instead of ForeignKey('self').
 # TODO: Add queryset methods like `get_descendants` in a mixin.
 # TODO: Add model methods like `get_descendants` in a mixin.
@@ -101,13 +102,13 @@ class PathField(Field):
         return getattr(model_instance, self.attname)
 
     def _get_parent_value(self, parent):
-        if parent is not None:
+        if parent is None:
+            return ''
+        parent_value = getattr(parent, self.attname).value
+        if parent_value is None:
+            parent.save()
             parent_value = getattr(parent, self.attname).value
-            if parent_value is None:
-                parent.save()
-                parent_value = getattr(parent, self.attname).value
-            return parent_value + '.'
-        return ''
+        return parent_value + '.'
 
     def _update_children_paths(self, parent, model_instance=None):
         order_by = self.order_by + ('pk',)
@@ -129,7 +130,7 @@ class PathField(Field):
             #       to rebuild the tree.
             raise ValueError(
                 _('`max_siblings` (%d) has been reached.\n'
-                  'You should increase it then rebuild the tree.')
+                  'You should increase it then rebuild.')
                 % self.max_siblings)
         parent_value = self._get_parent_value(parent)
         # FIXME: This doesn't handle descending orders.
@@ -152,9 +153,9 @@ class PathField(Field):
         return new_paths
 
     @transaction.atomic
-    def rebuild_tree(self, db_alias=DEFAULT_DB_ALIAS):
+    def rebuild(self, db_alias=DEFAULT_DB_ALIAS):
         if connections[db_alias].vendor == 'postgresql':
-            rebuild_tree(self, db_alias=db_alias)
+            rebuild(self, db_alias=db_alias)
         else:
             # We force update the path of the first root node, so that all its
             # children and next siblings (so all siblings) will be updated.
