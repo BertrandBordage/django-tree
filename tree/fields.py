@@ -85,6 +85,15 @@ class PathField(Field):
         # so we don't have to worry about atomicity.
         # TODO: Try to move this whole behaviour to SQL only.
         parent = getattr(model_instance, self.parent_field_name)
+
+        if parent is not None:
+            parent_path = getattr(parent, self.attname)
+            path = getattr(model_instance, self.attname)
+            if parent_path.is_descendant_of(path, include_self=True):
+                # TODO: Add this behaviour to the model validation.
+                raise ValueError(
+                    _('Cannot set itself or a descendant as parent.'))
+
         new_paths = self._update_children_paths(parent, model_instance)
         self.model._default_manager.filter(pk__in=new_paths).update(
             path=TextToPath(Case(*[When(pk=pk, then=Value(path.value))
@@ -119,8 +128,8 @@ class PathField(Field):
             # TODO: Specify which command the user should run
             #       to rebuild the tree.
             raise ValueError(
-                '`max_siblings` (%d) has been reached.\n'
-                'You should increase it then rebuild the tree.'
+                _('`max_siblings` (%d) has been reached.\n'
+                  'You should increase it then rebuild the tree.')
                 % self.max_siblings)
         parent_value = self._get_parent_value(parent)
         # FIXME: This doesn't handle descending orders.

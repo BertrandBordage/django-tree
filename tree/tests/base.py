@@ -1,6 +1,7 @@
 # coding: utf-8
 
 from __future__ import unicode_literals
+from django.db import transaction
 from django.test import TestCase
 
 from .models import Place
@@ -553,3 +554,44 @@ class PathTest(TestCase):
         self.assertTrue(normandie <= osterreich)
         self.assertFalse(normandie > osterreich)
         self.assertFalse(normandie >= osterreich)
+
+    def test_is_ancestor_of(self):
+        list(self.create_test_places())
+
+        for place in Place.objects.all():
+            self.assertFalse(place.path.is_ancestor_of(place.path))
+            self.assertTrue(place.path.is_ancestor_of(place.path,
+                                                      include_self=True))
+            for ancestor in place.path.get_ancestors():
+                self.assertTrue(ancestor.path.is_ancestor_of(place.path))
+
+    def test_is_descendant_of(self):
+        list(self.create_test_places())
+
+        for place in Place.objects.all():
+            self.assertFalse(place.path.is_descendant_of(place.path))
+            self.assertTrue(place.path.is_descendant_of(place.path,
+                                                        include_self=True))
+            for descendant in place.path.get_descendants():
+                self.assertTrue(descendant.path.is_descendant_of(place.path))
+
+    def test_cycle(self):
+        # Simple cycle
+        a = Place.objects.create(name='a')
+        a.parent = a
+        with self.assertRaisesMessage(
+                ValueError, 'Cannot set itself or a descendant as parent.'):
+            with transaction.atomic():
+                with self.assertNumQueries(0):
+                    a.save()
+
+        # Complex cycle
+        b = Place.objects.create(name='b', parent=a)
+        c = Place.objects.create(name='c', parent=b)
+        d = Place.objects.create(name='d', parent=c)
+        a.parent = d
+        with self.assertRaisesMessage(
+                ValueError, 'Cannot set itself or a descendant as parent.'):
+            with transaction.atomic():
+                with self.assertNumQueries(0):
+                    a.save()

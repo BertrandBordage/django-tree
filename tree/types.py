@@ -148,3 +148,25 @@ class Path:
     def is_leaf(self):
         if self.value is not None:
             return not self.get_children().exists()
+
+    def is_ancestor_of(self, other, include_self=False):
+        if self.value is None:
+            return False
+        if isinstance(other, Path):
+            other = other.value
+        if other is None:
+            return False
+        if not include_self and self.value == other:
+            return False
+        return other.startswith(self.value)
+
+    def is_descendant_of(self, other, include_self=False):
+        if self.value is None:
+            return False
+        if isinstance(other, Path):
+            other = other.value
+        if other is None:
+            return False
+        if not include_self and self.value == other:
+            return False
+        return self.value.startswith(other)

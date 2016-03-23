@@ -94,7 +94,7 @@ on the whole tree structure. Example to show you most of the possibilities:
 
 .. code:: python
 
-    obj = YourModel.objects.first()
+    obj = YourModel.objects.all()[0]
     obj.path.field.rebuild_tree()  # Rebuilds the whole tree,
                                    # typically useful after a major migration.
     obj.path.depth
@@ -111,6 +111,9 @@ on the whole tree structure. Example to show you most of the possibilities:
     obj.path.get_next_sibling()
     # Same as `get_prev_sibling`, except that we get the first public one.
     obj.path.get_prev_siblings().filter(public=True).first()
+    other = YourModel.objects.all()[1]
+    obj.path.is_ancestor_of(other.path)
+    obj.path.is_descendant_of(other.path, include_self=True)
 
 There is also a bunch of less useful lookups, transforms and functions
 available. They will be documented with examples in the future.
