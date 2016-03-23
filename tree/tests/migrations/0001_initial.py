@@ -1,11 +1,11 @@
-from django.contrib.postgres.operations import CreateExtension
 from django.db import models, migrations
 from tree.fields import PathField
+from tree.operations import CreateTreeFunctions
 
 
 class Migration(migrations.Migration):
     operations = [
-        CreateExtension('ltree'),
+        CreateTreeFunctions(),
         migrations.CreateModel(
             name='Place',
             fields=[

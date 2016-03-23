@@ -7,8 +7,12 @@ from django.test import TestCase
 from .models import Place
 
 
+# TODO: Test same order_by values.
+# TODO: Test order_by with descending orders.
+
+
 class PathTest(TestCase):
-    def create_place(self, name, parent=None, n_queries=2):
+    def create_place(self, name, parent=None, n_queries=1):
         with self.assertNumQueries(n_queries):
             return Place.objects.create(name=name, parent=parent)
 
@@ -18,8 +22,8 @@ class PathTest(TestCase):
         normandie = self.create_place('Normandie', france)
         yield normandie
         yield self.create_place('Seine-Maritime', normandie)
-        yield self.create_place('Eure', normandie, n_queries=4)
-        yield self.create_place('Manche', normandie, n_queries=4)
+        yield self.create_place('Eure', normandie, n_queries=3)
+        yield self.create_place('Manche', normandie, n_queries=3)
         osterreich = self.create_place('Österreich')
         yield osterreich
         vienne = self.create_place('Vienne', osterreich)
@@ -111,15 +115,15 @@ class PathTest(TestCase):
         # FIXME: Find a way to update the tree without having to call
         # `rebuild_tree`.
         self.assertListEqual(
-            list(Place.objects.order_by('-path').values_list('path',
-                                                             flat=True)[:5]),
+            list(Place.objects.order_by('-name', '-pk')
+                 .values_list('path', flat=True)[:5]),
             ['00', '00', '00', '00', '00'])
 
         path_field.rebuild_tree()
 
         self.assertListEqual(
-            list(Place.objects.order_by('-path').values_list('path',
-                                                             flat=True)[:5]),
+            list(Place.objects.order_by('-name', '-pk')
+                 .values_list('path', flat=True)[:5]),
             ['2Z', '2Y', '2X', '2W', '2V'])
 
         with self.assertNumQueries(1):
