@@ -12,7 +12,7 @@ from .models import Place
 
 
 class PathTest(TestCase):
-    def create_place(self, name, parent=None, n_queries=1):
+    def create_place(self, name, parent=None, n_queries=2):
         with self.assertNumQueries(n_queries):
             return Place.objects.create(name=name, parent=parent)
 
@@ -22,8 +22,8 @@ class PathTest(TestCase):
         normandie = self.create_place('Normandie', france)
         yield normandie
         yield self.create_place('Seine-Maritime', normandie)
-        yield self.create_place('Eure', normandie, n_queries=3)
-        yield self.create_place('Manche', normandie, n_queries=3)
+        yield self.create_place('Eure', normandie, n_queries=4)
+        yield self.create_place('Manche', normandie, n_queries=4)
         osterreich = self.create_place('Österreich')
         yield osterreich
         vienne = self.create_place('Vienne', osterreich)
