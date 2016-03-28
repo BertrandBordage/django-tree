@@ -1,8 +1,9 @@
-from django.db import DEFAULT_DB_ALIAS, connections
+from contextlib import contextmanager
+from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import Field
 from django.utils.translation import ugettext_lazy as _
 
-from .sql.postgresql import rebuild
+from .sql import postgresql
 from .types import Path
 
 
@@ -46,4 +47,17 @@ class PathField(Field):
         if connections[db_alias].vendor != 'postgresql':
             raise NotImplementedError(
                 'django-tree is only for PostgreSQL for now.')
-        rebuild(self, db_alias=db_alias)
+        postgresql.rebuild(self.model._meta.db_table, self.attname,
+                           db_alias=db_alias)
+
+    @contextmanager
+    @transaction.atomic
+    def disabled_trigger(self, db_alias=DEFAULT_DB_ALIAS):
+        if connections[db_alias].vendor != 'postgresql':
+            raise NotImplementedError(
+                'django-tree is only for PostgreSQL for now.')
+        postgresql.disable_trigger(self.model._meta.db_table, self.attname,
+                                   db_alias=db_alias)
+        yield
+        postgresql.enable_trigger(self.model._meta.db_table, self.attname,
+                                  db_alias=db_alias)

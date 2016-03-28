@@ -38,6 +38,7 @@ class CreateTreeFunctions(Operation):
 
 
 # TODO: Handle related lookups in `order_by`.
+# TODO: Add `DropTreeTrigger`.
 
 
 class CreateTreeTrigger(Operation, GetModelMixin):
@@ -69,13 +70,14 @@ class CreateTreeTrigger(Operation, GetModelMixin):
     def get_pre_params(self, model):
         meta = model._meta
         pk = meta.pk
+        path = meta.get_field(self.path_field).attname
         order_by = self.order_by
         if not (pk.attname in order_by or pk.name in order_by
                 or 'pk' in order_by):
             order_by += ('pk',)
 
         sql_order_by = []
-        update_columns = []
+        update_columns = [path]
         for field_name in order_by:
             descending = field_name[0] == '-'
             if descending:
@@ -91,10 +93,9 @@ class CreateTreeTrigger(Operation, GetModelMixin):
             table=meta.db_table,
             pk=meta.pk.attname,
             parent=meta.get_field(self.parent_field).attname,
-            path=meta.get_field(self.path_field).attname,
+            path=path,
             max_siblings=self.max_siblings,
             label_size=self.label_size,
-            # FIXME: Include PathField in `update_columns`.
             update_columns=', '.join(update_columns),
             order_by=", ".join(sql_order_by),
         )
@@ -142,7 +143,7 @@ class RebuildPaths(Operation, GetModelMixin):
             raise NotImplementedError(
                 'django-tree is only for PostgreSQL for now.')
         model = self.get_model(app_label, to_state)
-        postgresql.rebuild(model._meta.get_field(self.path_field),
+        postgresql.rebuild(model._meta.db_table, self.path_field,
                            db_alias=schema_editor.connection.alias)
 
     def database_backwards(self, app_label, schema_editor,

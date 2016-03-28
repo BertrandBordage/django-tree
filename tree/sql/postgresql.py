@@ -167,7 +167,7 @@ CREATE_TRIGGER_QUERIES = (
     """
     CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
     BEGIN
-        UPDATE "{table}" SET "{pk}" = "{table}"."{pk}" FROM (
+        UPDATE "{table}" SET "{path}" = "{table}"."{path}" FROM (
             SELECT * FROM "{table}"
             WHERE "{parent}" IS NULL
             LIMIT 1
@@ -185,8 +185,18 @@ DROP_TRIGGER_QUERIES = (
 )
 
 
-def rebuild(path_field, db_alias=DEFAULT_DB_ALIAS):
-    table = path_field.model._meta.db_table
+def rebuild(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
-        cursor.execute('SELECT rebuild_{}_{}();'
-                       .format(table, path_field.attname))
+        cursor.execute('SELECT rebuild_{}_{}();'.format(table, path_field))
+
+
+def disable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
+    with connections[db_alias].cursor() as cursor:
+        cursor.execute('ALTER TABLE {} DISABLE TRIGGER update_{};'
+                       .format(table, path_field))
+
+
+def enable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
+    with connections[db_alias].cursor() as cursor:
+        cursor.execute('ALTER TABLE {} ENABLE TRIGGER update_{};'
+                       .format(table, path_field))

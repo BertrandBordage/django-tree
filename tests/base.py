@@ -2,7 +2,7 @@
 
 from __future__ import unicode_literals
 from django.db import transaction, InternalError
-from django.test import TestCase
+from django.test import TransactionTestCase
 
 from .models import Place
 
@@ -12,12 +12,13 @@ from .models import Place
 # TODO: Test what happens when we move a node after itself
 #       while staying in the same siblinghood
 #       (it should not create a hole at the former position).
+# TODO: Test ORM update/delete.
 # TODO: Test raw SQL insertion/update/delete.
 # TODO: Test if rebuild works with NULL path values.
 # TODO: Test using Path objects as sql parameters.
 
 
-class PathTest(TestCase):
+class PathTest(TransactionTestCase):
     def create_place(self, name, parent=None, n_queries=1):
         with self.assertNumQueries(n_queries):
             return Place.objects.create(name=name, parent=parent)
@@ -95,19 +96,22 @@ class PathTest(TestCase):
 
     def test_rebuild(self):
         list(self.create_test_places())
+        path_field = Place._meta.get_field('path')
 
-        Place.objects.update(path='00')
+        with path_field.disabled_trigger():
+            Place.objects.update(path='00')
         self.assertPlaces([
             ('00', 'Eure'), ('00', 'France'), ('00', 'Manche'),
             ('00', 'Normandie'), ('00', 'Österreich'), ('00', 'Poitiers'),
             ('00', 'Poitou-Charentes'), ('00', 'Seine-Maritime'),
             ('00', 'Vienne')])
         with self.assertNumQueries(1):
-            Place._meta.get_field('path').rebuild()
+            path_field.rebuild()
         self.assertPlaces(self.correct_places_data)
 
         # Root
-        Place.objects.filter(name='France').update(path='2Z')
+        with path_field.disabled_trigger():
+            Place.objects.filter(name='France').update(path='2Z')
         self.assertPlaces([
             ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
             ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
@@ -115,11 +119,12 @@ class PathTest(TestCase):
             ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
             ('2Z', 'France')])
         with self.assertNumQueries(1):
-            Place._meta.get_field('path').rebuild()
+            path_field.rebuild()
         self.assertPlaces(self.correct_places_data)
 
         # Branch
-        Place.objects.filter(name='Normandie').update(path='2Z.2Z')
+        with path_field.disabled_trigger():
+            Place.objects.filter(name='Normandie').update(path='2Z.2Z')
         self.assertPlaces([
             ('00', 'France'), ('00.00.00', 'Eure'),
             ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
@@ -127,18 +132,19 @@ class PathTest(TestCase):
             ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
             ('2Z.2Z', 'Normandie')])
         with self.assertNumQueries(1):
-            Place._meta.get_field('path').rebuild()
+            path_field.rebuild()
         self.assertPlaces(self.correct_places_data)
 
         # Leaf
-        Place.objects.filter(name='Seine-Maritime').update(path='00.2Z')
+        with path_field.disabled_trigger():
+            Place.objects.filter(name='Seine-Maritime').update(path='00.2Z')
         self.assertPlaces([
             ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
             ('00.00.01', 'Manche'), ('00.01', 'Poitou-Charentes'),
             ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
             ('00.2Z', 'Seine-Maritime'), ('01', 'Österreich')])
         with self.assertNumQueries(1):
-            Place._meta.get_field('path').rebuild()
+            path_field.rebuild()
         self.assertPlaces(self.correct_places_data)
 
     def test_max_siblings(self):
