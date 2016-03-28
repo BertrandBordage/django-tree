@@ -167,7 +167,7 @@ class Path:
 
 
 # Tells psycopg2 how to prepare a Path object for the database,
-# in case it doesn’t go through the ORM.
+# in case it doesn't go through the ORM.
 try:
     import psycopg2
 except ImportError:
