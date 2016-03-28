@@ -12,6 +12,6 @@ if __name__ == '__main__':
     django.setup()
     from django.test.runner import DiscoverRunner
     test_runner = DiscoverRunner(verbosity=2, keepdb=True)
-    failures = test_runner.run_tests(['tree.tests'])
+    failures = test_runner.run_tests(['tests.base'])
     if failures:
         sys.exit(failures)

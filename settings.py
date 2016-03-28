@@ -6,12 +6,9 @@ DATABASES = {
     },
 }
 
-MIGRATION_MODULES = {
-    'tree': 'tree.tests.migrations',
-}
-
 INSTALLED_APPS = (
     'tree',
+    'tests',
 )
 
 SECRET_KEY = 'not important here'

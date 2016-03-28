@@ -1,7 +1,7 @@
 # coding: utf-8
 
 from __future__ import unicode_literals
-from django.db import transaction
+from django.db import transaction, InternalError
 from django.test import TestCase
 
 from .models import Place
@@ -10,11 +10,15 @@ from .models import Place
 # TODO: Test same order_by values.
 # TODO: Test order_by with descending orders.
 # TODO: Test what happens when we move a node after itself
-#       while staying in the same siblinghood.
+#       while staying in the same siblinghood
+#       (it should not create a hole at the former position).
+# TODO: Test raw SQL insertion/update/delete.
+# TODO: Test if rebuild works with NULL path values.
+# TODO: Test using Path objects as sql parameters.
 
 
 class PathTest(TestCase):
-    def create_place(self, name, parent=None, n_queries=2):
+    def create_place(self, name, parent=None, n_queries=1):
         with self.assertNumQueries(n_queries):
             return Place.objects.create(name=name, parent=parent)
 
@@ -29,8 +33,8 @@ class PathTest(TestCase):
         normandie = self.create_place('Normandie', france)
         yield normandie
         yield self.create_place('Seine-Maritime', normandie)
-        yield self.create_place('Eure', normandie, n_queries=3)
-        yield self.create_place('Manche', normandie, n_queries=3)
+        yield self.create_place('Eure', normandie)
+        yield self.create_place('Manche', normandie)
         osterreich = self.create_place('Österreich')
         yield osterreich
         vienne = self.create_place('Vienne', osterreich)
@@ -98,7 +102,7 @@ class PathTest(TestCase):
             ('00', 'Normandie'), ('00', 'Österreich'), ('00', 'Poitiers'),
             ('00', 'Poitou-Charentes'), ('00', 'Seine-Maritime'),
             ('00', 'Vienne')])
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(1):
             Place._meta.get_field('path').rebuild()
         self.assertPlaces(self.correct_places_data)
 
@@ -110,7 +114,7 @@ class PathTest(TestCase):
             ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
             ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
             ('2Z', 'France')])
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(1):
             Place._meta.get_field('path').rebuild()
         self.assertPlaces(self.correct_places_data)
 
@@ -122,7 +126,7 @@ class PathTest(TestCase):
             ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
             ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
             ('2Z.2Z', 'Normandie')])
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(1):
             Place._meta.get_field('path').rebuild()
         self.assertPlaces(self.correct_places_data)
 
@@ -133,25 +137,16 @@ class PathTest(TestCase):
             ('00.00.01', 'Manche'), ('00.01', 'Poitou-Charentes'),
             ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
             ('00.2Z', 'Seine-Maritime'), ('01', 'Österreich')])
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(1):
             Place._meta.get_field('path').rebuild()
         self.assertPlaces(self.correct_places_data)
 
     def test_max_siblings(self):
-        path_field = Place._meta.get_field('path')
-        bulk = [Place(name='Anything') for _ in range(path_field.max_siblings)]
+        max_siblings = 108
+        bulk = [Place(name='Anything') for _ in range(max_siblings)]
         # TODO: Find a way to `bulk_create` in a single SQL query.
-        with self.assertNumQueries(len(bulk) + 1):
+        with self.assertNumQueries(1):
             Place.objects.bulk_create(bulk)
-
-        # FIXME: Find a way to update the tree without having to call
-        #        `rebuild`.
-        self.assertListEqual(
-            list(Place.objects.order_by('-name', '-pk')
-                 .values_list('path', flat=True)[:5]),
-            ['00', '00', '00', '00', '00'])
-
-        path_field.rebuild()
 
         self.assertListEqual(
             list(Place.objects.order_by('-name', '-pk')
@@ -160,10 +155,10 @@ class PathTest(TestCase):
 
         with self.assertNumQueries(1):
             with self.assertRaisesMessage(
-                    ValueError,
+                    InternalError,
                     '`max_siblings` (%d) has been reached.\n'
                     'You should increase it then rebuild.'
-                    % path_field.max_siblings):
+                    % max_siblings):
                 Place.objects.create(name='Anything')
 
     def test_depth(self):
@@ -616,9 +611,9 @@ class PathTest(TestCase):
         a = Place.objects.create(name='a')
         a.parent = a
         with self.assertRaisesMessage(
-                ValueError, 'Cannot set itself or a descendant as parent.'):
+                InternalError, 'Cannot set itself or a descendant as parent.'):
             with transaction.atomic():
-                with self.assertNumQueries(0):
+                with self.assertNumQueries(1):
                     a.save()
 
         # Complex cycle
@@ -627,7 +622,7 @@ class PathTest(TestCase):
         d = Place.objects.create(name='d', parent=c)
         a.parent = d
         with self.assertRaisesMessage(
-                ValueError, 'Cannot set itself or a descendant as parent.'):
+                InternalError, 'Cannot set itself or a descendant as parent.'):
             with transaction.atomic():
-                with self.assertNumQueries(0):
+                with self.assertNumQueries(1):
                     a.save()

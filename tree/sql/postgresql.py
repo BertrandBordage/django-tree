@@ -1,20 +1,20 @@
 from django.db import DEFAULT_DB_ALIAS, connections
 
+from .base import ALPHANUM, ALPHANUM_LEN
+
 
 CREATE_FUNCTIONS_QUERIES = (
     'CREATE EXTENSION IF NOT EXISTS ltree;',
-    # FIXME: This query has the modulo operator '%' escaped otherwise Django
-    #        considers it as a query parameter.
     """
     CREATE OR REPLACE FUNCTION to_alphanum(i bigint) RETURNS text AS $$
     DECLARE
-        ALPHANUM text := '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-        ALPHANUM_LEN int := length(ALPHANUM);
+        ALPHANUM text := '{}';
+        ALPHANUM_LEN int := {};
         out text := '';
         remainder int := 0;
     BEGIN
         LOOP
-            remainder := i %% ALPHANUM_LEN;
+            remainder := i % ALPHANUM_LEN;
             i := i / ALPHANUM_LEN;
             out := substring(ALPHANUM from remainder+1 for 1) || out;
             IF i = 0 THEN
@@ -23,65 +23,170 @@ CREATE_FUNCTIONS_QUERIES = (
         END LOOP;
     END;
     $$ LANGUAGE plpgsql;
+    """.format(ALPHANUM, ALPHANUM_LEN),
+    """
+    CREATE OR REPLACE FUNCTION update_paths() RETURNS trigger AS $$
+    DECLARE
+        table_name text := TG_ARGV[0];
+        pk text := TG_ARGV[1];
+        parent text := TG_ARGV[2];
+        path text := TG_ARGV[3];
+        order_by text[] := TG_ARGV[4];
+        max_siblings int := TG_ARGV[5];
+        label_size int := TG_ARGV[6];
+        current_path ltree;
+        parent_path ltree;
+        new_path ltree;
+        n_siblings integer;
+    BEGIN
+        EXECUTE format('SELECT $1.%I', path) INTO current_path USING NEW;
+        IF current_path IS NULL THEN
+            EXECUTE format('
+                SELECT %1$I FROM %2$I WHERE %3$I = $1.%3$I
+            ', path, table_name, pk) INTO current_path USING NEW;
+        END IF;
+        EXECUTE format('
+            SELECT %1$I FROM %2$I WHERE %3$I = $1.%4$I
+        ', path, table_name, pk, parent) INTO parent_path USING NEW;
+        IF parent_path IS NULL THEN
+            parent_path := ''::ltree;
+        END IF;
+
+        -- TODO: Add this behaviour to the model validation.
+        IF parent_path <@ current_path THEN
+            RAISE 'Cannot set itself or a descendant as parent.';
+        END IF;
+
+        -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
+        EXECUTE format('
+            WITH RECURSIVE generate_paths(pk, path) AS ((
+                    SELECT
+                        %1$I,
+                        $1 || lpad(
+                            to_alphanum(row_number() OVER (ORDER BY %2$s) - 1),
+                            %3$L, ''0'')
+                    FROM ((
+                            SELECT *
+                            FROM %4$I
+                            WHERE
+                                (CASE
+                                    WHEN $2.%5$I IS NULL
+                                        THEN %5$I IS NULL
+                                    ELSE %5$I = $2.%5$I END)
+                                AND (CASE
+                                    WHEN $2.%1$I IS NULL
+                                        THEN %1$I IS NOT NULL
+                                    ELSE %1$I != $2.%1$I END)
+                        ) UNION ALL (
+                            SELECT $2.*
+                        )
+                    ) AS t
+                ) UNION ALL (
+                    SELECT
+                        t2.%1$I,
+                        t1.path || lpad(
+                            to_alphanum(row_number() OVER (PARTITION BY t1.pk
+                                                           ORDER BY %6$s) - 1),
+                            %3$L, ''0'')
+                    FROM generate_paths AS t1
+                    INNER JOIN %4$I AS t2 ON t2.%5$I = t1.pk
+                )
+            ), updated AS (
+                UPDATE %4$I AS t2 SET %7$I = t1.path::ltree
+                FROM generate_paths AS t1
+                WHERE t2.%1$I = t1.pk AND t2.%1$I != $2.%1$I
+                    AND (t2.%7$I IS NULL OR t2.%7$I != t1.path)
+            )
+            SELECT path, (SELECT COUNT(*) FROM generate_paths)
+            FROM generate_paths
+            WHERE (
+                CASE WHEN $2.%1$I IS NULL THEN pk IS NULL
+                ELSE pk = $2.%1$I END)
+        ',
+            pk,
+            array_to_string(order_by, ','),
+            label_size,
+            table_name,
+            parent,
+            't2.' || array_to_string(order_by, ',t2.'),
+            path)
+        INTO new_path, n_siblings
+        USING parent_path, NEW;
+        EXECUTE format('
+            SELECT *
+            FROM json_populate_record($1, ''{"%s": "%s"}''::json)
+        ', path, new_path) INTO NEW USING NEW;
+
+        IF n_siblings > max_siblings THEN
+            RAISE '`max_siblings` (%) has been reached.\n'
+                'You should increase it then rebuild.', max_siblings;
+        END IF;
+
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    """,
+    """
+    CREATE OR REPLACE FUNCTION rebuild_paths(table_name text, pk text,
+                                             parent text) RETURNS void AS $$
+    BEGIN
+        EXECUTE format('
+            UPDATE %1$I SET %2$I = %2$I WHERE %3$I IS NULL
+        ', table_name, pk, parent);
+    END;
+    $$ LANGUAGE plpgsql;
     """,
 )
+# We escape the modulo operator '%' otherwise Django considers it
+# as a placeholder for a parameter.
+CREATE_FUNCTIONS_QUERIES = [s.replace('%', '%%')
+                            for s in CREATE_FUNCTIONS_QUERIES]
 
 
 DROP_FUNCTIONS_QUERIES = (
-    'DROP EXTENSION IF EXISTS ltree;',
+    """
+    DROP FUNCTION IF EXISTS rebuild_paths(table_name text, pk text,
+                                          parent text);
+    """,
+    'DROP FUNCTION IF EXISTS update_paths();',
     'DROP FUNCTION IF EXISTS to_alphanum(i bigint);',
+    'DROP EXTENSION IF EXISTS ltree;',
 )
 
-
-UPDATE_SQL = """
-WITH RECURSIVE generate_paths(pk, path) AS ((
-    %s
-  ) UNION ALL (
-    SELECT
-      t2."{pk_attname}",
-      t1.path || lpad(
-        to_alphanum(row_number() OVER (PARTITION BY t1.pk
-                                       ORDER BY {order_by}) - 1),
-        {label_size}, '0')::ltree
-    FROM generate_paths AS t1
-    INNER JOIN "{table}" AS t2 ON t2."{parent_attname}" = t1.pk
-  )
+CREATE_TRIGGER_QUERIES = (
+    """
+    CREATE TRIGGER update_{path}
+    BEFORE INSERT OR UPDATE OF {update_columns}
+    ON "{table}"
+    FOR EACH ROW
+    WHEN (pg_trigger_depth() = 0)
+    EXECUTE PROCEDURE update_paths(
+        "{table}", "{pk}", "{parent}", "{path}", '{{{order_by}}}',
+        {max_siblings}, {label_size});
+    """,
+    """
+    CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
+    BEGIN
+        UPDATE "{table}" SET "{pk}" = "{table}"."{pk}" FROM (
+            SELECT * FROM "{table}"
+            WHERE "{parent}" IS NULL
+            LIMIT 1
+            FOR UPDATE
+        ) AS t
+        WHERE "{table}"."{pk}" = t."{pk}";
+    END;
+    $$ LANGUAGE plpgsql;
+    """,
 )
-UPDATE "{table}" AS t2 SET "{attname}" = t1.path::ltree
-FROM generate_paths AS t1
-WHERE t2."{pk_attname}" = t1.pk AND t2."{attname}" != t1."{attname}";
-"""
 
-UPDATE_SIBLINGS_SQL = UPDATE_SQL % 'VALUES (%s, %s::ltree)'
-
-REBUILD_SQL = UPDATE_SQL % """
-SELECT
-  "{pk_attname}",
-  lpad(to_alphanum(row_number() OVER (ORDER BY {order_by}) - 1),
-       {label_size}, '0')::ltree
-FROM "{table}" AS t2
-WHERE "{parent_attname}" IS NULL
-"""
+DROP_TRIGGER_QUERIES = (
+    'DROP TRIGGER IF EXISTS update_{path} ON {table};',
+    'DROP FUNCTION IF EXISTS rebuild_{table}_{path}();',
+)
 
 
 def rebuild(path_field, db_alias=DEFAULT_DB_ALIAS):
+    table = path_field.model._meta.db_table
     with connections[db_alias].cursor() as cursor:
-        meta = path_field.model._meta
-        order_by = []
-        for field_name in path_field.order_by + ('pk',):
-            field = (meta.pk if field_name == 'pk'
-                     else meta.get_field(field_name.lstrip('-')))
-            order_by.append(
-                't2."%s" %s' % (
-                    field.attname,
-                    'DESC' if field_name[0] == '-' else 'ASC'))
-        parent_field = meta.get_field(path_field.parent_field_name)
-        cursor.execute(
-            REBUILD_SQL.format(**{
-                'attname': path_field.attname,
-                'pk_attname': meta.pk.attname,
-                'label_size': path_field.label_size,
-                'table': meta.db_table,
-                'parent_attname': parent_field.attname,
-                'order_by': ', '.join(order_by),
-            }))
+        cursor.execute('SELECT rebuild_{}_{}();'
+                       .format(table, path_field.attname))

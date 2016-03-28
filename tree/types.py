@@ -134,12 +134,6 @@ class Path:
             return self.depth + 1
 
     @property
-    def parent(self):
-        parent_value = (None if self.value is None or self.is_root
-                        else self.value.rsplit('.', 1)[0])
-        return self.__class__(self.field, parent_value)
-
-    @property
     def is_root(self):
         if self.value is not None:
             return '.' not in self.value
@@ -170,3 +164,18 @@ class Path:
         if not include_self and self.value == other:
             return False
         return self.value.startswith(other)
+
+
+# Tells psycopg2 how to prepare a Path object for the database,
+# in case it doesn’t go through the ORM.
+try:
+    import psycopg2
+except ImportError:
+    pass
+else:
+    from psycopg2.extensions import adapt, register_adapter, AsIs
+
+    def adapt_path(path):
+        return AsIs('%s::ltree' % adapt(path.value))
+
+    register_adapter(Path, adapt_path)
