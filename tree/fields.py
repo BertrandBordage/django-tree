@@ -19,8 +19,18 @@ class PathField(Field):
 
     def __init__(self, *args, **kwargs):
         kwargs.setdefault('editable', False)
-        kwargs.setdefault('default', lambda: Path(self, None))
+        self.original_default = kwargs.get('default')
+        kwargs['default'] = lambda: Path(self, self.original_default)
         super(PathField, self).__init__(*args, **kwargs)
+
+    def deconstruct(self):
+        name, path, args, kwargs = super(PathField, self).deconstruct()
+        if not kwargs['editable']:
+            del kwargs['editable']
+        del kwargs['default']
+        if self.original_default is not None:
+            kwargs['default'] = self.original_default
+        return name, path, args, kwargs
 
     def db_type(self, connection):
         if connection.vendor == 'postgresql':
