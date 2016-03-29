@@ -78,6 +78,10 @@ class Path:
         if self.value is None:
             return self.qs.none()
         qs = self.qs
+        if self.is_root:
+            if include_self:
+                return qs.filter(**{self.attname: self.value})
+            return qs.none()
         if not include_self:
             qs = qs.exclude(**{self.attname: self.value})
         return qs.filter(**{self.attname + '__ancestor_of': self.value})

@@ -242,7 +242,7 @@ class PathTest(TransactionTestCase):
                 list(france.path.get_ancestors(include_self=True)
                      .values_list('name', flat=True)), ['France'])
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(0):
             self.assertListEqual(
                 list(france.path.get_ancestors()
                      .values_list('name', flat=True)), [])
