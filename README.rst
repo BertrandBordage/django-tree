@@ -49,14 +49,23 @@ After installing the module, you need to add ``'tree',`` to your
 ``INSTALLED_APPS``, then add a ``PathField`` to a model with a
 ``ForeignKey('self')``, typically named ``parent`` (use the ``parent_field``
 argument of ``CreateTreeTrigger`` if the field has another name).
+``PathField`` stores ``Path`` objects which have methods to execute queries,
+such as getting all the descendants of the current object, its siblings, etc.
+To call these methods more conveniently, you can add ``TreeModelMixin``
+to your model.  The inheriting order is not important, as the mixin methods
+do not clash with Django.  If you have multiple ``PathField``s
+on the same model, you will have to specify the field name in the method
+you’re calling using ``path_field``.
+
 This should give you a model like this:
 
 .. code:: python
 
     from django.db.models import Model, CharField, ForeignKey, BooleanField
     from tree.fields import PathField
+    from tree.models import TreeModelMixin
 
-    class YourModel(Model):
+    class YourModel(Model, TreeModelMixin):
         name = CharField(max_length=30)
         parent = ForeignKey('self', null=True, blank=True)
         path = PathField()
@@ -116,8 +125,9 @@ Example model:
     from django.db.models import (
         Model, CharField, ForeignKey, IntegerField, BooleanField)
     from tree.fields import PathField
+    from tree.models import TreeModelMixin
 
-    class YourModel(Model):
+    class YourModel(Model, TreeModelMixin):
         name = CharField(max_length=30)
         parent = ForeignKey('self', null=True, blank=True)
         position = IntegerField(default=1)
@@ -162,32 +172,48 @@ Usage
 
 ``PathField`` is automatically filled thanks to ``CreateTreeTrigger``,
 you don’t need to set, modify, or even see its value once it is installed.
-But you can use the ``Path`` object it returns to get tree information
-about the current instance, or make complex queries on the whole tree structure.
+But you can use the ``Path`` object it stores or the more convenient
+``TreeModelMixin`` to get tree information about the current instance,
+or make complex queries on the whole tree structure.
 Example to show you most of the possibilities:
 
 .. code:: python
 
     obj = YourModel.objects.all()[0]
-    obj.path.depth
-    obj.path.level  # Same as depth, but starts with 1 instead of 0.
-    obj.path.is_root
-    obj.path.is_leaf
-    obj.path.get_children()
-    obj.path.get_children().filter(public=True)
-    obj.path.get_ancestors()
-    obj.path.get_ancestors(include_self=True)
-    obj.path.get_descendants(include_self=True)
-    obj.path.get_siblings()
-    obj.path.get_prev_sibling()  # Fetches the previous sibling.
-    obj.path.get_next_sibling()
+    obj.path.get_depth()
+    obj.get_depth()  # Shortcut for the previous method, if you use
+                     # `TreeModelMixin`. Same for other object methods below.
+    obj.get_level()  # Same as depth, but starts with 1 instead of 0.
+    obj.is_root()
+    obj.is_leaf()
+    obj.get_children()
+    obj.get_children().filter(public=True)
+    obj.get_ancestors()
+    obj.get_ancestors(include_self=True)
+    obj.get_descendants(include_self=True)
+    obj.get_siblings()
+    obj.get_prev_sibling()  # Fetches the previous sibling.
+    obj.get_next_sibling()
     # Same as `get_prev_sibling`, except that we get the first public one.
-    obj.path.get_prev_siblings().filter(public=True).first()
+    obj.get_prev_siblings().filter(public=True).first()
     other = YourModel.objects.all()[1]
-    obj.path.is_ancestor_of(other.path)
-    obj.path.is_descendant_of(other.path, include_self=True)
-    obj.path.rebuild()  # Rebuilds all trees of this field, useful only
-                        # if something is broken, which shouldn’t happen.
+    obj.is_ancestor_of(other)
+    obj.is_descendant_of(other, include_self=True)
+
+    #
+    # Advanced usage
+    # Use the following methods only if you understand exactly what they mean.
+    #
+
+    YourModel.rebuild_tree()  # Rebuilds all paths of this field, useful only
+                              # if something is broken, which shouldn’t happen.
+    YourModel.disable_tree_trigger()  # Disables the SQL trigger.
+    YourModel.enable_tree_trigger()   # Restores the SQL trigger.
+    with YourModel.disabled_tree_trigger():
+        # What happens inside this context manager is ignored
+        # by the SQL trigger.
+        # The trigger is restored after that, even if there an error occurred.
+        pass
 
 There is also a bunch of less useful lookups, transforms and functions
 available. They will be documented with examples in the future.

@@ -16,6 +16,10 @@ from .models import Place
 # TODO: Test raw SQL insertion/update/delete.
 # TODO: Test if rebuild works with NULL path values.
 # TODO: Test using Path objects as sql parameters.
+# TODO: Test multiple path fields on the same model.
+# TODO: Test `disable_trigger`, `enable_trigger`, & `disabled_trigger`.
+# TODO: Test if `disabled_trigger` does not affect
+#       a concurrent node creation/update.
 
 
 class PathTest(TransactionTestCase):
@@ -96,9 +100,8 @@ class PathTest(TransactionTestCase):
 
     def test_rebuild(self):
         list(self.create_test_places())
-        path_field = Place._meta.get_field('path')
 
-        with path_field.disabled_trigger():
+        with Place.disabled_tree_trigger():
             Place.objects.update(path='00')
         self.assertPlaces([
             ('00', 'Eure'), ('00', 'France'), ('00', 'Manche'),
@@ -106,11 +109,11 @@ class PathTest(TransactionTestCase):
             ('00', 'Poitou-Charentes'), ('00', 'Seine-Maritime'),
             ('00', 'Vienne')])
         with self.assertNumQueries(1):
-            path_field.rebuild()
+            Place.rebuild_tree()
         self.assertPlaces(self.correct_places_data)
 
         # Root
-        with path_field.disabled_trigger():
+        with Place.disabled_tree_trigger():
             Place.objects.filter(name='France').update(path='2Z')
         self.assertPlaces([
             ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
@@ -119,11 +122,11 @@ class PathTest(TransactionTestCase):
             ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
             ('2Z', 'France')])
         with self.assertNumQueries(1):
-            path_field.rebuild()
+            Place.rebuild_tree()
         self.assertPlaces(self.correct_places_data)
 
         # Branch
-        with path_field.disabled_trigger():
+        with Place.disabled_tree_trigger():
             Place.objects.filter(name='Normandie').update(path='2Z.2Z')
         self.assertPlaces([
             ('00', 'France'), ('00.00.00', 'Eure'),
@@ -132,11 +135,11 @@ class PathTest(TransactionTestCase):
             ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
             ('2Z.2Z', 'Normandie')])
         with self.assertNumQueries(1):
-            path_field.rebuild()
+            Place.rebuild_tree()
         self.assertPlaces(self.correct_places_data)
 
         # Leaf
-        with path_field.disabled_trigger():
+        with Place.disabled_tree_trigger():
             Place.objects.filter(name='Seine-Maritime').update(path='00.2Z')
         self.assertPlaces([
             ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
@@ -144,7 +147,7 @@ class PathTest(TransactionTestCase):
             ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
             ('00.2Z', 'Seine-Maritime'), ('01', 'Österreich')])
         with self.assertNumQueries(1):
-            path_field.rebuild()
+            Place.rebuild_tree()
         self.assertPlaces(self.correct_places_data)
 
     def test_max_siblings(self):
@@ -171,7 +174,7 @@ class PathTest(TransactionTestCase):
         list(self.create_test_places())
 
         with self.assertNumQueries(1):
-            data = [(p.path.depth, p.name) for p in Place.objects.all()]
+            data = [(p.get_depth(), p.name) for p in Place.objects.all()]
             self.assertListEqual(data, [
                 (0, 'France'), (1, 'Normandie'), (2, 'Eure'), (2, 'Manche'),
                 (2, 'Seine-Maritime'), (1, 'Poitou-Charentes'), (2, 'Vienne'),
@@ -181,20 +184,20 @@ class PathTest(TransactionTestCase):
         list(self.create_test_places())
 
         with self.assertNumQueries(1):
-            paths = [p.path for p in Place.objects.all()]
+            paths = [p for p in Place.objects.all()]
             self.assertListEqual(
-                [p.level for p in paths], [p.depth + 1 for p in paths])
+                [p.get_level() for p in paths], [p.get_depth() + 1 for p in paths])
 
     def test_is_root(self):
         list(self.create_test_places())
 
-        places = [p.name for p in Place.objects.all() if p.path.is_root]
+        places = [p.name for p in Place.objects.all() if p.is_root()]
         self.assertListEqual(places, ['France', 'Österreich'])
 
     def test_is_leaf(self):
         list(self.create_test_places())
 
-        places = [p.name for p in Place.objects.all() if p.path.is_leaf]
+        places = [p.name for p in Place.objects.all() if p.is_leaf()]
         self.assertListEqual(places, ['Eure', 'Manche', 'Seine-Maritime',
                                       'Poitiers', 'Österreich'])
 
@@ -207,7 +210,7 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.path.get_children()
+                list(france.get_children()
                      .values_list('name', flat=True)),
                 ['Normandie', 'Poitou-Charentes'])
 
@@ -217,7 +220,7 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_children()
+                list(normandie.get_children()
                      .values_list('name', flat=True)),
                 ['Eure', 'Manche', 'Seine-Maritime'])
 
@@ -227,7 +230,7 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_children()
+                list(seine_maritime.get_children()
                      .values_list('name', flat=True)), [])
 
     def test_get_ancestors(self):
@@ -239,12 +242,12 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.path.get_ancestors(include_self=True)
+                list(france.get_ancestors(include_self=True)
                      .values_list('name', flat=True)), ['France'])
 
         with self.assertNumQueries(0):
             self.assertListEqual(
-                list(france.path.get_ancestors()
+                list(france.get_ancestors()
                      .values_list('name', flat=True)), [])
 
         # Branch
@@ -253,12 +256,12 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_ancestors(include_self=True)
+                list(normandie.get_ancestors(include_self=True)
                      .values_list('name', flat=True)), ['France', 'Normandie'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_ancestors()
+                list(normandie.get_ancestors()
                      .values_list('name', flat=True)), ['France'])
 
         # Leaf
@@ -267,13 +270,13 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_ancestors(include_self=True)
+                list(seine_maritime.get_ancestors(include_self=True)
                      .values_list('name', flat=True)),
                 ['France', 'Normandie', 'Seine-Maritime'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_ancestors()
+                list(seine_maritime.get_ancestors()
                      .values_list('name', flat=True)), ['France', 'Normandie'])
 
     def test_get_descendants(self):
@@ -285,14 +288,14 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.path.get_descendants(include_self=True)
+                list(france.get_descendants(include_self=True)
                      .values_list('name', flat=True)),
                 ['France', 'Normandie', 'Eure', 'Manche', 'Seine-Maritime',
                  'Poitou-Charentes', 'Vienne', 'Poitiers'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.path.get_descendants()
+                list(france.get_descendants()
                      .values_list('name', flat=True)),
                 ['Normandie', 'Eure', 'Manche', 'Seine-Maritime',
                  'Poitou-Charentes', 'Vienne', 'Poitiers'])
@@ -303,13 +306,13 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_descendants(include_self=True)
+                list(normandie.get_descendants(include_self=True)
                      .values_list('name', flat=True)),
                 ['Normandie', 'Eure', 'Manche', 'Seine-Maritime'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_descendants()
+                list(normandie.get_descendants()
                      .values_list('name', flat=True)),
                 ['Eure', 'Manche', 'Seine-Maritime'])
 
@@ -319,12 +322,12 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_descendants(include_self=True)
+                list(seine_maritime.get_descendants(include_self=True)
                      .values_list('name', flat=True)), ['Seine-Maritime'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_descendants()
+                list(seine_maritime.get_descendants()
                      .values_list('name', flat=True)), [])
 
     def test_get_siblings(self):
@@ -336,13 +339,13 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.path.get_siblings(include_self=True)
+                list(france.get_siblings(include_self=True)
                      .values_list('name', flat=True)),
                 ['France', 'Österreich'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.path.get_siblings()
+                list(france.get_siblings()
                      .values_list('name', flat=True)), ['Österreich'])
 
         # Branch
@@ -351,13 +354,13 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_siblings(include_self=True)
+                list(normandie.get_siblings(include_self=True)
                      .values_list('name', flat=True)),
                 ['Normandie', 'Poitou-Charentes'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_siblings()
+                list(normandie.get_siblings()
                      .values_list('name', flat=True)), ['Poitou-Charentes'])
 
         # Leaf
@@ -366,13 +369,13 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_siblings(include_self=True)
+                list(seine_maritime.get_siblings(include_self=True)
                      .values_list('name', flat=True)),
                 ['Eure', 'Manche', 'Seine-Maritime'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_siblings()
+                list(seine_maritime.get_siblings()
                      .values_list('name', flat=True)), ['Eure', 'Manche'])
 
     def test_get_prev_siblings(self):
@@ -384,12 +387,12 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.path.get_prev_siblings(include_self=True)
+                list(france.get_prev_siblings(include_self=True)
                      .values_list('name', flat=True)), ['France'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.path.get_prev_siblings()
+                list(france.get_prev_siblings()
                      .values_list('name', flat=True)), [])
 
         # Branch
@@ -398,12 +401,12 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_prev_siblings(include_self=True)
+                list(normandie.get_prev_siblings(include_self=True)
                      .values_list('name', flat=True)), ['Normandie'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_prev_siblings()
+                list(normandie.get_prev_siblings()
                      .values_list('name', flat=True)), [])
 
         # Leaf
@@ -412,13 +415,13 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_prev_siblings(include_self=True)
+                list(seine_maritime.get_prev_siblings(include_self=True)
                      .values_list('name', flat=True)),
                 ['Seine-Maritime', 'Manche', 'Eure'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_prev_siblings()
+                list(seine_maritime.get_prev_siblings()
                      .values_list('name', flat=True)), ['Manche', 'Eure'])
 
     def test_get_next_siblings(self):
@@ -430,13 +433,13 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.path.get_next_siblings(include_self=True)
+                list(france.get_next_siblings(include_self=True)
                      .values_list('name', flat=True)),
                 ['France', 'Österreich'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.path.get_next_siblings()
+                list(france.get_next_siblings()
                      .values_list('name', flat=True)), ['Österreich'])
 
         # Branch
@@ -445,13 +448,13 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_next_siblings(include_self=True)
+                list(normandie.get_next_siblings(include_self=True)
                      .values_list('name', flat=True)),
                 ['Normandie', 'Poitou-Charentes'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.path.get_next_siblings()
+                list(normandie.get_next_siblings()
                      .values_list('name', flat=True)), ['Poitou-Charentes'])
 
         # Leaf
@@ -460,13 +463,13 @@ class PathTest(TransactionTestCase):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_next_siblings(include_self=True)
+                list(seine_maritime.get_next_siblings(include_self=True)
                      .values_list('name', flat=True)),
                 ['Seine-Maritime'])
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.path.get_next_siblings()
+                list(seine_maritime.get_next_siblings()
                      .values_list('name', flat=True)), [])
 
     def test_get_prev_sibling(self):
@@ -475,18 +478,18 @@ class PathTest(TransactionTestCase):
         # Root
         france = Place.objects.get(name='France')
         with self.assertNumQueries(1):
-            self.assertEqual(france.path.get_prev_sibling(), None)
+            self.assertEqual(france.get_prev_sibling(), None)
 
         # Branch
         normandie = Place.objects.get(name='Normandie')
         with self.assertNumQueries(1):
-            self.assertEqual(normandie.path.get_prev_sibling(), None)
+            self.assertEqual(normandie.get_prev_sibling(), None)
 
         # Leaf
         seine_maritime = Place.objects.get(name='Seine-Maritime')
         with self.assertNumQueries(1):
             self.assertEqual(
-                seine_maritime.path.get_prev_sibling().name, 'Manche')
+                seine_maritime.get_prev_sibling().name, 'Manche')
 
     def test_get_next_sibling(self):
         list(self.create_test_places())
@@ -494,46 +497,46 @@ class PathTest(TransactionTestCase):
         # Root
         france = Place.objects.get(name='France')
         with self.assertNumQueries(1):
-            self.assertEqual(france.path.get_next_sibling().name, 'Österreich')
+            self.assertEqual(france.get_next_sibling().name, 'Österreich')
 
         # Branch
         normandie = Place.objects.get(name='Normandie')
         with self.assertNumQueries(1):
             self.assertEqual(
-                normandie.path.get_next_sibling().name, 'Poitou-Charentes')
+                normandie.get_next_sibling().name, 'Poitou-Charentes')
 
         # Leaf
         seine_maritime = Place.objects.get(name='Seine-Maritime')
         with self.assertNumQueries(1):
-            self.assertEqual(seine_maritime.path.get_next_sibling(), None)
+            self.assertEqual(seine_maritime.get_next_sibling(), None)
 
     def test_new_path(self):
-        path = Place().path
+        place = Place()
 
         with self.assertNumQueries(0):
-            self.assertListEqual(list(path.get_children()), [])
+            self.assertListEqual(list(place.get_children()), [])
         with self.assertNumQueries(0):
-            self.assertListEqual(list(path.get_ancestors()), [])
+            self.assertListEqual(list(place.get_ancestors()), [])
         with self.assertNumQueries(0):
-            self.assertListEqual(list(path.get_descendants()), [])
+            self.assertListEqual(list(place.get_descendants()), [])
         with self.assertNumQueries(0):
-            self.assertListEqual(list(path.get_siblings()), [])
+            self.assertListEqual(list(place.get_siblings()), [])
         with self.assertNumQueries(0):
-            self.assertListEqual(list(path.get_prev_siblings()), [])
+            self.assertListEqual(list(place.get_prev_siblings()), [])
         with self.assertNumQueries(0):
-            self.assertListEqual(list(path.get_next_siblings()), [])
+            self.assertListEqual(list(place.get_next_siblings()), [])
         with self.assertNumQueries(0):
-            self.assertEqual(path.get_prev_sibling(), None)
+            self.assertEqual(place.get_prev_sibling(), None)
         with self.assertNumQueries(0):
-            self.assertEqual(path.get_next_sibling(), None)
+            self.assertEqual(place.get_next_sibling(), None)
         with self.assertNumQueries(0):
-            self.assertEqual(path.depth, None)
+            self.assertEqual(place.get_depth(), None)
         with self.assertNumQueries(0):
-            self.assertEqual(path.level, None)
+            self.assertEqual(place.get_level(), None)
         with self.assertNumQueries(0):
-            self.assertEqual(path.is_root, None)
+            self.assertEqual(place.is_root(), None)
         with self.assertNumQueries(0):
-            self.assertEqual(path.is_leaf, None)
+            self.assertEqual(place.is_leaf(), None)
 
     def test_comparisons(self):
         list(self.create_test_places())
@@ -565,7 +568,7 @@ class PathTest(TransactionTestCase):
 
         # Same depth
         osterreich = Place.objects.get(name='Österreich').path
-        self.assertEqual(france.depth, osterreich.depth)
+        self.assertEqual(france.get_depth(), osterreich.get_depth())
         self.assertFalse(france == osterreich)
         self.assertTrue(france != osterreich)
         self.assertTrue(france < osterreich)
@@ -575,7 +578,7 @@ class PathTest(TransactionTestCase):
 
         # Inferior depth
         normandie = Place.objects.get(name='Normandie').path
-        self.assertLess(france.depth, normandie.depth)
+        self.assertLess(france.get_depth(), normandie.get_depth())
         self.assertFalse(france == normandie)
         self.assertTrue(france != normandie)
         self.assertTrue(france < normandie)
@@ -584,7 +587,7 @@ class PathTest(TransactionTestCase):
         self.assertFalse(france >= normandie)
 
         # Superior depth
-        self.assertGreater(normandie.depth, osterreich.depth)
+        self.assertGreater(normandie.get_depth(), osterreich.get_depth())
         self.assertFalse(normandie == osterreich)
         self.assertTrue(normandie != osterreich)
         self.assertTrue(normandie < osterreich)
@@ -596,21 +599,21 @@ class PathTest(TransactionTestCase):
         list(self.create_test_places())
 
         for place in Place.objects.all():
-            self.assertFalse(place.path.is_ancestor_of(place.path))
-            self.assertTrue(place.path.is_ancestor_of(place.path,
-                                                      include_self=True))
-            for ancestor in place.path.get_ancestors():
-                self.assertTrue(ancestor.path.is_ancestor_of(place.path))
+            self.assertFalse(place.is_ancestor_of(place))
+            self.assertTrue(place.is_ancestor_of(place,
+                                                 include_self=True))
+            for ancestor in place.get_ancestors():
+                self.assertTrue(ancestor.is_ancestor_of(place))
 
     def test_is_descendant_of(self):
         list(self.create_test_places())
 
         for place in Place.objects.all():
-            self.assertFalse(place.path.is_descendant_of(place.path))
-            self.assertTrue(place.path.is_descendant_of(place.path,
-                                                        include_self=True))
-            for descendant in place.path.get_descendants():
-                self.assertTrue(descendant.path.is_descendant_of(place.path))
+            self.assertFalse(place.is_descendant_of(place))
+            self.assertTrue(place.is_descendant_of(place,
+                                                   include_self=True))
+            for descendant in place.get_descendants():
+                self.assertTrue(descendant.is_descendant_of(place))
 
     def test_cycle(self):
         # Simple cycle

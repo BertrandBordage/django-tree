@@ -1,4 +1,5 @@
 from django.db.models import QuerySet
+from django.utils.six import string_types
 
 
 class Path:
@@ -78,7 +79,7 @@ class Path:
         if self.value is None:
             return self.qs.none()
         qs = self.qs
-        if self.is_root:
+        if self.is_root():
             if include_self:
                 return qs.filter(**{self.attname: self.value})
             return qs.none()
@@ -99,7 +100,7 @@ class Path:
             return self.qs.none()
         qs = self.qs
         match = '*{1}'
-        if not self.is_root:
+        if not self.is_root():
             match = self.value.rsplit('.', 1)[0] + '.' + match
         if not include_self:
             qs = qs.exclude(**{self.attname: self.value})
@@ -127,22 +128,18 @@ class Path:
     def get_next_sibling(self):
         return self.get_next_siblings().first()
 
-    @property
-    def depth(self):
+    def get_depth(self):
         if self.value is not None:
             return self.value.count('.')
 
-    @property
-    def level(self):
+    def get_level(self):
         if self.value is not None:
-            return self.depth + 1
+            return self.get_depth() + 1
 
-    @property
     def is_root(self):
         if self.value is not None:
             return '.' not in self.value
 
-    @property
     def is_leaf(self):
         if self.value is not None:
             return not self.get_children().exists()
@@ -154,6 +151,8 @@ class Path:
             other = other.value
         if other is None:
             return False
+        if not isinstance(other, string_types):
+            raise TypeError('`other` must be a `Path` instance or a string.')
         if not include_self and self.value == other:
             return False
         return other.startswith(self.value)
@@ -165,6 +164,8 @@ class Path:
             other = other.value
         if other is None:
             return False
+        if not isinstance(other, string_types):
+            raise TypeError('`other` must be a `Path` instance or a string.')
         if not include_self and self.value == other:
             return False
         return self.value.startswith(other)
