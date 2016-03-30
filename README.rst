@@ -53,7 +53,7 @@ argument of ``CreateTreeTrigger`` if the field has another name).
 such as getting all the descendants of the current object, its siblings, etc.
 To call these methods more conveniently, you can add ``TreeModelMixin``
 to your model.  The inheriting order is not important, as the mixin methods
-do not clash with Django.  If you have multiple ``PathField``s
+do not clash with Django.  If you have multiple ``PathField``
 on the same model, you will have to specify the field name in the method
 you’re calling using ``path_field``.
 
