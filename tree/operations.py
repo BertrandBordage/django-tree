@@ -40,8 +40,15 @@ class CreateTreeFunctions(Operation, CheckDatabaseMixin):
         return 'Creates functions & extensions required by django-tree'
 
 
-# TODO: Handle related lookups in `order_by`.
-# TODO: Add `DropTreeTrigger`.
+class DeleteTreeFunctions(CreateTreeFunctions):
+    def database_forwards(self, *args, **kwargs):
+        super(DeleteTreeFunctions, self).database_backwards(*args, **kwargs)
+
+    def database_backwards(self, *args, **kwargs):
+        super(DeleteTreeFunctions, self).database_forwards(*args, **kwargs)
+
+    def describe(self):
+        return 'Deletes functions & extensions required by django-tree'
 
 
 class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
@@ -79,6 +86,7 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
                 or 'pk' in order_by):
             order_by += ('pk',)
 
+        # TODO: Handle related lookups in `order_by`.
         sql_order_by = []
         update_columns = [path]
         for field_name in order_by:
@@ -124,6 +132,17 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
         return 'Creates a trigger that automatically updates a `PathField`'
 
 
+class DeleteTreeTrigger(CreateTreeTrigger):
+    def database_forwards(self, *args, **kwargs):
+        super(DeleteTreeTrigger, self).database_backwards(*args, **kwargs)
+
+    def database_backwards(self, *args, **kwargs):
+        super(DeleteTreeTrigger, self).database_forwards(*args, **kwargs)
+
+    def describe(self):
+        return 'Deletes the trigger that automatically updates a `PathField`'
+
+
 class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):
     reversible = True
     atomic = True
@@ -148,4 +167,4 @@ class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):
         self.check_database_backend(schema_editor)
 
     def describe(self):
-        return 'Rebuilds all the tree structure of a given django-tree field.'
+        return 'Rebuilds all the tree structure of a given django-tree field'

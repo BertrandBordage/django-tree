@@ -1,6 +1,6 @@
 from django.db import migrations
 from tree.fields import PathField
-from tree.operations import CreateTreeTrigger, RebuildPaths
+from tree.operations import CreateTreeTrigger, RebuildPaths, DeleteTreeTrigger
 
 
 class Migration(migrations.Migration):
@@ -13,5 +13,6 @@ class Migration(migrations.Migration):
         CreateTreeTrigger('Something', order_by=('name',)),
         RebuildPaths('Something'),
         migrations.AlterField('Something', 'path', PathField()),
+        DeleteTreeTrigger('Something', order_by=('name',)),
         migrations.DeleteModel('Something'),
     ]
