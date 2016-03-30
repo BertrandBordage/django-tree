@@ -68,6 +68,8 @@ class PathField(Field):
                 'django-tree is only for PostgreSQL for now.')
         postgresql.disable_trigger(self.model._meta.db_table, self.attname,
                                    db_alias=db_alias)
-        yield
-        postgresql.enable_trigger(self.model._meta.db_table, self.attname,
-                                  db_alias=db_alias)
+        try:
+            yield
+        finally:
+            postgresql.enable_trigger(self.model._meta.db_table, self.attname,
+                                      db_alias=db_alias)
