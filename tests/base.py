@@ -153,7 +153,6 @@ class PathTest(TransactionTestCase):
     def test_max_siblings(self):
         max_siblings = 108
         bulk = [Place(name='Anything') for _ in range(max_siblings)]
-        # TODO: Find a way to `bulk_create` in a single SQL query.
         with self.assertNumQueries(1):
             Place.objects.bulk_create(bulk)
 
