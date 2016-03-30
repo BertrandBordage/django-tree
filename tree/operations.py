@@ -5,6 +5,13 @@ from .sql import postgresql
 from .sql.base import DEFAULT_MAX_SIBLINGS, ALPHANUM_LEN
 
 
+class CheckDatabaseMixin:
+    def check_database_backend(self, schema_editor):
+        if schema_editor.connection.vendor != 'postgresql':
+            raise NotImplementedError(
+                'django-tree is only for PostgreSQL for now.')
+
+
 class GetModelMixin:
     def get_model(self, app_label, state):
         get_model = state.apps.get_model
@@ -12,7 +19,7 @@ class GetModelMixin:
                 else get_model(app_label, self.model_lookup))
 
 
-class CreateTreeFunctions(Operation):
+class CreateTreeFunctions(Operation, CheckDatabaseMixin):
     reversible = True
     atomic = True
 
@@ -20,16 +27,12 @@ class CreateTreeFunctions(Operation):
         pass
 
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
-        if schema_editor.connection.vendor != 'postgresql':
-            raise NotImplementedError(
-                'django-tree is only for PostgreSQL for now.')
+        self.check_database_backend(schema_editor)
         for sql_query in postgresql.CREATE_FUNCTIONS_QUERIES:
             schema_editor.execute(sql_query)
 
     def database_backwards(self, app_label, schema_editor, from_state, to_state):
-        if schema_editor.connection.vendor != 'postgresql':
-            raise NotImplementedError(
-                'django-tree is only for PostgreSQL for now.')
+        self.check_database_backend(schema_editor)
         for sql_query in postgresql.DROP_FUNCTIONS_QUERIES:
             schema_editor.execute(sql_query)
 
@@ -41,7 +44,7 @@ class CreateTreeFunctions(Operation):
 # TODO: Add `DropTreeTrigger`.
 
 
-class CreateTreeTrigger(Operation, GetModelMixin):
+class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
     reversible = True
     atomic = True
 
@@ -105,18 +108,14 @@ class CreateTreeTrigger(Operation, GetModelMixin):
 
     def database_forwards(self, app_label, schema_editor,
                           from_state, to_state):
-        if schema_editor.connection.vendor != 'postgresql':
-            raise NotImplementedError(
-                'django-tree is only for PostgreSQL for now.')
+        self.check_database_backend(schema_editor)
         for sql_query in postgresql.CREATE_TRIGGER_QUERIES:
             schema_editor.execute(sql_query.format(
                 **self.get_pre_params(self.get_model(app_label, to_state))))
 
     def database_backwards(self, app_label, schema_editor,
                            from_state, to_state):
-        if schema_editor.connection.vendor != 'postgresql':
-            raise NotImplementedError(
-                'django-tree is only for PostgreSQL for now.')
+        self.check_database_backend(schema_editor)
         for sql_query in postgresql.DROP_TRIGGER_QUERIES:
             schema_editor.execute(sql_query.format(
                 **self.get_pre_params(self.get_model(app_label, to_state))))
@@ -125,7 +124,7 @@ class CreateTreeTrigger(Operation, GetModelMixin):
         return 'Creates a trigger that automatically updates a `PathField`'
 
 
-class RebuildPaths(Operation, GetModelMixin):
+class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):
     reversible = True
     atomic = True
 
@@ -139,18 +138,14 @@ class RebuildPaths(Operation, GetModelMixin):
 
     def database_forwards(self, app_label, schema_editor,
                           from_state, to_state):
-        if schema_editor.connection.vendor != 'postgresql':
-            raise NotImplementedError(
-                'django-tree is only for PostgreSQL for now.')
+        self.check_database_backend(schema_editor)
         model = self.get_model(app_label, to_state)
         postgresql.rebuild(model._meta.db_table, self.path_field,
                            db_alias=schema_editor.connection.alias)
 
     def database_backwards(self, app_label, schema_editor,
                            from_state, to_state):
-        if schema_editor.connection.vendor != 'postgresql':
-            raise NotImplementedError(
-                'django-tree is only for PostgreSQL for now.')
+        self.check_database_backend(schema_editor)
 
     def describe(self):
         return 'Rebuilds all the tree structure of a given django-tree field.'
