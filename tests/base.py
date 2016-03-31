@@ -20,6 +20,8 @@ from .models import Place
 # TODO: Test `disable_trigger`, `enable_trigger`, & `disabled_trigger`.
 # TODO: Test if `disabled_trigger` does not affect
 #       a concurrent node creation/update.
+# TODO: Test if breaking a transaction reverts the changes done by the trigger
+#       when updating nodes during that transaction.
 
 
 class PathTest(TransactionTestCase):

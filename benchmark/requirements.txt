@@ -1,0 +1,7 @@
+-r ../tests/requirements.txt
+django-mptt==0.8.3
+django-treebeard==4.0
+
+pandas==0.18.0
+numpy==1.11.0
+matplotlib==1.5.1
