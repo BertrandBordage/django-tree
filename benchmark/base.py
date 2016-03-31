@@ -25,7 +25,7 @@ class Benchmark:
         TreebeardNSPlace: 'treebeard NS',
     }
     siblings_per_level = (
-        7, 6, 5, 4, 3, 2, 2,
+        7, 6, 5, 4, 3, 2, 2, 2, 2,
     )
     time_it_iterations = 30
     tests = {}
@@ -151,7 +151,7 @@ class Benchmark:
                         elapsed_time = time() - start
                     except StopIteration:
                         break
-                    self.add_data(model, 'Creating objects',
+                    self.add_data(model, 'Create all objects',
                                   count, elapsed_time)
                     print('Testing %d objects...' % count, end='\r')
                     self.run_tests(model, level, count)

@@ -7,7 +7,7 @@ import django
 
 
 if __name__ == '__main__':
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'tests.settings')
     django.setup()
     from django.test.runner import DiscoverRunner
     test_runner = DiscoverRunner(verbosity=2)
