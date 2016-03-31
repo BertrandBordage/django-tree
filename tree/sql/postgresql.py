@@ -185,6 +185,15 @@ DROP_TRIGGER_QUERIES = (
 )
 
 
+CREATE_INDEX_QUERIES = (
+    'CREATE INDEX {table}_{path} ON {table} USING gist({path});',
+)
+
+DROP_INDEX_QUERIES = (
+    'DROP INDEX {table}_{path};',
+)
+
+
 def rebuild(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
         cursor.execute('SELECT rebuild_{}_{}();'.format(table, path_field))

@@ -1,6 +1,6 @@
 from django.db import models, migrations
 from tree.fields import PathField
-from tree.operations import CreateTreeTrigger
+from tree.operations import CreateTreeTrigger, CreateTreeIndex
 
 
 class Migration(migrations.Migration):
@@ -21,5 +21,7 @@ class Migration(migrations.Migration):
                 'ordering': ('path', 'name'),
             },
         ),
-        CreateTreeTrigger('tests.Place', order_by=('name',), max_siblings=36*3)
+        CreateTreeTrigger('tests.Place', order_by=('name',),
+                          max_siblings=36*3),
+        CreateTreeIndex('tests.Place'),
     ]

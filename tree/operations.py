@@ -143,6 +143,54 @@ class DeleteTreeTrigger(CreateTreeTrigger):
         return 'Deletes the trigger that automatically updates a `PathField`'
 
 
+class CreateTreeIndex(Operation, GetModelMixin, CheckDatabaseMixin):
+    reversible = True
+    atomic = True
+
+    def __init__(self, model_lookup, path_field='path'):
+        self.model_lookup = model_lookup
+        self.path_field = path_field
+        super(CreateTreeIndex, self).__init__()
+
+    def state_forwards(self, app_label, state):
+        pass
+
+    def get_pre_params(self, model):
+        meta = model._meta
+        return {
+            'table': meta.db_table,
+            'path': meta.get_field(self.path_field).attname,
+        }
+
+    def database_forwards(self, app_label, schema_editor,
+                          from_state, to_state):
+        self.check_database_backend(schema_editor)
+        for sql_query in postgresql.CREATE_INDEX_QUERIES:
+            schema_editor.execute(sql_query.format(
+                **self.get_pre_params(self.get_model(app_label, to_state))))
+
+    def database_backwards(self, app_label, schema_editor,
+                           from_state, to_state):
+        self.check_database_backend(schema_editor)
+        for sql_query in postgresql.DROP_INDEX_QUERIES:
+            schema_editor.execute(sql_query.format(
+                **self.get_pre_params(self.get_model(app_label, to_state))))
+
+    def describe(self):
+        return 'Creates an index that speeds up a `PathField`'
+
+
+class DeleteTreeIndex(CreateTreeIndex):
+    def database_forwards(self, *args, **kwargs):
+        super(DeleteTreeIndex, self).database_backwards(*args, **kwargs)
+
+    def database_backwards(self, *args, **kwargs):
+        super(DeleteTreeIndex, self).database_forwards(*args, **kwargs)
+
+    def describe(self):
+        return 'Deletes the index that speeds up a `PathField`'
+
+
 class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):
     reversible = True
     atomic = True
