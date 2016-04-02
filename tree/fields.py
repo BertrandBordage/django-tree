@@ -9,7 +9,6 @@ from .types import Path
 
 # TODO: Handle ManyToManyField('self') instead of ForeignKey('self').
 # TODO: Add queryset methods like `get_descendants` in a mixin.
-# TODO: Implement a way to create a GiST index (probably a migration).
 # TODO: Implement an alternative using regex for other db backends.
 
 
