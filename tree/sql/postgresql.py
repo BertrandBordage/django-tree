@@ -112,6 +112,7 @@ CREATE_FUNCTIONS_QUERIES = (
             path)
         INTO new_path, n_siblings
         USING parent_path, NEW;
+        -- FIXME: `json_populate_record` is not available in PostgreSQL < 9.3.
         EXECUTE format('
             SELECT *
             FROM json_populate_record($1, ''{"%s": "%s"}''::json)

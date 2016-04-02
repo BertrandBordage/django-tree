@@ -2,6 +2,9 @@ from django.db.models import QuerySet
 from django.utils.six import string_types
 
 
+# TODO: Add a `get_roots` method.
+
+
 class Path:
     def __init__(self, field, value):
         self.field = field
@@ -76,24 +79,25 @@ class Path:
             **{self.attname + '__match': self.value + '.*{1}'})
 
     def get_ancestors(self, include_self=False):
-        if self.value is None:
+        if self.value is None or (self.is_root() and not include_self):
             return self.qs.none()
-        qs = self.qs
-        if self.is_root():
-            if include_self:
-                return qs.filter(**{self.attname: self.value})
-            return qs.none()
+        paths = []
+        path = ''
+        for part in self.value.split('.'):
+            if path:
+                path += '.'
+            path += part
+            paths.append(path)
         if not include_self:
-            qs = qs.exclude(**{self.attname: self.value})
-        return qs.filter(**{self.attname + '__ancestor_of': self.value})
+            paths.pop()
+        return self.qs.filter(**{self.attname + '__in': paths})
 
     def get_descendants(self, include_self=False):
         if self.value is None:
             return self.qs.none()
-        qs = self.qs
-        if not include_self:
-            qs = qs.exclude(**{self.attname: self.value})
-        return qs.filter(**{self.attname + '__descendant_of': self.value})
+        return self.qs.filter(
+            **{self.attname + '__match': self.value + ('.*' if include_self
+                                                       else '.*{1,}')})
 
     def get_siblings(self, include_self=False):
         if self.value is None:
