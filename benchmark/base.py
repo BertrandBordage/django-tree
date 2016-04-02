@@ -1,10 +1,12 @@
 from __future__ import print_function
 from collections import Iterable
+from math import log10
 import os
 from time import time
 
 from django.db import connections, router
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 import pandas as pd
 
 from .models import (
@@ -16,6 +18,51 @@ class SkipTest(Exception):
     pass
 
 
+SI_PREFIXES = (
+    (1e9, 'G'),
+    (1e6, 'M'),
+    (1e3, 'k'),
+    (1, ''),
+    (1e-3, 'm'),
+    (1e-6, 'µ'),
+    (1e-9, 'n'),
+)
+
+
+def get_precision(n):
+    return -int(log10(n))
+
+
+def prefix_unit(v, unit, min_limit=None):
+    if v is None:
+        return
+
+    prefixes = SI_PREFIXES
+    if min_limit is not None:
+        prefixes = prefixes[:min_limit]
+
+    precision = get_precision(min([n for n, s in prefixes]))
+
+    for exp, exp_str in prefixes:
+        if v >= exp:
+            break
+
+    n = v / exp
+    pat = ('%%.%df' % (precision - get_precision(exp)))
+    res = '%s' % (pat % n)
+
+    # We remove trailing zero and the dot if it's possible.
+    if '.' in res:
+        res = res.rstrip('0')
+        if res[-1] == '.':
+            res = res[:-1]
+
+    if res == '0':
+        return res
+
+    return '%s %s%s' % (res, exp_str, unit)
+
+
 class Benchmark:
     models = {
         MPTTPlace: 'MPTT',
@@ -25,10 +72,15 @@ class Benchmark:
         TreebeardNSPlace: 'treebeard NS',
     }
     siblings_per_level = (
-        7, 6, 5, 4, 3, 2, 2, 2, 2,
+        7, 6, 5, 4, 3, 2, 2, 2,
     )
-    time_it_iterations = 30
+    time_it_iterations = 100
     tests = {}
+    ticks_formatters = {
+        'Time (s)': FuncFormatter(lambda v, pos: prefix_unit(v, 's')),
+        'Disk usage (bytes)': FuncFormatter(
+            lambda v, pos: prefix_unit(v, 'B', -3)),
+    }
     results_path = 'benchmark/results/'
 
     def __init__(self):
@@ -124,8 +176,16 @@ class Benchmark:
             self.add_data(model, test_name, count, value, y_label)
 
     def plot_series(self, series, database_name, test_name, y_label):
-        ax = series.plot(marker='x', title=test_name)
+        ax = series.plot(
+            marker='x', title=test_name,
+            xlim=(0, series.index.max() * 1.05),
+            ylim=(0, series.max().max() * 1.05),
+        )
         ax.set(xlabel='Amount of objects in table', ylabel=y_label)
+        ax.xaxis.set_major_formatter(
+            FuncFormatter(lambda v, pos: prefix_unit(v, '', -3)))
+        if y_label in self.ticks_formatters:
+            ax.yaxis.set_major_formatter(self.ticks_formatters[y_label])
         plt.savefig(os.path.join(
             self.results_path,
             '%s - %s.svg' % (database_name, test_name)))
@@ -138,7 +198,7 @@ class Benchmark:
 
             for model in self.models:
                 print('-' * 50)
-                print('%s on %s:' % (
+                print('%s on %s' % (
                     self.models[model],
                     connections[db_alias].vendor))
                 it = self.populate_database(model)
@@ -155,8 +215,28 @@ class Benchmark:
                                   count, elapsed_time)
                     print('Testing %d objects...' % count, end='\r')
                     self.run_tests(model, level, count)
+                    # We delete the objects to avoid impacting
+                    # the following tests and to clear some disk space.
+                    print('Deleting objects...', end='\r')
+                    model.objects.all().delete()
 
         df = pd.DataFrame(self.data)
+        df.to_csv(os.path.join(self.results_path, 'data.csv'))
+
+        stats_df = df.set_index(['Database', 'Test name', 'Count'])
+        stats_df.sort_index(inplace=True)
+        group_by = stats_df.groupby(level=[0, 1, 2])
+        min_values_series = group_by.min()['Value']
+        max_values_series = group_by.max()['Value']
+        stats_df['Value'] = ((stats_df['Value'] - min_values_series)
+                             / (max_values_series - min_values_series))
+        stats_df = stats_df.groupby(['Y label',
+                                     'Implementation']).mean()
+        stats_df['Value'] = ((20 * (1 - stats_df['Value']))
+                             .apply(lambda f: '%.1f / 20' % f))
+        stats_df.to_html(os.path.join(self.results_path, 'stats.html'),
+                         header=False)
+
         df.set_index('Count', inplace=True)
         for database_name in df['Database'].unique():
             for test_name in df['Test name'].unique():
@@ -383,19 +463,113 @@ class TestGetDescendantsCount(GetLeafMixin, BenchmarkTest):
 #
 
 
-@Benchmark.register_test('Get siblings [root]')
+@Benchmark.register_test('Get siblings [root]', (MPTTPlace, TreePlace))
+class TestGetSiblings(GetRootMixin, BenchmarkTest):
+    def run(self):
+        list(self.obj.get_siblings(include_self=True))
+
+
+@Benchmark.register_test(
+    'Get siblings [root]',
+    (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
 class TestGetSiblings(GetRootMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_siblings())
 
 
-@Benchmark.register_test('Get siblings [branch]')
+@Benchmark.register_test('Get siblings [branch]', (MPTTPlace, TreePlace))
+class TestGetSiblings(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        list(self.obj.get_siblings(include_self=True))
+
+
+@Benchmark.register_test(
+    'Get siblings [branch]',
+    (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
 class TestGetSiblings(GetBranchMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_siblings())
 
 
-@Benchmark.register_test('Get siblings [leaf]')
+@Benchmark.register_test('Get siblings [leaf]', (MPTTPlace, TreePlace))
+class TestGetSiblings(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        list(self.obj.get_siblings(include_self=True))
+
+
+@Benchmark.register_test(
+    'Get siblings [leaf]',
+    (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
 class TestGetSiblings(GetLeafMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_siblings())
+
+
+#
+# Previous sibling
+#
+
+
+@Benchmark.register_test('Get previous sibling [root]', MPTTPlace)
+class TestGetPrevSibling(GetRootMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_previous_sibling()
+
+
+@Benchmark.register_test(
+    'Get previous sibling [root]',
+    (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+class TestGetPrevSibling(GetRootMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_prev_sibling()
+
+
+@Benchmark.register_test('Get previous sibling [branch]', MPTTPlace)
+class TestGetPrevSibling(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_previous_sibling()
+
+
+@Benchmark.register_test(
+    'Get previous sibling [branch]',
+    (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+class TestGetPrevSibling(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_prev_sibling()
+
+
+@Benchmark.register_test('Get previous sibling [leaf]', MPTTPlace)
+class TestGetPrevSibling(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_previous_sibling()
+
+
+@Benchmark.register_test(
+    'Get previous sibling [leaf]',
+    (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+class TestGetPrevSibling(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_prev_sibling()
+
+
+#
+# Next sibling
+#
+
+
+@Benchmark.register_test('Get next sibling [root]')
+class TestGetNextSibling(GetRootMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_next_sibling()
+
+
+@Benchmark.register_test('Get next sibling [branch]')
+class TestGetNextSibling(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_next_sibling()
+
+
+@Benchmark.register_test('Get next sibling [leaf]')
+class TestGetNextSibling(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_next_sibling()
