@@ -53,9 +53,11 @@ class PathTest(TransactionTestCase):
         vienne.save()
         yield vienne
 
-    def assertPlaces(self, values, n_queries=1):
+    def assertPlaces(self, values, queryset=None, n_queries=1):
         with self.assertNumQueries(n_queries):
-            places = list(Place.objects.all())
+            if queryset is None:
+                queryset = Place.objects.all()
+            places = list(queryset)
             self.assertListEqual([(p.path, p.name) for p in places], values)
 
     def test_insert(self):
@@ -100,58 +102,6 @@ class PathTest(TransactionTestCase):
         next(it)
         self.assertPlaces(self.correct_places_data)
 
-    def test_rebuild(self):
-        list(self.create_test_places())
-
-        with Place.disabled_tree_trigger():
-            Place.objects.update(path='00')
-        self.assertPlaces([
-            ('00', 'Eure'), ('00', 'France'), ('00', 'Manche'),
-            ('00', 'Normandie'), ('00', 'Österreich'), ('00', 'Poitiers'),
-            ('00', 'Poitou-Charentes'), ('00', 'Seine-Maritime'),
-            ('00', 'Vienne')])
-        with self.assertNumQueries(1):
-            Place.rebuild_tree()
-        self.assertPlaces(self.correct_places_data)
-
-        # Root
-        with Place.disabled_tree_trigger():
-            Place.objects.filter(name='France').update(path='2Z')
-        self.assertPlaces([
-            ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
-            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
-            ('2Z', 'France')])
-        with self.assertNumQueries(1):
-            Place.rebuild_tree()
-        self.assertPlaces(self.correct_places_data)
-
-        # Branch
-        with Place.disabled_tree_trigger():
-            Place.objects.filter(name='Normandie').update(path='2Z.2Z')
-        self.assertPlaces([
-            ('00', 'France'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
-            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
-            ('2Z.2Z', 'Normandie')])
-        with self.assertNumQueries(1):
-            Place.rebuild_tree()
-        self.assertPlaces(self.correct_places_data)
-
-        # Leaf
-        with Place.disabled_tree_trigger():
-            Place.objects.filter(name='Seine-Maritime').update(path='00.2Z')
-        self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.01', 'Poitou-Charentes'),
-            ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
-            ('00.2Z', 'Seine-Maritime'), ('01', 'Österreich')])
-        with self.assertNumQueries(1):
-            Place.rebuild_tree()
-        self.assertPlaces(self.correct_places_data)
-
     def test_max_siblings(self):
         max_siblings = 108
         bulk = [Place(name='Anything') for _ in range(max_siblings)]
@@ -171,7 +121,7 @@ class PathTest(TransactionTestCase):
                     % max_siblings):
                 Place.objects.create(name='Anything')
 
-    def test_depth(self):
+    def test_get_depth(self):
         list(self.create_test_places())
 
         with self.assertNumQueries(1):
@@ -181,13 +131,14 @@ class PathTest(TransactionTestCase):
                 (2, 'Seine-Maritime'), (1, 'Poitou-Charentes'), (2, 'Vienne'),
                 (3, 'Poitiers'), (0, 'Österreich')])
 
-    def test_level(self):
+    def test_get_level(self):
         list(self.create_test_places())
 
         with self.assertNumQueries(1):
             paths = [p for p in Place.objects.all()]
             self.assertListEqual(
-                [p.get_level() for p in paths], [p.get_depth() + 1 for p in paths])
+                [p.get_level() for p in paths],
+                [p.get_depth() + 1 for p in paths])
 
     def test_is_root(self):
         list(self.create_test_places())
@@ -615,6 +566,64 @@ class PathTest(TransactionTestCase):
                                                    include_self=True))
             for descendant in place.get_descendants():
                 self.assertTrue(descendant.is_descendant_of(place))
+
+    def test_get_roots(self):
+        list(self.create_test_places())
+
+        self.assertPlaces([('00', 'France'), ('01', 'Österreich')],
+                          queryset=Place.get_roots())
+
+    def test_rebuild(self):
+        list(self.create_test_places())
+
+        with Place.disabled_tree_trigger():
+            Place.objects.update(path='00')
+        self.assertPlaces([
+            ('00', 'Eure'), ('00', 'France'), ('00', 'Manche'),
+            ('00', 'Normandie'), ('00', 'Österreich'), ('00', 'Poitiers'),
+            ('00', 'Poitou-Charentes'), ('00', 'Seine-Maritime'),
+            ('00', 'Vienne')])
+        with self.assertNumQueries(1):
+            Place.rebuild_tree()
+        self.assertPlaces(self.correct_places_data)
+
+        # Root
+        with Place.disabled_tree_trigger():
+            Place.objects.filter(name='France').update(path='2Z')
+        self.assertPlaces([
+            ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
+            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
+            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
+            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
+            ('2Z', 'France')])
+        with self.assertNumQueries(1):
+            Place.rebuild_tree()
+        self.assertPlaces(self.correct_places_data)
+
+        # Branch
+        with Place.disabled_tree_trigger():
+            Place.objects.filter(name='Normandie').update(path='2Z.2Z')
+        self.assertPlaces([
+            ('00', 'France'), ('00.00.00', 'Eure'),
+            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
+            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
+            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
+            ('2Z.2Z', 'Normandie')])
+        with self.assertNumQueries(1):
+            Place.rebuild_tree()
+        self.assertPlaces(self.correct_places_data)
+
+        # Leaf
+        with Place.disabled_tree_trigger():
+            Place.objects.filter(name='Seine-Maritime').update(path='00.2Z')
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
+            ('00.00.01', 'Manche'), ('00.01', 'Poitou-Charentes'),
+            ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
+            ('00.2Z', 'Seine-Maritime'), ('01', 'Österreich')])
+        with self.assertNumQueries(1):
+            Place.rebuild_tree()
+        self.assertPlaces(self.correct_places_data)
 
     def test_cycle(self):
         # Simple cycle

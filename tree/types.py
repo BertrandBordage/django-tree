@@ -2,9 +2,6 @@ from django.db.models import QuerySet
 from django.utils.six import string_types
 
 
-# TODO: Add a `get_roots` method.
-
-
 class Path:
     def __init__(self, field, value):
         self.field = field

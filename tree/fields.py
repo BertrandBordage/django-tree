@@ -10,6 +10,7 @@ from .types import Path
 # TODO: Handle ManyToManyField('self') instead of ForeignKey('self').
 # TODO: Add queryset methods like `get_descendants` in a mixin.
 # TODO: Implement an alternative using regex for other db backends.
+# TODO: Add a UNIQUE constraint.
 
 
 class PathField(Field):
@@ -53,6 +54,11 @@ class PathField(Field):
         if isinstance(value, Path):
             return value.value
         return value
+
+    # TODO: Move this method to a queryset.
+    def get_roots(self):
+        return self.model._default_manager.filter(
+            **{self.attname + '__match': '*{1}'})
 
     def rebuild(self, db_alias=DEFAULT_DB_ALIAS):
         self._check_database_backend(db_alias)

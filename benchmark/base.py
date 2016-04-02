@@ -573,3 +573,27 @@ class TestGetNextSibling(GetBranchMixin, BenchmarkTest):
 class TestGetNextSibling(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.obj.get_next_sibling()
+
+
+#
+# Get roots
+#
+
+
+@Benchmark.register_test('Get roots', MPTTPlace)
+class TestGetRoots(BenchmarkTest):
+    def run(self):
+        list(self.model._default_manager.root_nodes())
+
+
+@Benchmark.register_test('Get roots', TreePlace)
+class TestGetSiblings(BenchmarkTest):
+    def run(self):
+        list(self.model.get_roots())
+
+
+@Benchmark.register_test(
+    'Get roots', (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+class TestGetRoots(BenchmarkTest):
+    def run(self):
+        list(self.model.get_root_nodes())

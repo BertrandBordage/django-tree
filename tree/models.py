@@ -81,6 +81,11 @@ class TreeModelMixin:
                 .is_descendant_of(other._get_path_value(path_field),
                                   include_self=include_self))
 
+    # TODO: Remove this method.
+    @classmethod
+    def get_roots(cls, path_field=None):
+        return cls._get_path_field(path_field).get_roots()
+
     @classmethod
     def rebuild_tree(cls, db_alias=DEFAULT_DB_ALIAS, path_field=None):
         """

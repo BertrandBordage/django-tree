@@ -199,6 +199,7 @@ Example to show you most of the possibilities:
     other = YourModel.objects.all()[1]
     obj.is_ancestor_of(other)
     obj.is_descendant_of(other, include_self=True)
+    YourModel.get_roots()
 
     #
     # Advanced usage
