@@ -215,10 +215,10 @@ class Benchmark:
                                   count, elapsed_time)
                     print('Testing %d objects...' % count, end='\r')
                     self.run_tests(model, level, count)
-                    # We delete the objects to avoid impacting
-                    # the following tests and to clear some disk space.
-                    print('Deleting objects...', end='\r')
-                    model.objects.all().delete()
+                # We delete the objects to avoid impacting
+                # the following tests and to clear some disk space.
+                print('Deleting objects...', end='\r')
+                model.objects.all().delete()
 
         df = pd.DataFrame(self.data)
         df.to_csv(os.path.join(self.results_path, 'data.csv'))
