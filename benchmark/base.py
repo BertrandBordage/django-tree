@@ -1,6 +1,5 @@
 from __future__ import print_function
 from collections import Iterable
-from math import log10
 import os
 from time import time
 
@@ -12,55 +11,7 @@ import pandas as pd
 from .models import (
     TreePlace, MPTTPlace, TreebeardMPPlace, TreebeardNSPlace, TreebeardALPlace,
 )
-
-
-class SkipTest(Exception):
-    pass
-
-
-SI_PREFIXES = (
-    (1e9, 'G'),
-    (1e6, 'M'),
-    (1e3, 'k'),
-    (1, ''),
-    (1e-3, 'm'),
-    (1e-6, 'µ'),
-    (1e-9, 'n'),
-)
-
-
-def get_precision(n):
-    return -int(log10(n))
-
-
-def prefix_unit(v, unit, min_limit=None):
-    if v is None:
-        return
-
-    prefixes = SI_PREFIXES
-    if min_limit is not None:
-        prefixes = prefixes[:min_limit]
-
-    precision = get_precision(min([n for n, s in prefixes]))
-
-    for exp, exp_str in prefixes:
-        if v >= exp:
-            break
-
-    n = v / exp
-    pat = ('%%.%df' % (precision - get_precision(exp)))
-    res = '%s' % (pat % n)
-
-    # We remove trailing zero and the dot if it's possible.
-    if '.' in res:
-        res = res.rstrip('0')
-        if res[-1] == '.':
-            res = res[:-1]
-
-    if res == '0':
-        return res
-
-    return '%s %s%s' % (res, exp_str, unit)
+from .utils import prefix_unit, SkipTest, LineDisplay
 
 
 class Benchmark:
@@ -72,9 +23,8 @@ class Benchmark:
         TreebeardNSPlace: 'treebeard NS',
     }
     siblings_per_level = (
-        7, 6, 5, 4, 3, 2, 2, 2,
+        10, 10, 10, 10,
     )
-    time_it_iterations = 100
     tests = {}
     ticks_formatters = {
         'Time (s)': FuncFormatter(lambda v, pos: prefix_unit(v, 's')),
@@ -100,43 +50,35 @@ class Benchmark:
     def add_data(self, model, test_name, count, value, y_label='Time (s)'):
         self.data.append({
             'Database': connections[self.current_db_alias].vendor,
-            'Implementation': self.models[model],
             'Test name': test_name,
+            'Count': count,
+            'Implementation': self.models[model],
             'Value': value,
             'Y label': y_label,
-            'Count': count,
         })
 
     def populate_database(self, model, level=1, parents=(None,)):
         n_siblings = self.siblings_per_level[level-1]
-        if model in (TreePlace, TreebeardALPlace):
-            bulk = []
-            for parent in parents:
-                bulk.extend([model(parent=parent)
-                             for _ in range(n_siblings)])
-            model.objects.bulk_create(bulk)
-            objects = model.objects.all()
-            if parents != (None,):
-                objects = objects.filter(parent__in=parents)
-        elif model in (TreebeardMPPlace, TreebeardNSPlace):
-            objects = []
-            for parent in parents:
-                # We have to fetch again each because the path can have changed
+        for parent in parents:
+            if model in (TreePlace, TreebeardALPlace):
+                bulk = [model(parent=parent)
+                        for _ in range(n_siblings)]
+                model.objects.bulk_create(bulk)
+                objects = model.objects.filter(parent=parent)
+            elif model in (TreebeardMPPlace, TreebeardNSPlace):
+                # We fetch again each parent because the path can change
                 # during the creation of children from the previous parent.
                 if parent is not None:
                     parent = model.objects.get(pk=parent.pk)
-                for _ in range(n_siblings):
-                    objects.append(model.add_root() if parent is None
-                                   else parent.add_child())
-        else:
-            objects = []
-            for parent in parents:
-                for _ in range(n_siblings):
-                    objects.append(model.objects.create(parent=parent))
-        yield level, model.objects.count()
-        if level < len(self.siblings_per_level):
-            for count in self.populate_database(model, level+1, objects):
-                yield count
+                objects = [model.add_root() if parent is None
+                           else parent.add_child() for _ in range(n_siblings)]
+            else:
+                objects = [model.objects.create(parent=parent)
+                           for _ in range(n_siblings)]
+            yield level, model.objects.count()
+            if level < len(self.siblings_per_level):
+                for count in self.populate_database(model, level+1, objects):
+                    yield count
 
     def create_databases(self):
         old_db_names = {}
@@ -168,57 +110,70 @@ class Benchmark:
             except SkipTest:
                 continue
             start = time()
-            for i in range(self.time_it_iterations):
-                value = benchmark_test.run()
-            elapsed_time = (time() - start) / self.time_it_iterations
+            value = benchmark_test.run()
+            elapsed_time = time() - start
             if value is None:
                 value = elapsed_time
-            self.add_data(model, test_name, count, value, y_label)
+            self.add_data(model, test_name, count, value, y_label=y_label)
 
-    def plot_series(self, series, database_name, test_name, y_label):
-        ax = series.plot(
-            marker='x', title=test_name,
-            xlim=(0, series.index.max() * 1.05),
-            ylim=(0, series.max().max() * 1.05),
+    def plot(self, df, database_name, test_name, y_label):
+        ax = df.rolling(100).mean().plot(
+            title=test_name, alpha=0.8,
+            xlim=(0, df.index.max() * 1.05),
+            ylim=(0, df.max().max() * 1.05),
         )
         ax.set(xlabel='Amount of objects in table', ylabel=y_label)
+
         ax.xaxis.set_major_formatter(
             FuncFormatter(lambda v, pos: prefix_unit(v, '', -3)))
         if y_label in self.ticks_formatters:
             ax.yaxis.set_major_formatter(self.ticks_formatters[y_label])
-        plt.savefig(os.path.join(
-            self.results_path,
-            '%s - %s.svg' % (database_name, test_name)))
+
+        legend = ax.legend(
+            loc='upper center', bbox_to_anchor=(0.5, 0.0),
+            bbox_transform=plt.gcf().transFigure,
+            fancybox=True, shadow=True, ncol=3)
+
+        plt.savefig(
+            os.path.join(self.results_path,
+                         '%s - %s.svg' % (database_name, test_name)),
+            bbox_extra_artists=(legend,), bbox_inches='tight',
+        )
 
     def run(self):
         self.create_databases()
 
         for db_alias in connections:
             self.current_db_alias = db_alias
+            connection = connections[db_alias]
 
             for model in self.models:
                 print('-' * 50)
-                print('%s on %s' % (
-                    self.models[model],
-                    connections[db_alias].vendor))
+                print('%s on %s' % (self.models[model], connection.vendor))
                 it = self.populate_database(model)
                 elapsed_time = 0.0
-                while True:
-                    print('Creating new objects...', end='\r')
-                    try:
-                        start = time() - elapsed_time
-                        level, count = next(it)
-                        elapsed_time = time() - start
-                    except StopIteration:
-                        break
-                    self.add_data(model, 'Create all objects',
-                                  count, elapsed_time)
-                    print('Testing %d objects...' % count, end='\r')
-                    self.run_tests(model, level, count)
-                # We delete the objects to avoid impacting
-                # the following tests and to clear some disk space.
-                print('Deleting objects...', end='\r')
-                model.objects.all().delete()
+                with LineDisplay() as line:
+                    while True:
+                        line.update('Creating new objects...')
+                        try:
+                            start = time() - elapsed_time
+                            level, count = next(it)
+                            elapsed_time = time() - start
+                        except StopIteration:
+                            break
+                        self.add_data(model, 'Create all objects',
+                                      count, elapsed_time)
+                        with connection.cursor() as cursor:
+                            # This makes sure the database statistics are
+                            # up to date and the disk usage is optimised.
+                            cursor.execute(
+                                'VACUUM ANALYZE "%s";' % model._meta.db_table)
+                        line.update('Testing with %d objects...' % count)
+                        self.run_tests(model, level, count)
+                    # We delete the objects to avoid impacting
+                    # the following tests and to clear some disk space.
+                    line.update('Deleting all objects from the table...')
+                    model.objects.all().delete()
 
         df = pd.DataFrame(self.data)
         df.to_csv(os.path.join(self.results_path, 'data.csv'))
@@ -245,7 +200,7 @@ class Benchmark:
                 y_labels = sub_df['Y label'].unique()
                 assert len(y_labels) == 1
                 sub_df = sub_df.pivot(columns='Implementation', values='Value')
-                self.plot_series(sub_df, database_name, test_name, y_labels[0])
+                self.plot(sub_df, database_name, test_name, y_labels[0])
 
 
 class BenchmarkTest:
