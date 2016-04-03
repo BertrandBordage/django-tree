@@ -10,7 +10,6 @@ from .types import Path
 # TODO: Handle ManyToManyField('self') instead of ForeignKey('self').
 # TODO: Add queryset methods like `get_descendants` in a mixin.
 # TODO: Implement an alternative using regex for other db backends.
-# TODO: Add a UNIQUE constraint.
 
 
 class PathField(Field):

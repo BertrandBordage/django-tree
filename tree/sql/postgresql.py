@@ -156,7 +156,7 @@ DROP_FUNCTIONS_QUERIES = (
 
 CREATE_TRIGGER_QUERIES = (
     """
-    CREATE TRIGGER update_{path}
+    CREATE TRIGGER "update_{path}"
     BEFORE INSERT OR UPDATE OF {update_columns}
     ON "{table}"
     FOR EACH ROW
@@ -178,20 +178,29 @@ CREATE_TRIGGER_QUERIES = (
     END;
     $$ LANGUAGE plpgsql;
     """,
+    # TODO: Find a way to create this deferrable unique constraint
+    #       somewhere else.
+    """
+    ALTER TABLE "{table}"
+    ADD CONSTRAINT "{table}_{path}_unique" UNIQUE ("{path}") DEFERRABLE;
+    """,
 )
 
 DROP_TRIGGER_QUERIES = (
-    'DROP TRIGGER IF EXISTS update_{path} ON {table};',
+    # TODO: Find a way to delete this deferrable unique constraint
+    #       somewhere else.
+    'ALTER TABLE "{table}" DROP CONSTRAINT "{table}_{path}_unique";'
+    'DROP TRIGGER IF EXISTS "update_{path}" ON "{table}";',
     'DROP FUNCTION IF EXISTS rebuild_{table}_{path}();',
 )
 
 
 CREATE_INDEX_QUERIES = (
-    'CREATE INDEX {table}_{path} ON {table} USING gist({path});',
+    'CREATE INDEX "{table}_{path}" ON "{table}" USING gist("{path}");',
 )
 
 DROP_INDEX_QUERIES = (
-    'DROP INDEX {table}_{path};',
+    'DROP INDEX "{table}_{path}";',
 )
 
 
@@ -202,11 +211,11 @@ def rebuild(table, path_field, db_alias=DEFAULT_DB_ALIAS):
 
 def disable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
-        cursor.execute('ALTER TABLE {} DISABLE TRIGGER update_{};'
+        cursor.execute('ALTER TABLE "{}" DISABLE TRIGGER "update_{}";'
                        .format(table, path_field))
 
 
 def enable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
-        cursor.execute('ALTER TABLE {} ENABLE TRIGGER update_{};'
+        cursor.execute('ALTER TABLE "{}" ENABLE TRIGGER "update_{}";'
                        .format(table, path_field))

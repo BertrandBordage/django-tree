@@ -577,12 +577,14 @@ class PathTest(TransactionTestCase):
         list(self.create_test_places())
 
         with Place.disabled_tree_trigger():
-            Place.objects.update(path='00')
+            for i, place in enumerate(Place.objects.order_by('name')):
+                place.path = str(i)
+                place.save()
         self.assertPlaces([
-            ('00', 'Eure'), ('00', 'France'), ('00', 'Manche'),
-            ('00', 'Normandie'), ('00', 'Österreich'), ('00', 'Poitiers'),
-            ('00', 'Poitou-Charentes'), ('00', 'Seine-Maritime'),
-            ('00', 'Vienne')])
+            ('0', 'Eure'), ('1', 'France'), ('2', 'Manche'),
+            ('3', 'Normandie'), ('4', 'Österreich'), ('5', 'Poitiers'),
+            ('6', 'Poitou-Charentes'), ('7', 'Seine-Maritime'),
+            ('8', 'Vienne')])
         with self.assertNumQueries(1):
             Place.rebuild_tree()
         self.assertPlaces(self.correct_places_data)
