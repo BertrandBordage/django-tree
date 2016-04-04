@@ -164,10 +164,13 @@ class Benchmark:
                         self.add_data(model, 'Create all objects',
                                       count, elapsed_time)
                         with connection.cursor() as cursor:
-                            # This makes sure the database statistics are
+                            # This makes sure the table statistics are
                             # up to date and the disk usage is optimised.
                             cursor.execute(
                                 'VACUUM ANALYZE "%s";' % model._meta.db_table)
+                            # This makes sure the indexes are up to date.
+                            cursor.execute(
+                                'REINDEX TABLE "%s";' % model._meta.db_table)
                         line.update('Testing with %d objects...' % count)
                         self.run_tests(model, level, count)
                     # We delete the objects to avoid impacting
@@ -228,23 +231,37 @@ class TestDiskUsage(BenchmarkTest):
 
 class GetRootMixin:
     def setup(self):
-        self.obj = self.model.objects.order_by('pk').first()
+        qs = self.model._default_manager.all()
+        qs = (qs.filter(depth=1)
+              if self.model in (TreebeardMPPlace, TreebeardNSPlace)
+              else qs.filter(parent__isnull=True))
+        self.obj = qs[qs.count() // 2]
 
 
 class GetBranchMixin:
     def setup(self):
         if self.level < 3:
             raise SkipTest
-        if self.model in (TreePlace, MPTTPlace, TreebeardALPlace):
-            self.obj = self.model.objects.filter(
-                parent__isnull=False, children__isnull=False).first()
-        elif self.model in (TreebeardMPPlace, TreebeardNSPlace):
-            self.obj = self.model.objects.filter(depth=1).first()
+
+        qs = self.model._default_manager.all()
+        if self.model is MPTTPlace:
+            qs = qs.filter(level=1)
+        elif self.model is TreePlace:
+            qs = qs.filter(path__level=2)
+        elif self.model is TreebeardALPlace:
+            qs = qs.filter(parent__isnull=False, parent__parent__isnull=True)
+        else:
+            qs = qs.filter(depth=2)
+        self.obj = qs[qs.count() // 2]
 
 
 class GetLeafMixin:
     def setup(self):
-        self.obj = self.model.objects.order_by('-pk').first()
+        qs = self.model._default_manager.all()
+        qs = (qs.filter(depth=self.level)
+              if self.model in (TreebeardMPPlace, TreebeardNSPlace)
+              else qs.filter(children__isnull=True))
+        self.obj = qs[qs.count() // 2]
 
 
 #
