@@ -217,3 +217,27 @@ Example to show you most of the possibilities:
 
 There is also a bunch of less useful lookups, transforms and functions
 available. They will be documented with examples in the future.
+
+
+Differences with MPTT and treebeard
+-----------------------------------
+
+Level vs depth
+..............
+
+django-mptt and django-treebeard use two different names to designate almost
+the same thing: MPTT uses level and treebeard uses depth.
+Both are integers to show how much distance a node is to the top of the tree.
+The only difference is that level should start by convention with 1 and depth
+should start with 0.
+
+Unfortunately, **both MPTT and treebeard are wrong about the indexing**:
+MPTT starts its level with 0 and treebeard starts its depth with 1.
+
+**Django-tree finally fixes this issue by implementing a level starting by 1**,
+and no depth to avoid confusion. One name had to be chosen, and I find that
+“level” represents more accurately the idea that we deal with an abstract tree,
+where all the node of the same level are on the same row.
+In comparison, “depth” sounds like we’re actually digging a real root,
+and it gives the impression that a child of a root
+can be at a different depth than a child of another root, like in real life.
