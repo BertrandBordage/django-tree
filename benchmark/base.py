@@ -117,10 +117,11 @@ class Benchmark:
             self.add_data(model, test_name, count, value, y_label=y_label)
 
     def plot(self, df, database_name, test_name, y_label):
-        ax = df.rolling(100).mean().plot(
+        means = df.rolling(100).mean()
+        ax = means.plot(
             title=test_name, alpha=0.8,
-            xlim=(0, df.index.max() * 1.05),
-            ylim=(0, df.max().max() * 1.05),
+            xlim=(0, means.index.max() * 1.05),
+            ylim=(0, means.max().max() * 1.05),
         )
         ax.set(xlabel='Amount of objects in table', ylabel=y_label)
 
