@@ -180,10 +180,9 @@ Example to show you most of the possibilities:
 .. code:: python
 
     obj = YourModel.objects.all()[0]
-    obj.path.get_depth()
-    obj.get_depth()  # Shortcut for the previous method, if you use
+    obj.path.get_level()
+    obj.get_level()  # Shortcut for the previous method, if you use
                      # `TreeModelMixin`. Same for other object methods below.
-    obj.get_level()  # Same as depth, but starts with 1 instead of 0.
     obj.is_root()
     obj.is_leaf()
     obj.get_children()

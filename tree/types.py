@@ -129,13 +129,9 @@ class Path:
     def get_next_sibling(self):
         return self.get_next_siblings().first()
 
-    def get_depth(self):
-        if self.value is not None:
-            return self.value.count('.')
-
     def get_level(self):
         if self.value is not None:
-            return self.get_depth() + 1
+            return self.value.count('.') + 1
 
     def is_root(self):
         if self.value is not None:

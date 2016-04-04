@@ -59,9 +59,6 @@ class TreeModelMixin:
         return (self._get_path_value(path_field)
                 .get_next_sibling())
 
-    def get_depth(self, path_field=None):
-        return self._get_path_value(path_field).get_depth()
-
     def get_level(self, path_field=None):
         return self._get_path_value(path_field).get_level()
 
