@@ -205,8 +205,8 @@ Example to show you most of the possibilities:
     # Use the following methods only if you understand exactly what they mean.
     #
 
-    YourModel.rebuild_tree()  # Rebuilds all paths of this field, useful only
-                              # if something is broken, which shouldn’t happen.
+    YourModel.rebuild_paths()  # Rebuilds all paths of this field, useful only
+                               # if something is broken, which shouldn’t happen.
     YourModel.disable_tree_trigger()  # Disables the SQL trigger.
     YourModel.enable_tree_trigger()   # Restores the SQL trigger.
     with YourModel.disabled_tree_trigger():

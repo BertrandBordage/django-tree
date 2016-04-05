@@ -84,7 +84,7 @@ class TreeModelMixin:
         return cls._get_path_field(path_field).get_roots()
 
     @classmethod
-    def rebuild_tree(cls, db_alias=DEFAULT_DB_ALIAS, path_field=None):
+    def rebuild_paths(cls, db_alias=DEFAULT_DB_ALIAS, path_field=None):
         """
         Rebuilds the paths of all the ``PathField``s
         if ``path_field`` is ``None``.  Otherwise, only paths from

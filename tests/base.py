@@ -22,6 +22,7 @@ from .models import Place
 #       a concurrent node creation/update.
 # TODO: Test if breaking a transaction reverts the changes done by the trigger
 #       when updating nodes during that transaction.
+# TODO: Test path arrays.
 
 
 class PathTest(TransactionTestCase):
@@ -575,7 +576,7 @@ class PathTest(TransactionTestCase):
             ('6', 'Poitou-Charentes'), ('7', 'Seine-Maritime'),
             ('8', 'Vienne')])
         with self.assertNumQueries(1):
-            Place.rebuild_tree()
+            Place.rebuild_paths()
         self.assertPlaces(self.correct_places_data)
 
         # Root
@@ -588,7 +589,7 @@ class PathTest(TransactionTestCase):
             ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
             ('2Z', 'France')])
         with self.assertNumQueries(1):
-            Place.rebuild_tree()
+            Place.rebuild_paths()
         self.assertPlaces(self.correct_places_data)
 
         # Branch
@@ -601,7 +602,7 @@ class PathTest(TransactionTestCase):
             ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
             ('2Z.2Z', 'Normandie')])
         with self.assertNumQueries(1):
-            Place.rebuild_tree()
+            Place.rebuild_paths()
         self.assertPlaces(self.correct_places_data)
 
         # Leaf
@@ -613,7 +614,7 @@ class PathTest(TransactionTestCase):
             ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
             ('00.2Z', 'Seine-Maritime'), ('01', 'Österreich')])
         with self.assertNumQueries(1):
-            Place.rebuild_tree()
+            Place.rebuild_paths()
         self.assertPlaces(self.correct_places_data)
 
     def test_cycle(self):
