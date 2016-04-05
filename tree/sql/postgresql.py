@@ -70,10 +70,7 @@ CREATE_FUNCTIONS_QUERIES = (
                                     WHEN $2.%5$I IS NULL
                                         THEN %5$I IS NULL
                                     ELSE %5$I = $2.%5$I END)
-                                AND (CASE
-                                    WHEN $2.%1$I IS NULL
-                                        THEN TRUE
-                                    ELSE %1$I != $2.%1$I END)
+                                AND %1$I != COALESCE($2.%1$I, -1)
                         ) UNION ALL (
                             SELECT $2.*
                         )
@@ -125,12 +122,18 @@ CREATE_FUNCTIONS_QUERIES = (
     $$ LANGUAGE plpgsql;
     """,
     """
-    CREATE OR REPLACE FUNCTION rebuild_paths(table_name text, pk text,
-                                             parent text) RETURNS void AS $$
+    CREATE OR REPLACE FUNCTION rebuild_paths(
+        table_name text, pk text, parent text, path text) RETURNS void AS $$
     BEGIN
         EXECUTE format('
-            UPDATE %1$I SET %2$I = %2$I WHERE %3$I IS NULL
-        ', table_name, pk, parent);
+            UPDATE %1$I SET %4$I = %1$I.%4$I FROM (
+                SELECT * FROM %1$I
+                WHERE %3$I IS NULL
+                LIMIT 1
+                FOR UPDATE
+            ) AS t
+            WHERE %1$I.%2$I = t.%2$I
+        ', table_name, pk, parent, path);
     END;
     $$ LANGUAGE plpgsql;
     """,
@@ -144,7 +147,7 @@ CREATE_FUNCTIONS_QUERIES = [s.replace('%', '%%')
 DROP_FUNCTIONS_QUERIES = (
     """
     DROP FUNCTION IF EXISTS rebuild_paths(table_name text, pk text,
-                                          parent text);
+                                          parent text, path text);
     """,
     'DROP FUNCTION IF EXISTS update_paths();',
     'DROP FUNCTION IF EXISTS to_alphanum(i bigint);',
@@ -159,19 +162,13 @@ CREATE_TRIGGER_QUERIES = (
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
     EXECUTE PROCEDURE update_paths(
-        "{pk}", "{parent}", "{path}", '{{{order_by}}}',
+        '{pk}', '{parent}', '{path}', '{{{order_by}}}',
         {max_siblings}, {label_size});
     """,
     """
     CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
     BEGIN
-        UPDATE "{table}" SET "{path}" = "{table}"."{path}" FROM (
-            SELECT * FROM "{table}"
-            WHERE "{parent}" IS NULL
-            LIMIT 1
-            FOR UPDATE
-        ) AS t
-        WHERE "{table}"."{pk}" = t."{pk}";
+        PERFORM rebuild_paths('{table}', '{pk}', '{parent}', '{path}');
     END;
     $$ LANGUAGE plpgsql;
     """,
