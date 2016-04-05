@@ -6,7 +6,8 @@ from .base import ALPHANUM, ALPHANUM_LEN
 CREATE_FUNCTIONS_QUERIES = (
     'CREATE EXTENSION IF NOT EXISTS ltree;',
     """
-    CREATE OR REPLACE FUNCTION to_alphanum(i bigint) RETURNS text AS $$
+    CREATE OR REPLACE FUNCTION to_alphanum(i bigint,
+                                           size smallint) RETURNS text AS $$
     DECLARE
         ALPHANUM text := '{}';
         ALPHANUM_LEN int := {};
@@ -18,7 +19,7 @@ CREATE_FUNCTIONS_QUERIES = (
             i := i / ALPHANUM_LEN;
             out := substring(ALPHANUM from remainder+1 for 1) || out;
             IF i = 0 THEN
-                RETURN out;
+                RETURN lpad(out, size, '0');
             END IF;
         END LOOP;
     END;
@@ -59,9 +60,8 @@ CREATE_FUNCTIONS_QUERIES = (
             WITH RECURSIVE generate_paths(pk, path) AS ((
                     SELECT
                         %1$I,
-                        $1 || lpad(
-                            to_alphanum(row_number() OVER (ORDER BY %2$s) - 1),
-                            %3$L, ''0'')
+                        $1 || to_alphanum(
+                            row_number() OVER (ORDER BY %2$s) - 1, %3$L)
                     FROM ((
                             SELECT *
                             FROM %4$I
@@ -78,10 +78,9 @@ CREATE_FUNCTIONS_QUERIES = (
                 ) UNION ALL (
                     SELECT
                         t2.%1$I,
-                        t1.path || lpad(
-                            to_alphanum(row_number() OVER (PARTITION BY t1.pk
-                                                           ORDER BY %6$s) - 1),
-                            %3$L, ''0'')
+                        t1.path || to_alphanum(
+                            row_number() OVER (PARTITION BY t1.pk
+                                               ORDER BY %6$s) - 1, %3$L)
                     FROM generate_paths AS t1
                     INNER JOIN %4$I AS t2 ON t2.%5$I = t1.pk
                 )
