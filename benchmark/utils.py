@@ -1,5 +1,4 @@
 from math import log10
-import sys
 
 
 class SkipTest(Exception):
@@ -49,22 +48,3 @@ def prefix_unit(v, unit, min_limit=None):
         return res
 
     return '%s %s%s' % (res, exp_str, unit)
-
-
-class LineDisplay:
-    def __init__(self):
-        print()
-
-    def __enter__(self):
-        return self
-
-    def clear(self):
-        sys.stdout.write('\033[F\033[K')
-        sys.stdout.flush()
-
-    def update(self, *args, **kwargs):
-        self.clear()
-        print(*args, **kwargs)
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.clear()

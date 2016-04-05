@@ -1,17 +1,28 @@
 from __future__ import print_function
 from collections import Iterable
+from functools import reduce
 import os
 from time import time
 
-from django.db import connections, router
+from django.db import connections, router, transaction
+from django.db.models import Max, F
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import pandas as pd
+from tqdm import tqdm
 
 from .models import (
     TreePlace, MPTTPlace, TreebeardMPPlace, TreebeardNSPlace, TreebeardALPlace,
 )
-from .utils import prefix_unit, SkipTest, LineDisplay
+from .utils import prefix_unit, SkipTest
+
+
+DISK_USAGE = 'Disk usage (bytes)'
+READ_LATENCY = 'Read latency (s)'
+WRITE_LATENCY = 'Write latency (s)'
+
+BYTES_FORMATTER = FuncFormatter(lambda v, pos: prefix_unit(v, 'B', -3))
+SECONDS_FORMATTER = FuncFormatter(lambda v, pos: prefix_unit(v, 's'))
 
 
 class Benchmark:
@@ -23,13 +34,13 @@ class Benchmark:
         TreebeardNSPlace: 'treebeard NS',
     }
     siblings_per_level = (
-        10, 10, 10, 10,
+        5, 5, 5, 5, 5,
     )
     tests = {}
     ticks_formatters = {
-        'Time (s)': FuncFormatter(lambda v, pos: prefix_unit(v, 's')),
-        'Disk usage (bytes)': FuncFormatter(
-            lambda v, pos: prefix_unit(v, 'B', -3)),
+        DISK_USAGE: BYTES_FORMATTER,
+        READ_LATENCY: SECONDS_FORMATTER,
+        WRITE_LATENCY: SECONDS_FORMATTER,
     }
     results_path = 'benchmark/results/'
 
@@ -47,7 +58,7 @@ class Benchmark:
     def current_db_alias(self, db_alias):
         self.router.db_alias = db_alias
 
-    def add_data(self, model, test_name, count, value, y_label='Time (s)'):
+    def add_data(self, model, test_name, count, value, y_label=READ_LATENCY):
         self.data.append({
             'Database': connections[self.current_db_alias].vendor,
             'Test name': test_name,
@@ -75,7 +86,7 @@ class Benchmark:
             else:
                 objects = [model.objects.create(parent=parent)
                            for _ in range(n_siblings)]
-            yield level, model.objects.count()
+            yield model.objects.count()
             if level < len(self.siblings_per_level):
                 for count in self.populate_database(model, level+1, objects):
                     yield count
@@ -88,7 +99,7 @@ class Benchmark:
             conn.creation.create_test_db(autoclobber=True)
 
     @classmethod
-    def register_test(cls, name, models=None, y_label='Time (s)'):
+    def register_test(cls, name, models=None, y_label=READ_LATENCY):
         if models is None:
             models = cls.models
         if not isinstance(models, Iterable):
@@ -97,27 +108,32 @@ class Benchmark:
         def inner(test_class):
             for model in models:
                 cls.tests[(name, model, y_label)] = test_class
+            return test_class
 
         return inner
 
-    def run_tests(self, tested_model, level, count):
+    def run_tests(self, tested_model, count):
+        connection = connections[self.current_db_alias]
         for (test_name, model, y_label), test_class in self.tests.items():
             if model is not tested_model:
                 continue
-            benchmark_test = test_class(self, model, level)
-            try:
-                benchmark_test.setup()
-            except SkipTest:
-                continue
-            start = time()
-            value = benchmark_test.run()
-            elapsed_time = time() - start
+            benchmark_test = test_class(self, model)
+            with transaction.atomic(using=self.current_db_alias):
+                try:
+                    benchmark_test.setup()
+                except SkipTest:
+                    value = elapsed_time = None
+                else:
+                    start = time()
+                    value = benchmark_test.run()
+                    elapsed_time = time() - start
+                connection.needs_rollback = True
             if value is None:
                 value = elapsed_time
             self.add_data(model, test_name, count, value, y_label=y_label)
 
     def plot(self, df, database_name, test_name, y_label):
-        means = df.rolling(100).mean()
+        means = df.rolling(70).mean()
         ax = means.plot(
             title=test_name, alpha=0.8,
             xlim=(0, means.index.max() * 1.05),
@@ -152,35 +168,34 @@ class Benchmark:
                 print('-' * 50)
                 print('%s on %s' % (self.models[model], connection.vendor))
                 it = self.populate_database(model)
+                total = reduce(lambda x, y: y + x * y, self.siblings_per_level)
+                progress = tqdm(it, total=total)
                 elapsed_time = 0.0
-                with LineDisplay() as line:
-                    while True:
-                        line.update('Creating new objects...')
-                        try:
-                            start = time() - elapsed_time
-                            level, count = next(it)
-                            elapsed_time = time() - start
-                        except StopIteration:
-                            break
-                        self.add_data(model, 'Create all objects',
-                                      count, elapsed_time)
-                        with connection.cursor() as cursor:
-                            # This makes sure the table statistics are
-                            # up to date and the disk usage is optimised.
-                            cursor.execute(
-                                'VACUUM ANALYZE "%s";' % model._meta.db_table)
-                            # This makes sure the indexes are up to date.
-                            cursor.execute(
-                                'REINDEX TABLE "%s";' % model._meta.db_table)
-                        line.update('Testing with %d objects...' % count)
-                        self.run_tests(model, level, count)
-                    # We delete the objects to avoid impacting
-                    # the following tests and to clear some disk space.
-                    line.update('Deleting all objects from the table...')
-                    model.objects.all().delete()
+                while True:
+                    try:
+                        start = time() - elapsed_time
+                        count = next(it)
+                        elapsed_time = time() - start
+                    except StopIteration:
+                        break
+                    progress.update(count - progress.n)
+                    self.add_data(model, 'Create all objects', count,
+                                  elapsed_time, y_label=WRITE_LATENCY)
+                    with connection.cursor() as cursor:
+                        # This makes sure the table statistics are
+                        # up to date and the disk usage is optimised.
+                        cursor.execute(
+                            'VACUUM ANALYZE "%s";' % model._meta.db_table)
+                        # This makes sure the indexes are up to date.
+                        cursor.execute(
+                            'REINDEX TABLE "%s";' % model._meta.db_table)
+                    self.run_tests(model, count)
+                # We delete the objects to avoid impacting
+                # the following tests and to clear some disk space.
+                model.objects.all().delete()
 
         df = pd.DataFrame(self.data)
-        df.to_csv(os.path.join(self.results_path, 'data.csv'))
+        df.to_csv(os.path.join(self.results_path, 'data.csv'), index=False)
 
         stats_df = df.set_index(['Database', 'Test name', 'Count'])
         stats_df.sort_index(inplace=True)
@@ -189,8 +204,8 @@ class Benchmark:
         max_values_series = group_by.max()['Value']
         stats_df['Value'] = ((stats_df['Value'] - min_values_series)
                              / (max_values_series - min_values_series))
-        stats_df = stats_df.groupby(['Y label',
-                                     'Implementation']).mean()
+        stats_df['Value'] = stats_df['Value'].fillna(1.0)
+        stats_df = stats_df.groupby(['Y label', 'Implementation']).mean()
         stats_df['Value'] = ((20 * (1 - stats_df['Value']))
                              .apply(lambda f: '%.1f / 20' % f))
         stats_df.to_html(os.path.join(self.results_path, 'stats.html'),
@@ -208,10 +223,9 @@ class Benchmark:
 
 
 class BenchmarkTest:
-    def __init__(self, benchmark, model, level):
+    def __init__(self, benchmark, model):
         self.benchmark = benchmark
         self.model = model
-        self.level = level
 
     def setup(self):
         pass
@@ -221,7 +235,7 @@ class BenchmarkTest:
 
 
 @Benchmark.register_test('Table disk usage (including indexes)',
-                         y_label='Disk usage (bytes)')
+                         y_label=DISK_USAGE)
 class TestDiskUsage(BenchmarkTest):
     def run(self):
         with connections[self.benchmark.current_db_alias].cursor() as cursor:
@@ -241,9 +255,6 @@ class GetRootMixin:
 
 class GetBranchMixin:
     def setup(self):
-        if self.level < 3:
-            raise SkipTest
-
         qs = self.model._default_manager.all()
         if self.model is MPTTPlace:
             qs = qs.filter(level=1)
@@ -253,13 +264,16 @@ class GetBranchMixin:
             qs = qs.filter(parent__isnull=False, parent__parent__isnull=True)
         else:
             qs = qs.filter(depth=2)
-        self.obj = qs[qs.count() // 2]
+        try:
+            self.obj = qs[qs.count() // 2]
+        except IndexError:
+            raise SkipTest
 
 
 class GetLeafMixin:
     def setup(self):
         qs = self.model._default_manager.all()
-        qs = (qs.filter(depth=self.level)
+        qs = (qs.annotate(n=Max('depth')).filter(depth=F('n'))
               if self.model in (TreebeardMPPlace, TreebeardNSPlace)
               else qs.filter(children__isnull=True))
         self.obj = qs[qs.count() // 2]
@@ -271,19 +285,19 @@ class GetLeafMixin:
 
 
 @Benchmark.register_test('Get children [root]')
-class TestGetChildren(GetRootMixin, BenchmarkTest):
+class TestGetChildrenRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_children())
 
 
 @Benchmark.register_test('Get children [branch]')
-class TestGetChildren(GetBranchMixin, BenchmarkTest):
+class TestGetChildrenBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_children())
 
 
 @Benchmark.register_test('Get children [leaf]')
-class TestGetChildren(GetLeafMixin, BenchmarkTest):
+class TestGetChildrenLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_children())
 
@@ -295,7 +309,7 @@ class TestGetChildren(GetLeafMixin, BenchmarkTest):
 
 @Benchmark.register_test('Get children count [root]',
                          (MPTTPlace, TreePlace))
-class TestGetChildrenCount(GetRootMixin, BenchmarkTest):
+class TestGetChildrenCountRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.obj.get_children().count()
 
@@ -303,14 +317,14 @@ class TestGetChildrenCount(GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get children count [root]',
     (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetChildrenCount(GetRootMixin, BenchmarkTest):
+class TestGetChildrenCountRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.obj.get_children_count()
 
 
 @Benchmark.register_test('Get children count [branch]',
                          (MPTTPlace, TreePlace))
-class TestGetChildrenCount(GetBranchMixin, BenchmarkTest):
+class TestGetChildrenCountBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.obj.get_children().count()
 
@@ -318,14 +332,14 @@ class TestGetChildrenCount(GetBranchMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get children count [branch]',
     (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetChildrenCount(GetBranchMixin, BenchmarkTest):
+class TestGetChildrenCountBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.obj.get_children_count()
 
 
 @Benchmark.register_test('Get children count [leaf]',
                          (MPTTPlace, TreePlace))
-class TestGetChildrenCount(GetLeafMixin, BenchmarkTest):
+class TestGetChildrenCountLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.obj.get_children().count()
 
@@ -333,9 +347,32 @@ class TestGetChildrenCount(GetLeafMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get children count [leaf]',
     (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetChildrenCount(GetLeafMixin, BenchmarkTest):
+class TestGetChildrenCounteaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.obj.get_children_count()
+
+
+#
+# Filtered children count
+#
+
+
+@Benchmark.register_test('Get filtered children count [root]')
+class TestGetFilteredChildrenCountRoot(GetRootMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_children().filter(pk__contains='1').count()
+
+
+@Benchmark.register_test('Get filtered children count [branch]')
+class TestGetFilteredChildrenCountBranch(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_children().filter(pk__contains='1').count()
+
+
+@Benchmark.register_test('Get filtered children count [leaf]')
+class TestGetFilteredChildrenCountLeaf(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        self.obj.get_children().filter(pk__contains='1').count()
 
 
 #
@@ -344,19 +381,19 @@ class TestGetChildrenCount(GetLeafMixin, BenchmarkTest):
 
 
 @Benchmark.register_test('Get ancestors [root]')
-class TestGetAncestors(GetRootMixin, BenchmarkTest):
+class TestGetAncestorsRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_ancestors())
 
 
 @Benchmark.register_test('Get ancestors [branch]',)
-class TestGetAncestors(GetBranchMixin, BenchmarkTest):
+class TestGetAncestorsBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_ancestors())
 
 
 @Benchmark.register_test('Get ancestors [leaf]')
-class TestGetAncestors(GetLeafMixin, BenchmarkTest):
+class TestGetAncestorsLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_ancestors())
 
@@ -367,19 +404,19 @@ class TestGetAncestors(GetLeafMixin, BenchmarkTest):
 
 
 @Benchmark.register_test('Get descendants [root]')
-class TestGetDescendants(GetRootMixin, BenchmarkTest):
+class TestGetDescendantsRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_descendants())
 
 
 @Benchmark.register_test('Get descendants [branch]')
-class TestGetDescendants(GetBranchMixin, BenchmarkTest):
+class TestGetDescendantsBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_descendants())
 
 
 @Benchmark.register_test('Get descendants [leaf]')
-class TestGetDescendants(GetLeafMixin, BenchmarkTest):
+class TestGetDescendantsLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_descendants())
 
@@ -390,7 +427,7 @@ class TestGetDescendants(GetLeafMixin, BenchmarkTest):
 
 
 @Benchmark.register_test('Get descendants count [root]', TreePlace)
-class TestGetDescendantsCount(GetRootMixin, BenchmarkTest):
+class TestGetDescendantsCountRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.obj.get_descendants().count()
 
@@ -398,13 +435,13 @@ class TestGetDescendantsCount(GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get descendants count [root]',
     (MPTTPlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetDescendantsCount(GetRootMixin, BenchmarkTest):
+class TestGetDescendantsCountRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.obj.get_descendant_count()
 
 
 @Benchmark.register_test('Get descendants count [branch]', TreePlace)
-class TestGetDescendantsCount(GetBranchMixin, BenchmarkTest):
+class TestGetDescendantsCountBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.obj.get_descendants().count()
 
@@ -412,13 +449,13 @@ class TestGetDescendantsCount(GetBranchMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get descendants count [branch]',
     (MPTTPlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetDescendantsCount(GetBranchMixin, BenchmarkTest):
+class TestGetDescendantsCountBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.obj.get_descendant_count()
 
 
 @Benchmark.register_test('Get descendants count [leaf]', TreePlace)
-class TestGetDescendantsCount(GetLeafMixin, BenchmarkTest):
+class TestGetDescendantsCountLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.obj.get_descendants().count()
 
@@ -426,9 +463,47 @@ class TestGetDescendantsCount(GetLeafMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get descendants count [leaf]',
     (MPTTPlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetDescendantsCount(GetLeafMixin, BenchmarkTest):
+class TestGetDescendantsCountLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.obj.get_descendant_count()
+
+
+#
+# Filtered descendants count
+#
+
+
+@Benchmark.register_test('Get filtered descendants count [root]')
+class TestGetFilteredDescendantsCountRoot(GetRootMixin, BenchmarkTest):
+    def setup(self):
+        if self.model is TreebeardALPlace:
+            raise SkipTest
+        super(TestGetFilteredDescendantsCountRoot, self).setup()
+
+    def run(self):
+        self.obj.get_descendants().filter(pk__contains='1').count()
+
+
+@Benchmark.register_test('Get filtered descendants count [branch]')
+class TestGetFilteredDescendantsCountBranch(GetBranchMixin, BenchmarkTest):
+    def setup(self):
+        if self.model is TreebeardALPlace:
+            raise SkipTest
+        super(TestGetFilteredDescendantsCountBranch, self).setup()
+
+    def run(self):
+        self.obj.get_descendants().filter(pk__contains='1').count()
+
+
+@Benchmark.register_test('Get filtered descendants count [leaf]')
+class TestGetFilteredDescendantsCountLeaf(GetLeafMixin, BenchmarkTest):
+    def setup(self):
+        if self.model is TreebeardALPlace:
+            raise SkipTest
+        super(TestGetFilteredDescendantsCountLeaf, self).setup()
+
+    def run(self):
+        self.obj.get_descendants().filter(pk__contains='1').count()
 
 
 #
@@ -437,7 +512,7 @@ class TestGetDescendantsCount(GetLeafMixin, BenchmarkTest):
 
 
 @Benchmark.register_test('Get siblings [root]', (MPTTPlace, TreePlace))
-class TestGetSiblings(GetRootMixin, BenchmarkTest):
+class TestGetSiblingsRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_siblings(include_self=True))
 
@@ -445,13 +520,13 @@ class TestGetSiblings(GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get siblings [root]',
     (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetSiblings(GetRootMixin, BenchmarkTest):
+class TestGetSiblingsRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_siblings())
 
 
 @Benchmark.register_test('Get siblings [branch]', (MPTTPlace, TreePlace))
-class TestGetSiblings(GetBranchMixin, BenchmarkTest):
+class TestGetSiblingsBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_siblings(include_self=True))
 
@@ -459,13 +534,13 @@ class TestGetSiblings(GetBranchMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get siblings [branch]',
     (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetSiblings(GetBranchMixin, BenchmarkTest):
+class TestGetSiblingsBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_siblings())
 
 
 @Benchmark.register_test('Get siblings [leaf]', (MPTTPlace, TreePlace))
-class TestGetSiblings(GetLeafMixin, BenchmarkTest):
+class TestGetSiblingsLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_siblings(include_self=True))
 
@@ -473,7 +548,7 @@ class TestGetSiblings(GetLeafMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get siblings [leaf]',
     (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetSiblings(GetLeafMixin, BenchmarkTest):
+class TestGetSiblingsLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         list(self.obj.get_siblings())
 
@@ -484,7 +559,7 @@ class TestGetSiblings(GetLeafMixin, BenchmarkTest):
 
 
 @Benchmark.register_test('Get previous sibling [root]', MPTTPlace)
-class TestGetPrevSibling(GetRootMixin, BenchmarkTest):
+class TestGetPrevSiblingRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.obj.get_previous_sibling()
 
@@ -492,13 +567,13 @@ class TestGetPrevSibling(GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get previous sibling [root]',
     (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetPrevSibling(GetRootMixin, BenchmarkTest):
+class TestGetPrevSiblingRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.obj.get_prev_sibling()
 
 
 @Benchmark.register_test('Get previous sibling [branch]', MPTTPlace)
-class TestGetPrevSibling(GetBranchMixin, BenchmarkTest):
+class TestGetPrevSiblingBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.obj.get_previous_sibling()
 
@@ -506,13 +581,13 @@ class TestGetPrevSibling(GetBranchMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get previous sibling [branch]',
     (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetPrevSibling(GetBranchMixin, BenchmarkTest):
+class TestGetPrevSiblingBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.obj.get_prev_sibling()
 
 
 @Benchmark.register_test('Get previous sibling [leaf]', MPTTPlace)
-class TestGetPrevSibling(GetLeafMixin, BenchmarkTest):
+class TestGetPrevSiblingLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.obj.get_previous_sibling()
 
@@ -520,7 +595,7 @@ class TestGetPrevSibling(GetLeafMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Get previous sibling [leaf]',
     (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
-class TestGetPrevSibling(GetLeafMixin, BenchmarkTest):
+class TestGetPrevSiblingLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.obj.get_prev_sibling()
 
@@ -531,19 +606,19 @@ class TestGetPrevSibling(GetLeafMixin, BenchmarkTest):
 
 
 @Benchmark.register_test('Get next sibling [root]')
-class TestGetNextSibling(GetRootMixin, BenchmarkTest):
+class TestGetNextSiblingRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.obj.get_next_sibling()
 
 
 @Benchmark.register_test('Get next sibling [branch]')
-class TestGetNextSibling(GetBranchMixin, BenchmarkTest):
+class TestGetNextSiblingBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.obj.get_next_sibling()
 
 
 @Benchmark.register_test('Get next sibling [leaf]')
-class TestGetNextSibling(GetLeafMixin, BenchmarkTest):
+class TestGetNextSiblingLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.obj.get_next_sibling()
 
@@ -560,7 +635,7 @@ class TestGetRoots(BenchmarkTest):
 
 
 @Benchmark.register_test('Get roots', TreePlace)
-class TestGetSiblings(BenchmarkTest):
+class TestGetRoots(BenchmarkTest):
     def run(self):
         list(self.model.get_roots())
 
@@ -570,3 +645,57 @@ class TestGetSiblings(BenchmarkTest):
 class TestGetRoots(BenchmarkTest):
     def run(self):
         list(self.model.get_root_nodes())
+
+
+#
+# Rebuild
+#
+
+
+@Benchmark.register_test('Rebuild paths', MPTTPlace, y_label=WRITE_LATENCY)
+class TestRebuildPaths(BenchmarkTest):
+    def run(self):
+        self.model._default_manager.rebuild()
+
+
+@Benchmark.register_test('Rebuild paths', TreePlace, y_label=WRITE_LATENCY)
+class TestRebuildPaths(BenchmarkTest):
+    def run(self):
+        self.model.rebuild_paths()
+
+
+@Benchmark.register_test('Rebuild paths', (TreebeardALPlace, TreebeardNSPlace),
+                         y_label=WRITE_LATENCY)
+class TestRebuildPaths(BenchmarkTest):
+    def setup(self):
+        raise SkipTest
+
+
+@Benchmark.register_test('Rebuild paths', TreebeardMPPlace,
+                         y_label=WRITE_LATENCY)
+class TestRebuildPaths(BenchmarkTest):
+    def run(self):
+        self.model.fix_tree()
+
+
+#
+# Delete
+#
+
+
+@Benchmark.register_test('Delete [root]', y_label=WRITE_LATENCY)
+class TestDeleteBranch(GetRootMixin, BenchmarkTest):
+    def run(self):
+        self.obj.delete()
+
+
+@Benchmark.register_test('Delete [branch]', y_label=WRITE_LATENCY)
+class TestDeleteBranch(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        self.obj.delete()
+
+
+@Benchmark.register_test('Delete [leaf]', y_label=WRITE_LATENCY)
+class TestDeleteLeaf(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        self.obj.delete()
