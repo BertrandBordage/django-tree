@@ -27,23 +27,20 @@ CREATE_FUNCTIONS_QUERIES = (
     """
     CREATE OR REPLACE FUNCTION update_paths() RETURNS trigger AS $$
     DECLARE
-        table_name text := TG_ARGV[0];
-        pk text := TG_ARGV[1];
-        parent text := TG_ARGV[2];
-        path text := TG_ARGV[3];
-        order_by text[] := TG_ARGV[4];
-        max_siblings int := TG_ARGV[5];
-        label_size int := TG_ARGV[6];
-        current_path ltree;
+        table_name text := TG_TABLE_NAME;
+        pk text := TG_ARGV[0];
+        parent text := TG_ARGV[1];
+        path text := TG_ARGV[2];
+        order_by text[] := TG_ARGV[3];
+        max_siblings int := TG_ARGV[4];
+        label_size int := TG_ARGV[5];
+        current_path ltree := NULL;
         parent_path ltree;
         new_path ltree;
         n_siblings integer;
     BEGIN
-        EXECUTE format('SELECT $1.%I', path) INTO current_path USING NEW;
-        IF current_path IS NULL THEN
-            EXECUTE format('
-                SELECT %1$I FROM %2$I WHERE %3$I = $1.%3$I
-            ', path, table_name, pk) INTO current_path USING NEW;
+        IF TG_OP = 'UPDATE' THEN
+            EXECUTE format('SELECT $1.%I', path) INTO current_path USING OLD;
         END IF;
         EXECUTE format('
             SELECT %1$I FROM %2$I WHERE %3$I = $1.%4$I
@@ -75,7 +72,7 @@ CREATE_FUNCTIONS_QUERIES = (
                                     ELSE %5$I = $2.%5$I END)
                                 AND (CASE
                                     WHEN $2.%1$I IS NULL
-                                        THEN %1$I IS NOT NULL
+                                        THEN TRUE
                                     ELSE %1$I != $2.%1$I END)
                         ) UNION ALL (
                             SELECT $2.*
@@ -162,7 +159,7 @@ CREATE_TRIGGER_QUERIES = (
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
     EXECUTE PROCEDURE update_paths(
-        "{table}", "{pk}", "{parent}", "{path}", '{{{order_by}}}',
+        "{pk}", "{parent}", "{path}", '{{{order_by}}}',
         {max_siblings}, {label_size});
     """,
     """
@@ -189,7 +186,7 @@ CREATE_TRIGGER_QUERIES = (
 DROP_TRIGGER_QUERIES = (
     # TODO: Find a way to delete this deferrable unique constraint
     #       somewhere else.
-    'ALTER TABLE "{table}" DROP CONSTRAINT "{table}_{path}_unique";'
+    'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{table}_{path}_unique";'
     'DROP TRIGGER IF EXISTS "update_{path}" ON "{table}";',
     'DROP FUNCTION IF EXISTS rebuild_{table}_{path}();',
 )
