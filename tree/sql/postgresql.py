@@ -35,24 +35,45 @@ CREATE_FUNCTIONS_QUERIES = (
         order_by text[] := TG_ARGV[3];
         max_siblings int := TG_ARGV[4];
         label_size int := TG_ARGV[5];
-        current_path ltree := NULL;
-        parent_path ltree;
+        old_path ltree := NULL;
         new_path ltree;
+        parent_path ltree;
+        parent_changed boolean;
         n_siblings integer;
     BEGIN
-        IF TG_OP = 'UPDATE' THEN
-            EXECUTE format('SELECT $1.%I', path) INTO current_path USING OLD;
+        IF TG_OP = 'INSERT' THEN
+            parent_changed := TRUE;
+        ELSIF TG_OP = 'UPDATE' THEN
+            EXECUTE format('SELECT COALESCE($1.%1$I != $2.%1$I, TRUE)', parent)
+            INTO parent_changed USING OLD, NEW;
+        ELSE
+            parent_changed := FALSE;
         END IF;
-        EXECUTE format('
-            SELECT %1$I FROM %2$I WHERE %3$I = $1.%4$I
-        ', path, table_name, pk, parent) INTO parent_path USING NEW;
-        IF parent_path IS NULL THEN
-            parent_path := ''::ltree;
+        IF parent_changed THEN
+            EXECUTE format('
+                SELECT COUNT(*) FROM %1$I
+                WHERE COALESCE(%2$I = $1.%2$I, %2$I IS NULL)
+            ', table_name, parent) INTO n_siblings USING NEW;
+            IF n_siblings = max_siblings THEN
+                RAISE '`max_siblings` (%) has been reached.\n'
+                    'You should increase it then rebuild.', max_siblings;
+            END IF;
         END IF;
 
-        -- TODO: Add this behaviour to the model validation.
-        IF parent_path <@ current_path THEN
-            RAISE 'Cannot set itself or a descendant as parent.';
+        IF TG_OP != 'DELETE' THEN
+            EXECUTE format('
+                SELECT %1$I FROM %2$I WHERE %3$I = $1.%4$I
+            ', path, table_name, pk, parent) INTO parent_path USING NEW;
+            IF parent_path IS NULL THEN
+                parent_path := ''::ltree;
+            END IF;
+        END IF;
+        IF TG_OP = 'UPDATE' THEN
+            EXECUTE format('SELECT $1.%I', path) INTO old_path USING OLD;
+            -- TODO: Add this behaviour to the model validation.
+            IF parent_path <@ old_path THEN
+                RAISE 'Cannot set itself or a descendant as parent.';
+            END IF;
         END IF;
 
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
@@ -70,7 +91,7 @@ CREATE_FUNCTIONS_QUERIES = (
                                     WHEN $2.%5$I IS NULL
                                         THEN %5$I IS NULL
                                     ELSE %5$I = $2.%5$I END)
-                                AND %1$I != COALESCE($2.%1$I, -1)
+                                AND COALESCE(%1$I != $2.%1$I, TRUE)
                         ) UNION ALL (
                             SELECT $2.*
                         )
@@ -90,11 +111,8 @@ CREATE_FUNCTIONS_QUERIES = (
                 WHERE t2.%1$I = t1.pk AND t2.%1$I != $2.%1$I
                     AND (t2.%7$I IS NULL OR t2.%7$I != t1.path)
             )
-            SELECT path, (SELECT COUNT(*) FROM generate_paths)
-            FROM generate_paths
-            WHERE (
-                CASE WHEN $2.%1$I IS NULL THEN pk IS NULL
-                ELSE pk = $2.%1$I END)
+            SELECT path FROM generate_paths
+            WHERE COALESCE(pk = $2.%1$I, pk IS NULL)
         ',
             pk,
             array_to_string(order_by, ','),
@@ -103,19 +121,12 @@ CREATE_FUNCTIONS_QUERIES = (
             parent,
             't2.' || array_to_string(order_by, ',t2.'),
             path)
-        INTO new_path, n_siblings
-        USING parent_path, NEW;
+        INTO new_path USING parent_path, NEW;
         -- FIXME: `json_populate_record` is not available in PostgreSQL < 9.3.
         EXECUTE format('
             SELECT *
             FROM json_populate_record($1, ''{"%s": "%s"}''::json)
         ', path, new_path) INTO NEW USING NEW;
-
-        IF n_siblings > max_siblings THEN
-            RAISE '`max_siblings` (%) has been reached.\n'
-                'You should increase it then rebuild.', max_siblings;
-        END IF;
-
         RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;

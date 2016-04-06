@@ -1,6 +1,8 @@
 # coding: utf-8
 
 from __future__ import unicode_literals
+from unittest import expectedFailure
+
 from django.db import transaction, InternalError
 from django.test import TransactionTestCase
 
@@ -102,6 +104,143 @@ class PathTest(TransactionTestCase):
             ('01.00', 'Vienne'), ('01.00.00', 'Poitiers')])
         next(it)
         self.assertPlaces(self.correct_places_data)
+
+    # TODO: Fix the unique constraint order.
+    @expectedFailure
+    def test_move_root_to_prev_root(self):
+        list(self.create_test_places())
+
+        osterreich = Place.objects.get(name='Österreich')
+        osterreich.name = 'Autriche'
+        osterreich.save()
+        self.assertPlaces([
+            ('00', 'Autriche'), ('01', 'France'),
+            ('01.00', 'Normandie'), ('01.00.00', 'Eure'),
+            ('01.00.01', 'Manche'), ('01.00.02', 'Seine-Maritime'),
+            ('01.01', 'Poitou-Charentes'), ('01.01.00', 'Vienne'),
+            ('01.01.00.00', 'Poitiers')])
+
+    # TODO: Fix the unique constraint order.
+    @expectedFailure
+    def test_move_root_to_next_root(self):
+        list(self.create_test_places())
+
+        france = Place.objects.get(name='France')
+        france.name = 'République française'
+        france.save()
+        self.assertPlaces([
+            ('00', 'Österreich'), ('01', 'République française'),
+            ('01.00', 'Normandie'), ('01.00.00', 'Eure'),
+            ('01.00.01', 'Manche'), ('01.00.02', 'Seine-Maritime'),
+            ('01.01', 'Poitou-Charentes'), ('01.01.00', 'Vienne'),
+            ('01.01.00.00', 'Poitiers')])
+
+    # TODO: Remove holes after moving an object to another parent
+    #       or after deleting it.
+    @expectedFailure
+    def test_move_root_to_prev_branch(self):
+        list(self.create_test_places())
+
+        little_france = Place.objects.create(name='Île-de-France')
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Normandie'),
+            ('00.00.00', 'Eure'),
+            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
+            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
+            ('00.01.00.00', 'Poitiers'), ('01', 'Île-de-France'),
+            ('02', 'Österreich')])
+
+        little_france.parent = Place.objects.get(name='France')
+        little_france.save()
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Île-de-France'),
+            ('00.01', 'Normandie'), ('00.01.00', 'Eure'),
+            ('00.01.01', 'Manche'), ('00.01.02', 'Seine-Maritime'),
+            ('00.02', 'Poitou-Charentes'), ('00.02.00', 'Vienne'),
+            ('00.02.00.00', 'Poitiers'), ('01', 'Österreich')])
+
+    # TODO: Remove holes after moving an object to another parent
+    #       or after deleting it.
+    @expectedFailure
+    def test_move_root_to_next_branch(self):
+        list(self.create_test_places())
+
+        bretagne = Place.objects.create(name='Bretagne')
+        self.assertPlaces([
+            ('00', 'Bretagne'),
+            ('01', 'France'), ('01.00', 'Normandie'),
+            ('01.00.00', 'Eure'),
+            ('01.00.01', 'Manche'), ('01.00.02', 'Seine-Maritime'),
+            ('01.01', 'Poitou-Charentes'), ('01.01.00', 'Vienne'),
+            ('01.01.00.00', 'Poitiers'), ('02', 'Österreich')])
+
+        bretagne.parent = Place.objects.get(name='France')
+        bretagne.save()
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Bretagne'), ('00.01', 'Normandie'),
+            ('00.01.00', 'Eure'),
+            ('00.01.01', 'Manche'), ('00.01.02', 'Seine-Maritime'),
+            ('00.02', 'Poitou-Charentes'), ('00.02.00', 'Vienne'),
+            ('00.02.00.00', 'Poitiers'), ('01', 'Österreich')])
+
+    # TODO: Remove holes after moving an object to another parent
+    #       or after deleting it.
+    @expectedFailure
+    def test_move_root_to_prev_leaf(self):
+        list(self.create_test_places())
+
+        grattenoix = Place.objects.create(name='Grattenoix')
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
+            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
+            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
+            ('00.01.00.00', 'Poitiers'), ('01', 'Grattenoix'),
+            ('02', 'Österreich')])
+
+        grattenoix.parent = Place.objects.get(name='Seine-Maritime')
+        grattenoix.save()
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
+            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
+            ('00.00.02.00', 'Grattenoix'), ('00.01', 'Poitou-Charentes'),
+            ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
+            ('01', 'Österreich')])
+
+    # TODO: Remove holes after moving an object to another parent
+    #       or after deleting it.
+    @expectedFailure
+    def test_move_root_to_next_leaf(self):
+        list(self.create_test_places())
+
+        evreux = Place.objects.create(name='Évreux')
+        self.assertPlaces([
+            ('00', 'Évreux'), ('01', 'France'), ('01.00', 'Normandie'),
+            ('01.00.00', 'Eure'), ('01.00.01', 'Manche'),
+            ('01.00.02', 'Seine-Maritime'), ('01.01', 'Poitou-Charentes'),
+            ('01.01.00', 'Vienne'), ('01.01.00.00', 'Poitiers'),
+            ('02', 'Österreich')])
+
+        evreux.parent = Place.objects.get(name='Eure')
+        evreux.save()
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
+            ('00.00.00.00', 'Évreux'), ('00.00.01', 'Manche'),
+            ('00.00.02', 'Seine-Maritime'), ('00.01', 'Poitou-Charentes'),
+            ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
+            ('01', 'Österreich')])
+
+    # TODO: Add move_branch_to_prev_root.
+    # TODO: Add move_branch_to_next_root.
+    # TODO: Add move_branch_to_prev_branch.
+    # TODO: Add move_branch_to_next_branch.
+    # TODO: Add move_branch_to_prev_leaf.
+    # TODO: Add move_branch_to_next_leaf.
+    # TODO: Add move_leaf_to_prev_root.
+    # TODO: Add move_leaf_to_next_root.
+    # TODO: Add move_leaf_to_prev_branch.
+    # TODO: Add move_leaf_to_next_branch.
+    # TODO: Add move_leaf_to_prev_leaf.
+    # TODO: Add move_leaf_to_next_leaf.
 
     def test_max_siblings(self):
         max_siblings = 108
