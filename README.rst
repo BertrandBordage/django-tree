@@ -227,7 +227,7 @@ Level vs depth
 
 django-mptt and django-treebeard use two different names to designate almost
 the same thing: MPTT uses level and treebeard uses depth.
-Both are integers to show how much distance a node is to the top of the tree.
+Both are integers to show how much distant is a node from the top of the tree.
 The only difference is that level should start by convention with 1 and depth
 should start with 0.
 
