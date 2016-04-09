@@ -1,6 +1,195 @@
+from collections import OrderedDict
+
 from django.db import DEFAULT_DB_ALIAS, connections
 
 from .base import ALPHANUM, ALPHANUM_LEN
+
+
+class Arg:
+    pattern = '%{position}${format_type}'
+    format_types = ('I', 'L', 's')
+
+    def __init__(self, position):
+        self.position = position
+
+    def __format__(self, format_spec):
+        if format_spec and format_spec not in self.format_types:
+            raise ValueError("Unknown format_spec '%s'" % format_spec)
+        if not format_spec and self.format_types:
+            format_spec = self.format_types[0]
+        return self.pattern.format(position=self.position,
+                                   format_type=format_spec)
+
+
+class UsingArg(Arg):
+    pattern = '${position}'
+    format_types = ()
+
+
+class AnyArg(OrderedDict):
+    arg_class = Arg
+
+    def __init__(self, *args, **kwargs):
+        super(AnyArg, self).__init__(*args, **kwargs)
+        self.position = 1
+
+    def __getitem__(self, item):
+        if item not in self:
+            self[item] = self.arg_class(self.position)
+            self.position += 1
+        return super(AnyArg, self).__getitem__(item)
+
+
+class AnyUsingArg(AnyArg):
+    arg_class = UsingArg
+
+
+def format_sql_in_function(sql, into=None):
+    kwargs = AnyArg({'USING': AnyUsingArg()})
+    sql = sql.format(**kwargs).replace("'", "''")
+    using = kwargs.pop('USING')
+    args = ', '.join([k for k in kwargs])
+
+    extra = ''
+    if into is not None:
+        extra += ' INTO ' + ', '.join(into)
+    if using:
+        extra += ' USING ' + ', '.join([a for a in using])
+
+    return "EXECUTE format('%s', %s)%s;" % (sql, args, extra)
+
+
+UPDATE_PATHS_FUNCTION = """
+    CREATE OR REPLACE FUNCTION update_paths() RETURNS trigger AS $$
+    DECLARE
+        table_name text := TG_TABLE_NAME;
+        pk text := TG_ARGV[0];
+        parent text := TG_ARGV[1];
+        path text := TG_ARGV[2];
+        order_by text[] := TG_ARGV[3];
+        max_siblings int := TG_ARGV[4];
+        label_size int := TG_ARGV[5];
+        order_by_cols text := array_to_string(order_by, ',');
+        order_by_cols2 text := 't2.' || array_to_string(order_by, ',t2.');
+        old_path ltree := NULL;
+        new_path ltree;
+        parent_path ltree;
+        parent_changed boolean;
+        n_siblings integer;
+    BEGIN
+        IF TG_OP = 'INSERT' THEN
+            parent_changed := TRUE;
+        ELSIF TG_OP = 'UPDATE' THEN
+            {}
+        ELSE
+            parent_changed := FALSE;
+        END IF;
+        IF parent_changed THEN
+            {}
+            IF n_siblings = max_siblings THEN
+                RAISE '`max_siblings` (%) has been reached.\n'
+                    'You should increase it then rebuild.', max_siblings;
+            END IF;
+        END IF;
+
+        IF TG_OP != 'DELETE' THEN
+            {}
+            IF parent_path IS NULL THEN
+                parent_path := ''::ltree;
+            END IF;
+        END IF;
+        IF TG_OP = 'UPDATE' THEN
+            {}
+            -- TODO: Add this behaviour to the model validation.
+            IF parent_path <@ old_path THEN
+                RAISE 'Cannot set itself or a descendant as parent.';
+            END IF;
+        END IF;
+
+        {}
+        {}
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    """.format(
+    format_sql_in_function("""
+        SELECT COALESCE({USING[OLD]}.{parent} != {USING[NEW]}.{parent}, TRUE)
+    """, into=['parent_changed']),
+    format_sql_in_function("""
+        SELECT COUNT(*) FROM {table_name}
+        WHERE COALESCE({parent} = {USING[NEW]}.{parent}, {parent} IS NULL)
+    """, into=['n_siblings']),
+    format_sql_in_function("""
+        SELECT {path} FROM {table_name} WHERE {pk} = {USING[NEW]}.{parent}
+    """, into=['parent_path']),
+    format_sql_in_function('SELECT {USING[OLD]}.{path}', into=['old_path']),
+    format_sql_in_function("""
+        -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
+        WITH RECURSIVE generate_paths(pk, path) AS ((
+                SELECT
+                    {pk},
+                    {USING[parent_path]} || to_alphanum(
+                        row_number() OVER (ORDER BY {order_by_cols:s}) - 1,
+                        {label_size:L})
+                FROM ((
+                        SELECT *
+                        FROM {table_name}
+                        WHERE
+                            (CASE
+                                WHEN {USING[NEW]}.{parent} IS NULL
+                                    THEN {parent} IS NULL
+                                ELSE {parent} = {USING[NEW]}.{parent} END)
+                            AND COALESCE({pk} != {USING[NEW]}.{pk}, TRUE)
+                    ) UNION ALL (
+                        SELECT {USING[NEW]}.*
+                    )
+                ) AS t
+            ) UNION ALL (
+                SELECT
+                    t2.{pk},
+                    t1.path || to_alphanum(
+                        row_number() OVER (PARTITION BY t1.pk
+                                           ORDER BY {order_by_cols2:s}) - 1,
+                        {label_size:L})
+                FROM generate_paths AS t1
+                INNER JOIN {table_name} AS t2 ON t2.{parent} = t1.pk
+            )
+        ), updated AS (
+            UPDATE {table_name} AS t2 SET {path} = t1.path::ltree
+            FROM generate_paths AS t1
+            WHERE t2.{pk} = t1.pk AND t2.{pk} != {USING[NEW]}.{pk}
+                AND (t2.{path} IS NULL OR t2.{path} != t1.path)
+        )
+        SELECT path FROM generate_paths
+        WHERE COALESCE(pk = {USING[NEW]}.{pk}, pk IS NULL)
+    """, into=['new_path']),
+    format_sql_in_function("""
+        -- FIXME: `json_populate_record` is not available in PostgreSQL < 9.3.
+        SELECT *
+        FROM json_populate_record({USING[NEW]},
+                                  '{{"{path:s}": "{new_path:s}"}}'::json)
+    """, into=['NEW']),
+)
+
+
+REBUILD_PATHS_FUNCTION = """
+    CREATE OR REPLACE FUNCTION rebuild_paths(
+        table_name text, pk text, parent text, path text) RETURNS void AS $$
+    BEGIN
+        {}
+    END;
+    $$ LANGUAGE plpgsql;
+    """.format(
+    format_sql_in_function("""
+        UPDATE {table_name} SET {path} = {table_name}.{path} FROM (
+            SELECT * FROM {table_name}
+            WHERE {parent} IS NULL
+            LIMIT 1
+            FOR UPDATE
+        ) AS t
+        WHERE {table_name}.{pk} = t.{pk}
+    """),
+)
 
 
 CREATE_FUNCTIONS_QUERIES = (
@@ -25,128 +214,8 @@ CREATE_FUNCTIONS_QUERIES = (
     END;
     $$ LANGUAGE plpgsql;
     """.format(ALPHANUM, ALPHANUM_LEN),
-    """
-    CREATE OR REPLACE FUNCTION update_paths() RETURNS trigger AS $$
-    DECLARE
-        table_name text := TG_TABLE_NAME;
-        pk text := TG_ARGV[0];
-        parent text := TG_ARGV[1];
-        path text := TG_ARGV[2];
-        order_by text[] := TG_ARGV[3];
-        max_siblings int := TG_ARGV[4];
-        label_size int := TG_ARGV[5];
-        old_path ltree := NULL;
-        new_path ltree;
-        parent_path ltree;
-        parent_changed boolean;
-        n_siblings integer;
-    BEGIN
-        IF TG_OP = 'INSERT' THEN
-            parent_changed := TRUE;
-        ELSIF TG_OP = 'UPDATE' THEN
-            EXECUTE format('SELECT COALESCE($1.%1$I != $2.%1$I, TRUE)', parent)
-            INTO parent_changed USING OLD, NEW;
-        ELSE
-            parent_changed := FALSE;
-        END IF;
-        IF parent_changed THEN
-            EXECUTE format('
-                SELECT COUNT(*) FROM %1$I
-                WHERE COALESCE(%2$I = $1.%2$I, %2$I IS NULL)
-            ', table_name, parent) INTO n_siblings USING NEW;
-            IF n_siblings = max_siblings THEN
-                RAISE '`max_siblings` (%) has been reached.\n'
-                    'You should increase it then rebuild.', max_siblings;
-            END IF;
-        END IF;
-
-        IF TG_OP != 'DELETE' THEN
-            EXECUTE format('
-                SELECT %1$I FROM %2$I WHERE %3$I = $1.%4$I
-            ', path, table_name, pk, parent) INTO parent_path USING NEW;
-            IF parent_path IS NULL THEN
-                parent_path := ''::ltree;
-            END IF;
-        END IF;
-        IF TG_OP = 'UPDATE' THEN
-            EXECUTE format('SELECT $1.%I', path) INTO old_path USING OLD;
-            -- TODO: Add this behaviour to the model validation.
-            IF parent_path <@ old_path THEN
-                RAISE 'Cannot set itself or a descendant as parent.';
-            END IF;
-        END IF;
-
-        -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
-        EXECUTE format('
-            WITH RECURSIVE generate_paths(pk, path) AS ((
-                    SELECT
-                        %1$I,
-                        $1 || to_alphanum(
-                            row_number() OVER (ORDER BY %2$s) - 1, %3$L)
-                    FROM ((
-                            SELECT *
-                            FROM %4$I
-                            WHERE
-                                (CASE
-                                    WHEN $2.%5$I IS NULL
-                                        THEN %5$I IS NULL
-                                    ELSE %5$I = $2.%5$I END)
-                                AND COALESCE(%1$I != $2.%1$I, TRUE)
-                        ) UNION ALL (
-                            SELECT $2.*
-                        )
-                    ) AS t
-                ) UNION ALL (
-                    SELECT
-                        t2.%1$I,
-                        t1.path || to_alphanum(
-                            row_number() OVER (PARTITION BY t1.pk
-                                               ORDER BY %6$s) - 1, %3$L)
-                    FROM generate_paths AS t1
-                    INNER JOIN %4$I AS t2 ON t2.%5$I = t1.pk
-                )
-            ), updated AS (
-                UPDATE %4$I AS t2 SET %7$I = t1.path::ltree
-                FROM generate_paths AS t1
-                WHERE t2.%1$I = t1.pk AND t2.%1$I != $2.%1$I
-                    AND (t2.%7$I IS NULL OR t2.%7$I != t1.path)
-            )
-            SELECT path FROM generate_paths
-            WHERE COALESCE(pk = $2.%1$I, pk IS NULL)
-        ',
-            pk,
-            array_to_string(order_by, ','),
-            label_size,
-            table_name,
-            parent,
-            't2.' || array_to_string(order_by, ',t2.'),
-            path)
-        INTO new_path USING parent_path, NEW;
-        -- FIXME: `json_populate_record` is not available in PostgreSQL < 9.3.
-        EXECUTE format('
-            SELECT *
-            FROM json_populate_record($1, ''{"%s": "%s"}''::json)
-        ', path, new_path) INTO NEW USING NEW;
-        RETURN NEW;
-    END;
-    $$ LANGUAGE plpgsql;
-    """,
-    """
-    CREATE OR REPLACE FUNCTION rebuild_paths(
-        table_name text, pk text, parent text, path text) RETURNS void AS $$
-    BEGIN
-        EXECUTE format('
-            UPDATE %1$I SET %4$I = %1$I.%4$I FROM (
-                SELECT * FROM %1$I
-                WHERE %3$I IS NULL
-                LIMIT 1
-                FOR UPDATE
-            ) AS t
-            WHERE %1$I.%2$I = t.%2$I
-        ', table_name, pk, parent, path);
-    END;
-    $$ LANGUAGE plpgsql;
-    """,
+    UPDATE_PATHS_FUNCTION,
+    REBUILD_PATHS_FUNCTION,
 )
 # We escape the modulo operator '%' otherwise Django considers it
 # as a placeholder for a parameter.
