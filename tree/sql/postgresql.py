@@ -73,16 +73,19 @@ UPDATE_PATHS_FUNCTION = """
         order_by_cols2 text := 't2.' || array_to_string(order_by, ',t2.');
         old_path ltree := NULL;
         new_path ltree;
-        parent_path ltree;
+        new_parent_path ltree;
         parent_changed boolean;
         n_siblings integer;
     BEGIN
+        IF TG_OP = 'DELETE' THEN
+            {}
+            RETURN OLD;
+        END IF;
+
         IF TG_OP = 'INSERT' THEN
             parent_changed := TRUE;
-        ELSIF TG_OP = 'UPDATE' THEN
-            {}
         ELSE
-            parent_changed := FALSE;
+            {}
         END IF;
         IF parent_changed THEN
             {}
@@ -92,16 +95,15 @@ UPDATE_PATHS_FUNCTION = """
             END IF;
         END IF;
 
-        IF TG_OP != 'DELETE' THEN
-            {}
-            IF parent_path IS NULL THEN
-                parent_path := ''::ltree;
-            END IF;
+        {}
+        IF new_parent_path IS NULL THEN
+            new_parent_path := ''::ltree;
         END IF;
+
         IF TG_OP = 'UPDATE' THEN
             {}
             -- TODO: Add this behaviour to the model validation.
-            IF parent_path <@ old_path THEN
+            IF new_parent_path <@ old_path THEN
                 RAISE 'Cannot set itself or a descendant as parent.';
             END IF;
         END IF;
@@ -113,6 +115,24 @@ UPDATE_PATHS_FUNCTION = """
     $$ LANGUAGE plpgsql;
     """.format(
     format_sql_in_function("""
+        UPDATE {table_name} AS t2 SET {path} = t1.path::ltree
+        FROM (
+            SELECT
+                {pk},
+                {USING[new_parent_path]} || to_alphanum(
+                    row_number() OVER (ORDER BY {order_by_cols:s}) - 1,
+                    {label_size:L})
+            FROM {table_name}
+            WHERE
+                (CASE
+                    WHEN {USING[OLD]}.{parent} IS NULL
+                        THEN {parent} IS NULL
+                    ELSE {parent} = {USING[OLD]}.{parent} END)
+                AND {pk} != {USING[OLD]}.{pk}
+        ) AS t1
+        WHERE t2.{pk} = t1.pk AND (t2.{path} IS NULL OR t2.{path} != t1.path)
+    """),
+    format_sql_in_function("""
         SELECT COALESCE({USING[OLD]}.{parent} != {USING[NEW]}.{parent}, TRUE)
     """, into=['parent_changed']),
     format_sql_in_function("""
@@ -121,14 +141,14 @@ UPDATE_PATHS_FUNCTION = """
     """, into=['n_siblings']),
     format_sql_in_function("""
         SELECT {path} FROM {table_name} WHERE {pk} = {USING[NEW]}.{parent}
-    """, into=['parent_path']),
+    """, into=['new_parent_path']),
     format_sql_in_function('SELECT {USING[OLD]}.{path}', into=['old_path']),
     format_sql_in_function("""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
                 SELECT
                     {pk},
-                    {USING[parent_path]} || to_alphanum(
+                    {USING[new_parent_path]} || to_alphanum(
                         row_number() OVER (ORDER BY {order_by_cols:s}) - 1,
                         {label_size:L})
                 FROM ((
@@ -236,7 +256,7 @@ DROP_FUNCTIONS_QUERIES = (
 CREATE_TRIGGER_QUERIES = (
     """
     CREATE TRIGGER "update_{path}"
-    BEFORE INSERT OR UPDATE OF {update_columns}
+    BEFORE INSERT OR UPDATE OF {update_columns} OR DELETE
     ON "{table}"
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
