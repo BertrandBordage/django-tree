@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from string import Formatter
 
 from django.db import DEFAULT_DB_ALIAS, connections
 
@@ -46,7 +47,8 @@ class AnyUsingArg(AnyArg):
 
 def format_sql_in_function(sql, into=None):
     kwargs = AnyArg({'USING': AnyUsingArg()})
-    sql = sql.format(**kwargs).replace("'", "''")
+    # TODO: Replace Formatter with sql.format(**kwargs) when dropping Python 2.
+    sql = Formatter().vformat(sql, (), kwargs).replace("'", "''")
     using = kwargs.pop('USING')
     args = ', '.join([k for k in kwargs])
 
