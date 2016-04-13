@@ -175,6 +175,7 @@ UPDATE_PATHS_FUNCTION = """
         WHERE pk = {USING[OLD]}.{pk}
     """, into=['new_path']),
     update_old_siblings=format_sql_in_function("""
+        -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, old_path, new_path) AS ((
                 SELECT
                     {pk},
@@ -192,11 +193,12 @@ UPDATE_PATHS_FUNCTION = """
                 SELECT
                     t2.{pk},
                     t2.{path},
-                    t1.new_path || subpath(t2.path, nlevel(t1.new_path))
+                    t1.new_path || subpath(t2.{path}, nlevel(t1.new_path))
                 FROM generate_paths AS t1
                 INNER JOIN {table_name} AS t2
                 ON t2.{path} ~ (ltree2text(t1.old_path) || '.*{{1,}}')::lquery
                 WHERE t1.old_path != t1.new_path
+                    AND t1.old_path > {USING[old_path]}
             ))
         UPDATE {table_name} AS t2 SET {path} = t1.new_path
         FROM generate_paths AS t1
