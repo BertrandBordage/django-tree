@@ -29,6 +29,8 @@ from .models import Place
 
 
 class PathTest(TransactionTestCase):
+    maxDiff = 1000
+
     def create_place(self, name, parent=None, n_queries=1):
         with self.assertNumQueries(n_queries):
             return Place.objects.create(name=name, parent=parent)
@@ -581,12 +583,12 @@ class PathTest(TransactionTestCase):
 
         # Root
         france = Place.objects.get(name='France')
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(0):
             self.assertEqual(france.get_prev_sibling(), None)
 
         # Branch
         normandie = Place.objects.get(name='Normandie')
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(0):
             self.assertEqual(normandie.get_prev_sibling(), None)
 
         # Leaf

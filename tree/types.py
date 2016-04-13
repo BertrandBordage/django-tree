@@ -124,10 +124,37 @@ class Path:
                 .order_by(self.attname))
 
     def get_prev_sibling(self):
-        return self.get_prev_siblings().first()
+        if self.value is None:
+            return None
+        if self.is_root():
+            parent_path = ''
+            current_label = self.value
+        else:
+            parent_path, current_label = self.value.rsplit('.', 1)
+        if not current_label.lstrip('0'):
+            return
+        size = len(current_label)
+        qs = self.qs.extra(
+            where=[self.attname + ' = %s::ltree '
+                   '|| to_alphanum(from_alphanum(%s)-1, %s::smallint)'],
+            params=(parent_path, current_label, size))
+        return qs.get()
 
     def get_next_sibling(self):
-        return self.get_next_siblings().first()
+        if self.value is None:
+            return None
+        if self.is_root():
+            parent_path = ''
+            current_label = self.value
+        else:
+            parent_path, current_label = self.value.rsplit('.', 1)
+        size = len(current_label)
+        qs = self.qs.extra(
+            where=[self.attname + ' = %s::ltree '
+                   '|| to_alphanum(from_alphanum(%s)+1, %s::smallint)'],
+            params=(parent_path, current_label, size),
+        )
+        return qs.first()
 
     def get_level(self):
         if self.value is not None:

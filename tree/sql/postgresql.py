@@ -263,8 +263,8 @@ UPDATE_PATHS_FUNCTION = """
         )
         SELECT path FROM generate_paths
         WHERE (CASE
-            WHEN {USING[NEW]}.{pk}
-                IS NULL THEN pk IS NULL
+            WHEN {USING[NEW]}.{pk} IS NULL
+                THEN pk IS NULL
             ELSE pk = {USING[NEW]}.{pk} END)
     """, into=['new_path']),
     set_new_path=format_sql_in_function("""
@@ -318,6 +318,26 @@ CREATE_FUNCTIONS_QUERIES = (
     END;
     $$ LANGUAGE plpgsql;
     """.format(ALPHANUM, ALPHANUM_LEN),
+    """
+    CREATE OR REPLACE FUNCTION from_alphanum(label text) RETURNS bigint AS $$
+    DECLARE
+        ALPHANUM text := '{}';
+        ALPHANUM_LEN int := {};
+        i int := 0;
+        size smallint := length(label);
+        out bigint := 0;
+    BEGIN
+        LOOP
+            out := out * ALPHANUM_LEN
+                   + position(substring(label from i for 1) in ALPHANUM) - 1;
+            IF i = size THEN
+                RETURN out;
+            END IF;
+            i := i + 1;
+        END LOOP;
+    END;
+    $$ LANGUAGE plpgsql;
+    """.format(ALPHANUM, ALPHANUM_LEN),
     UPDATE_PATHS_FUNCTION,
     REBUILD_PATHS_FUNCTION,
 )
@@ -333,7 +353,8 @@ DROP_FUNCTIONS_QUERIES = (
                                           parent text, path text);
     """,
     'DROP FUNCTION IF EXISTS update_paths();',
-    'DROP FUNCTION IF EXISTS to_alphanum(i bigint);',
+    'DROP FUNCTION IF EXISTS from_alphanum(label text);',
+    'DROP FUNCTION IF EXISTS to_alphanum(i bigint, size smallint);',
     'DROP EXTENSION IF EXISTS ltree;',
 )
 
