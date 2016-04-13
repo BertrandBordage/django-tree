@@ -181,14 +181,14 @@ UPDATE_PATHS_FUNCTION = """
                     {pk},
                     {path},
                     {USING[old_parent_path]} || to_alphanum(
-                        row_number() OVER (ORDER BY {order_by_cols:s}) - 1,
+                        from_alphanum(ltree2text(subpath({path}, -1))) - 1,
                         {label_size:L})
                 FROM {table_name}
                 WHERE (CASE
                         WHEN {USING[OLD]}.{parent} IS NULL
                             THEN {parent} IS NULL
                         ELSE {parent} = {USING[OLD]}.{parent} END)
-                    AND {pk} != {USING[OLD]}.{pk}
+                    AND {path} > {USING[old_path]}
             ) UNION ALL (
                 SELECT
                     t2.{pk},
@@ -198,7 +198,6 @@ UPDATE_PATHS_FUNCTION = """
                 INNER JOIN {table_name} AS t2
                 ON t2.{path} ~ (ltree2text(t1.old_path) || '.*{{1,}}')::lquery
                 WHERE t1.old_path != t1.new_path
-                    AND t1.old_path > {USING[old_path]}
             ))
         UPDATE {table_name} AS t2 SET {path} = t1.new_path
         FROM generate_paths AS t1

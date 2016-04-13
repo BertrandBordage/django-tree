@@ -128,6 +128,9 @@ class Path:
     def get_prev_sibling(self):
         if self.value is None:
             return None
+
+        # TODO: Handle the case where the trigger is not in place.
+
         if self.is_root():
             parent_path = ''
             current_label = self.value
@@ -143,6 +146,9 @@ class Path:
     def get_next_sibling(self):
         if self.value is None:
             return None
+
+        # TODO: Handle the case where the trigger is not in place.
+
         if self.is_root():
             parent_path = ''
             current_label = self.value
