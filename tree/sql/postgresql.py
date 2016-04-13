@@ -304,15 +304,15 @@ CREATE_FUNCTIONS_QUERIES = (
     DECLARE
         ALPHANUM text := '{}';
         ALPHANUM_LEN int := {};
-        out text := '';
+        label text := '';
         remainder int := 0;
     BEGIN
         LOOP
             remainder := i % ALPHANUM_LEN;
             i := i / ALPHANUM_LEN;
-            out := substring(ALPHANUM from remainder+1 for 1) || out;
+            label := substring(ALPHANUM from remainder+1 for 1) || label;
             IF i = 0 THEN
-                RETURN lpad(out, size, '0');
+                RETURN lpad(label, size, '0');
             END IF;
         END LOOP;
     END;
@@ -323,17 +323,17 @@ CREATE_FUNCTIONS_QUERIES = (
     DECLARE
         ALPHANUM text := '{}';
         ALPHANUM_LEN int := {};
-        i int := 0;
+        pos int := 0;
         size smallint := length(label);
-        out bigint := 0;
+        i bigint := 0;
     BEGIN
         LOOP
-            out := out * ALPHANUM_LEN
-                   + position(substring(label from i for 1) in ALPHANUM) - 1;
-            IF i = size THEN
-                RETURN out;
+            i := i * ALPHANUM_LEN
+                   + position(substring(label from pos for 1) in ALPHANUM) - 1;
+            IF pos = size THEN
+                RETURN i;
             END IF;
-            i := i + 1;
+            pos := pos + 1;
         END LOOP;
     END;
     $$ LANGUAGE plpgsql;

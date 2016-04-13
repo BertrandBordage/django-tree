@@ -1,6 +1,8 @@
 from django.db.models import QuerySet
 from django.utils.six import string_types
 
+from .sql.base import to_alphanum, from_alphanum
+
 
 class Path:
     def __init__(self, field, value):
@@ -131,14 +133,12 @@ class Path:
             current_label = self.value
         else:
             parent_path, current_label = self.value.rsplit('.', 1)
+            parent_path += '.'
         if not current_label.lstrip('0'):
             return
-        size = len(current_label)
-        qs = self.qs.extra(
-            where=[self.attname + ' = %s::ltree '
-                   '|| to_alphanum(from_alphanum(%s)-1, %s::smallint)'],
-            params=(parent_path, current_label, size))
-        return qs.get()
+        prev_label = parent_path + to_alphanum(
+            from_alphanum(current_label) - 1, len(current_label))
+        return self.qs.get(**{self.attname: prev_label})
 
     def get_next_sibling(self):
         if self.value is None:
@@ -148,13 +148,10 @@ class Path:
             current_label = self.value
         else:
             parent_path, current_label = self.value.rsplit('.', 1)
-        size = len(current_label)
-        qs = self.qs.extra(
-            where=[self.attname + ' = %s::ltree '
-                   '|| to_alphanum(from_alphanum(%s)+1, %s::smallint)'],
-            params=(parent_path, current_label, size),
-        )
-        return qs.first()
+            parent_path += '.'
+        next_label = parent_path + to_alphanum(
+            from_alphanum(current_label) + 1, len(current_label))
+        return self.qs.filter(**{self.attname: next_label}).first()
 
     def get_level(self):
         if self.value is not None:
