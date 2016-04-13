@@ -150,7 +150,7 @@ UPDATE_PATHS_FUNCTION = """
     rebuild=format_sql_in_function("""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
-                -- FIXME: This doesn’t handle non-integer primary keys.
+                -- FIXME: This doesn't handle non-integer primary keys.
                 SELECT NULL::int, ''::ltree
             ) UNION ALL (
                 SELECT
