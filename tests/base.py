@@ -1,7 +1,6 @@
 # coding: utf-8
 
 from __future__ import unicode_literals
-from unittest import expectedFailure
 
 from django.db import transaction, InternalError
 from django.test import TransactionTestCase
@@ -25,6 +24,8 @@ from .models import Place
 # TODO: Test if breaking a transaction reverts the changes done by the trigger
 #       when updating nodes during that transaction.
 # TODO: Test path arrays.
+# TODO: Test non-integer primary keys.
+# TODO: Test other `on_delete` behaviour than `CASCADE`.
 
 
 class PathTest(TransactionTestCase):
@@ -105,14 +106,43 @@ class PathTest(TransactionTestCase):
         next(it)
         self.assertPlaces(self.correct_places_data)
 
-    # TODO: Fix the unique constraint order.
-    @expectedFailure
+    def test_delete(self):
+        list(self.create_test_places())
+
+        self.assertPlaces(self.correct_places_data)
+
+        # Leaf
+        manche = Place.objects.get(name='Manche')
+        with self.assertNumQueries(2):
+            manche.delete()
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
+            ('00.00.01', 'Seine-Maritime'), ('00.01', 'Poitou-Charentes'),
+            ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
+            ('01', 'Österreich')])
+
+        # Branch
+        normandie = Place.objects.get(name='Normandie')
+        with self.assertNumQueries(3):
+            normandie.delete()
+        self.assertPlaces([
+            ('00', 'France'), ('00.00', 'Poitou-Charentes'),
+            ('00.00.00', 'Vienne'), ('00.00.00.00', 'Poitiers'),
+            ('01', 'Österreich')])
+
+        # Root
+        france = Place.objects.get(name='France')
+        with self.assertNumQueries(5):
+            france.delete()
+        self.assertPlaces([('00', 'Österreich')])
+
     def test_move_root_to_prev_root(self):
         list(self.create_test_places())
 
         osterreich = Place.objects.get(name='Österreich')
         osterreich.name = 'Autriche'
-        osterreich.save()
+        with self.assertNumQueries(1):
+            osterreich.save()
         self.assertPlaces([
             ('00', 'Autriche'), ('01', 'France'),
             ('01.00', 'Normandie'), ('01.00.00', 'Eure'),
@@ -120,14 +150,13 @@ class PathTest(TransactionTestCase):
             ('01.01', 'Poitou-Charentes'), ('01.01.00', 'Vienne'),
             ('01.01.00.00', 'Poitiers')])
 
-    # TODO: Fix the unique constraint order.
-    @expectedFailure
     def test_move_root_to_next_root(self):
         list(self.create_test_places())
 
         france = Place.objects.get(name='France')
         france.name = 'République française'
-        france.save()
+        with self.assertNumQueries(1):
+            france.save()
         self.assertPlaces([
             ('00', 'Österreich'), ('01', 'République française'),
             ('01.00', 'Normandie'), ('01.00.00', 'Eure'),
@@ -135,9 +164,6 @@ class PathTest(TransactionTestCase):
             ('01.01', 'Poitou-Charentes'), ('01.01.00', 'Vienne'),
             ('01.01.00.00', 'Poitiers')])
 
-    # TODO: Remove holes after moving an object to another parent
-    #       or after deleting it.
-    @expectedFailure
     def test_move_root_to_prev_branch(self):
         list(self.create_test_places())
 
@@ -151,7 +177,8 @@ class PathTest(TransactionTestCase):
             ('02', 'Österreich')])
 
         little_france.parent = Place.objects.get(name='France')
-        little_france.save()
+        with self.assertNumQueries(1):
+            little_france.save()
         self.assertPlaces([
             ('00', 'France'), ('00.00', 'Île-de-France'),
             ('00.01', 'Normandie'), ('00.01.00', 'Eure'),
@@ -159,9 +186,6 @@ class PathTest(TransactionTestCase):
             ('00.02', 'Poitou-Charentes'), ('00.02.00', 'Vienne'),
             ('00.02.00.00', 'Poitiers'), ('01', 'Österreich')])
 
-    # TODO: Remove holes after moving an object to another parent
-    #       or after deleting it.
-    @expectedFailure
     def test_move_root_to_next_branch(self):
         list(self.create_test_places())
 
@@ -175,7 +199,8 @@ class PathTest(TransactionTestCase):
             ('01.01.00.00', 'Poitiers'), ('02', 'Österreich')])
 
         bretagne.parent = Place.objects.get(name='France')
-        bretagne.save()
+        with self.assertNumQueries(1):
+            bretagne.save()
         self.assertPlaces([
             ('00', 'France'), ('00.00', 'Bretagne'), ('00.01', 'Normandie'),
             ('00.01.00', 'Eure'),
@@ -183,9 +208,6 @@ class PathTest(TransactionTestCase):
             ('00.02', 'Poitou-Charentes'), ('00.02.00', 'Vienne'),
             ('00.02.00.00', 'Poitiers'), ('01', 'Österreich')])
 
-    # TODO: Remove holes after moving an object to another parent
-    #       or after deleting it.
-    @expectedFailure
     def test_move_root_to_prev_leaf(self):
         list(self.create_test_places())
 
@@ -198,7 +220,8 @@ class PathTest(TransactionTestCase):
             ('02', 'Österreich')])
 
         grattenoix.parent = Place.objects.get(name='Seine-Maritime')
-        grattenoix.save()
+        with self.assertNumQueries(1):
+            grattenoix.save()
         self.assertPlaces([
             ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
             ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
@@ -206,9 +229,6 @@ class PathTest(TransactionTestCase):
             ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
             ('01', 'Österreich')])
 
-    # TODO: Remove holes after moving an object to another parent
-    #       or after deleting it.
-    @expectedFailure
     def test_move_root_to_next_leaf(self):
         list(self.create_test_places())
 
@@ -221,7 +241,8 @@ class PathTest(TransactionTestCase):
             ('02', 'Österreich')])
 
         evreux.parent = Place.objects.get(name='Eure')
-        evreux.save()
+        with self.assertNumQueries(1):
+            evreux.save()
         self.assertPlaces([
             ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
             ('00.00.00.00', 'Évreux'), ('00.00.01', 'Manche'),

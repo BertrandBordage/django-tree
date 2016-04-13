@@ -800,22 +800,21 @@ class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkTest):
         self.root.move(self.leaf, pos='sorted-child')
 
 
-# TODO: Enable this test once it is fixed for django-tree.
-# @Benchmark.register_test(
-#     'Move [branch to root]',
-#     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-# class TestMoveBranchToRoot(GetBranchMixin, BenchmarkTest):
-#     def run(self):
-#         self.branch.parent = None
-#         self.branch.save()
+@Benchmark.register_test(
+    'Move [branch to root]',
+    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+class TestMoveBranchToRoot(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        self.branch.parent = None
+        self.branch.save()
 
 
-# @Benchmark.register_test(
-#     'Move [branch to root]',
-#     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-# class TestMoveBranchToRoot(GetBranchMixin, GetRootMixin, BenchmarkTest):
-#     def run(self):
-#         self.branch.move(self.root, pos='sorted-sibling')
+@Benchmark.register_test(
+    'Move [branch to root]',
+    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+class TestMoveBranchToRoot(GetBranchMixin, GetRootMixin, BenchmarkTest):
+    def run(self):
+        self.branch.move(self.root, pos='sorted-sibling')
 
 
 @Benchmark.register_test(
@@ -835,22 +834,21 @@ class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkTest):
         self.branch.move(self.leaf, pos='sorted-child')
 
 
-# TODO: Enable this test once it is fixed for django-tree.
-# @Benchmark.register_test(
-#     'Move [leaf to root]',
-#     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-# class TestMoveLeafToRoot(GetLeafMixin, BenchmarkTest):
-#     def run(self):
-#         self.leaf.parent = None
-#         self.leaf.save()
+@Benchmark.register_test(
+    'Move [leaf to root]',
+    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+class TestMoveLeafToRoot(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        self.leaf.parent = None
+        self.leaf.save()
 
 
-# @Benchmark.register_test(
-#     'Move [leaf to root]',
-#     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-# class TestMoveLeafToRoot(GetLeafMixin, GetRootMixin, BenchmarkTest):
-#     def run(self):
-#         self.leaf.move(self.root, pos='sorted-sibling')
+@Benchmark.register_test(
+    'Move [leaf to root]',
+    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+class TestMoveLeafToRoot(GetLeafMixin, GetRootMixin, BenchmarkTest):
+    def run(self):
+        self.leaf.move(self.root, pos='sorted-sibling')
 
 
 @Benchmark.register_test(
