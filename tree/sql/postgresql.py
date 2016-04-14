@@ -126,7 +126,6 @@ UPDATE_PATHS_FUNCTION = """
                     'You should increase it then rebuild.', max_siblings;
             END IF;
             IF TG_OP = 'UPDATE' THEN
-                RAISE LOG 'UPDATE %', OLD;
                 {update_old_siblings}
             END IF;
         END IF;
