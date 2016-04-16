@@ -26,6 +26,7 @@ from .models import Place
 # TODO: Test path arrays.
 # TODO: Test non-integer primary keys.
 # TODO: Test other `on_delete` behaviour than `CASCADE`.
+# TODO: Test unusual table names.
 
 
 class PathTest(TransactionTestCase):

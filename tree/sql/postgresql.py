@@ -61,6 +61,7 @@ def format_sql_in_function(sql, into=None):
     return "EXECUTE format('%s', %s)%s;" % (sql, args, extra)
 
 
+# TODO: Add `LIMIT 1` where appropriate to see if it optimises a bit.
 UPDATE_PATHS_FUNCTION = """
     CREATE OR REPLACE FUNCTION update_paths() RETURNS trigger AS $$
     DECLARE
@@ -176,28 +177,20 @@ UPDATE_PATHS_FUNCTION = """
         WHERE pk = {USING[OLD]}.{pk}
     """, into=['new_path']),
     update_old_siblings=format_sql_in_function("""
-        UPDATE {table_name} AS t2 SET {path} = t1.path
-        FROM (
-            SELECT
-                {pk},
-                {USING[old_parent_path]}
-                    || to_alphanum(from_alphanum(
-                            ltree2text(subpath(
-                                {path}, nlevel({USING[old_parent_path]}), 1))
-                        ) - 1, {label_size:L})
-                    || (CASE
-                        WHEN nlevel({path}) > nlevel({USING[old_path]})
-                            THEN subpath({path}, nlevel({USING[old_path]}))
-                        ELSE ''::ltree END)
-            FROM {table_name}
-            WHERE {path} > {USING[old_path]} AND {path} ~ (CASE
-                WHEN {USING[old_parent_path]} = ''::ltree
-                    THEN '*{{1,}}'
-                ELSE ltree2text({USING[old_parent_path]})
-                    || '.*{{1,}}' END)::lquery
-            FOR UPDATE
-        ) AS t1 (pk, path)
-        WHERE t2.{pk} = t1.pk AND (t2.{path} IS NULL OR t2.{path} != t1.path)
+        UPDATE {table_name} SET {path} = {USING[old_parent_path]}
+            || to_alphanum(from_alphanum(
+                    ltree2text(subpath(
+                        {path}, nlevel({USING[old_parent_path]}), 1))
+                ) - 1, {label_size:L})
+            || (CASE
+                WHEN nlevel({path}) > nlevel({USING[old_path]})
+                    THEN subpath({path}, nlevel({USING[old_path]}))
+                ELSE ''::ltree END)
+        WHERE {path} > {USING[old_path]} AND {path} ~ (CASE
+            WHEN {USING[old_parent_path]} = ''::ltree
+                THEN '*{{1,}}'
+            ELSE ltree2text({USING[old_parent_path]})
+                || '.*{{1,}}' END)::lquery
     """),
     get_parent_changed=format_sql_in_function("""
         SELECT
