@@ -65,7 +65,8 @@ class PathTest(TransactionTestCase):
             if queryset is None:
                 queryset = Place.objects.all()
             places = list(queryset)
-            self.assertListEqual([(p.path, p.name) for p in places], values)
+            self.assertListEqual([(p.path.value, p.name) for p in places],
+                                 values)
 
     def test_insert(self):
         it = self.create_test_places()

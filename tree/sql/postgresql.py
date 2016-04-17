@@ -93,8 +93,8 @@ UPDATE_PATHS_FUNCTION = """
             RETURN OLD;
         END IF;
 
-        {get_new_path}
         IF TG_OP = 'UPDATE' THEN
+            {get_new_path}
             IF new_path = '__rebuild__' THEN
                 {rebuild}
                 {set_new_path}
@@ -186,11 +186,13 @@ UPDATE_PATHS_FUNCTION = """
                 WHEN nlevel({path}) > nlevel({USING[old_path]})
                     THEN subpath({path}, nlevel({USING[old_path]}))
                 ELSE ''::ltree END)
-        WHERE {path} > {USING[old_path]} AND {path} ~ (CASE
-            WHEN {USING[old_parent_path]} = ''::ltree
-                THEN '*{{1,}}'
-            ELSE ltree2text({USING[old_parent_path]})
-                || '.*{{1,}}' END)::lquery
+        WHERE {path} > {USING[old_path]}
+            AND NOT ({path} <@ {USING[old_path]})
+            AND {path} ~ (CASE
+                WHEN {USING[old_parent_path]} = ''::ltree
+                    THEN '*{{1,}}'
+                ELSE ltree2text({USING[old_parent_path]})
+                    || '.*{{1,}}' END)::lquery
     """),
     get_parent_changed=format_sql_in_function("""
         SELECT
