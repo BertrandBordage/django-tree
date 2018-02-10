@@ -51,6 +51,8 @@ def format_sql_in_function(sql, into=None):
     sql = Formatter().vformat(sql, (), kwargs).replace("'", "''")
     using = kwargs.pop('USING')
     args = ', '.join([k for k in kwargs])
+    if args:
+        args = ', ' + args
 
     extra = ''
     if into is not None:
@@ -58,7 +60,7 @@ def format_sql_in_function(sql, into=None):
     if using:
         extra += ' USING ' + ', '.join([a for a in using])
 
-    return "EXECUTE format('%s', %s)%s;" % (sql, args, extra)
+    return "EXECUTE format('%s'%s)%s;" % (sql, args, extra)
 
 
 # TODO: Add `LIMIT 1` where appropriate to see if it optimises a bit.
@@ -76,19 +78,18 @@ UPDATE_PATHS_FUNCTION = """
         order_by_cols2 text := 't2.' || array_to_string(order_by, ',t2.');
         old_path ltree := NULL;
         new_path ltree;
-        old_parent_path ltree := NULL;
+        old_parent_path ltree := '';
+        siblings_query lquery;
         new_parent_path ltree;
         parent_changed boolean;
         n_siblings integer;
     BEGIN
         IF TG_OP != 'INSERT' THEN
             {get_old_paths}
-        END IF;
-        IF old_parent_path IS NULL THEN
-            old_parent_path := ''::ltree;
-        END IF;
+        END IF;        
 
         IF TG_OP = 'DELETE' THEN
+            {set_siblings_query}
             {update_old_siblings}
             RETURN OLD;
         END IF;
@@ -127,6 +128,7 @@ UPDATE_PATHS_FUNCTION = """
                     'You should increase it then rebuild.', max_siblings;
             END IF;
             IF TG_OP = 'UPDATE' THEN
+                {set_siblings_query}
                 {update_old_siblings}
             END IF;
         END IF;
@@ -145,12 +147,19 @@ UPDATE_PATHS_FUNCTION = """
     get_old_paths=format_sql_in_function("""
         SELECT {USING[OLD]}.{path}, subpath({USING[OLD]}.{path}, 0, -1)
     """, into=['old_path', 'old_parent_path']),
+    set_siblings_query=format_sql_in_function("""
+        SELECT ((CASE
+            WHEN {USING[old_parent_path]} = ''::ltree
+            THEN ''
+            ELSE {USING[old_parent_path]}::text || '.'
+        END) || '*{{1}}')::lquery
+    """, into=['siblings_query']),
     get_new_path=format_sql_in_function(
         'SELECT {USING[NEW]}.{path}', into=['new_path']),
     rebuild=format_sql_in_function("""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
-                SELECT {parent}, ''::ltree
+                SELECT NULL::int, ''::ltree
                 FROM {table_name}
                 WHERE {parent} IS NULL
                 LIMIT 1
@@ -162,10 +171,9 @@ UPDATE_PATHS_FUNCTION = """
                                            ORDER BY {order_by_cols2:s}) - 1,
                         {label_size:L})
                 FROM generate_paths AS t1
-                INNER JOIN {table_name} AS t2 ON (CASE
-                    WHEN t1.pk IS NULL
-                        THEN t2.{parent} IS NULL
-                    ELSE t2.{parent} = t1.pk END)
+                INNER JOIN {table_name} AS t2 ON (
+                    t2.{parent} = t1.pk
+                    OR (t1.pk IS NULL AND t2.{parent} IS NULL))
             )
         ), updated AS (
             UPDATE {table_name} AS t2 SET {path} = t1.path
@@ -177,35 +185,37 @@ UPDATE_PATHS_FUNCTION = """
         WHERE pk = {USING[OLD]}.{pk}
     """, into=['new_path']),
     update_old_siblings=format_sql_in_function("""
-        UPDATE {table_name} SET {path} = {USING[old_parent_path]}
-            || to_alphanum(from_alphanum(
-                    ltree2text(subpath(
-                        {path}, nlevel({USING[old_parent_path]}), 1))
-                ) - 1, {label_size:L})
-            || (CASE
-                WHEN nlevel({path}) > nlevel({USING[old_path]})
-                    THEN subpath({path}, nlevel({USING[old_path]}))
-                ELSE ''::ltree END)
-        WHERE {path} > {USING[old_path]}
-            AND NOT ({path} <@ {USING[old_path]})
-            AND {path} ~ (CASE
-                WHEN {USING[old_parent_path]} = ''::ltree
-                    THEN '*{{1,}}'
-                ELSE ltree2text({USING[old_parent_path]})
-                    || '.*{{1,}}' END)::lquery
+        -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
+        WITH RECURSIVE generate_paths(pk, path) AS ((
+                SELECT
+                    {pk},
+                    {USING[old_parent_path]} || to_alphanum(from_alphanum(
+                        subpath({path}, nlevel({USING[old_parent_path]}),
+                                1)::text
+                    ) - 1, {label_size:L})
+                FROM {table_name}
+                WHERE
+                    {path} > {USING[old_path]}
+                    AND {path} ~ {USING[siblings_query]}
+            ) UNION ALL (
+                SELECT
+                    t2.{pk},
+                    t1.path || subpath(t2.{path}, nlevel(t1.path))
+                FROM generate_paths AS t1
+                INNER JOIN {table_name} AS t2 ON t2.{parent} = t1.pk
+            )
+        )
+        UPDATE {table_name} AS t2 SET {path} = t1.path
+        FROM generate_paths AS t1
+        WHERE t2.{pk} = t1.pk
     """),
     get_parent_changed=format_sql_in_function("""
-        SELECT
-            ({USING[OLD]}.{parent} IS NULL AND {USING[NEW]}.{parent} IS NOT NULL)
-            OR ({USING[OLD]}.{parent} IS NOT NULL AND {USING[NEW]}.{parent} IS NULL)
-            OR ({USING[OLD]}.{parent} != {USING[NEW]}.{parent})
+        SELECT COALESCE({USING[OLD]}.{parent} != {USING[NEW]}.{parent}, TRUE)
     """, into=['parent_changed']),
     get_n_siblings=format_sql_in_function("""
         SELECT COUNT(*) FROM {table_name}
-        WHERE (CASE
-            WHEN {USING[NEW]}.{parent} IS NULL
-                THEN {parent} IS NULL
-            ELSE {parent} = {USING[NEW]}.{parent} END)
+        WHERE {parent} = {USING[NEW]}.{parent}
+            OR ({USING[NEW]}.{parent} IS NULL AND {parent} IS NULL)
     """, into=['n_siblings']),
     get_new_parent_path=format_sql_in_function("""
         SELECT {path} FROM {table_name} WHERE {pk} = {USING[NEW]}.{parent}
@@ -221,15 +231,11 @@ UPDATE_PATHS_FUNCTION = """
                 FROM ((
                         SELECT *
                         FROM {table_name}
-                        WHERE
-                            (CASE
-                                WHEN {USING[NEW]}.{parent} IS NULL
-                                    THEN {parent} IS NULL
-                                ELSE {parent} = {USING[NEW]}.{parent} END)
-                            AND (CASE
-                                WHEN {USING[NEW]}.{pk} IS NULL
-                                    THEN TRUE
-                                ELSE {pk} != {USING[NEW]}.{pk} END)
+                        WHERE (
+                            {parent} = {USING[NEW]}.{parent}
+                            OR ({USING[NEW]}.{parent} IS NULL
+                                AND {parent} IS NULL)
+                        ) AND COALESCE({pk} != {USING[NEW]}.{pk}, TRUE)
                     ) UNION ALL (
                         SELECT {USING[NEW]}.*
                     )
@@ -251,10 +257,8 @@ UPDATE_PATHS_FUNCTION = """
                 AND (t2.{path} IS NULL OR t2.{path} != t1.path)
         )
         SELECT path FROM generate_paths
-        WHERE (CASE
-            WHEN {USING[NEW]}.{pk} IS NULL
-                THEN pk IS NULL
-            ELSE pk = {USING[NEW]}.{pk} END)
+        WHERE pk = {USING[NEW]}.{pk}
+            OR ({USING[NEW]}.{pk} IS NULL AND pk IS NULL)
     """, into=['new_path']),
     set_new_path=format_sql_in_function("""
         -- FIXME: `json_populate_record` is not available in PostgreSQL < 9.3.

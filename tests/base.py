@@ -117,7 +117,7 @@ class PathTest(TransactionTestCase):
 
         # Leaf
         manche = Place.objects.get(name='Manche')
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             manche.delete()
         self.assertPlaces([
             ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
@@ -136,7 +136,7 @@ class PathTest(TransactionTestCase):
 
         # Root
         france = Place.objects.get(name='France')
-        with self.assertNumQueries(5):
+        with self.assertNumQueries(3):
             france.delete()
         self.assertPlaces([('00', 'Österreich')])
 

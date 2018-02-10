@@ -94,20 +94,21 @@ class Path:
     def get_descendants(self, include_self=False):
         if self.value is None:
             return self.qs.none()
-        return self.qs.filter(
-            **{self.attname + '__match': self.value + ('.*' if include_self
-                                                       else '.*{1,}')})
+        qs = self.qs.filter(**{self.attname + '__descendant_of': self.value})
+        if include_self:
+            return qs
+        return qs.exclude(**{self.attname: self.value})
 
     def get_siblings(self, include_self=False):
         if self.value is None:
             return self.qs.none()
-        qs = self.qs
         match = '*{1}'
         if not self.is_root():
             match = self.value.rsplit('.', 1)[0] + '.' + match
-        if not include_self:
-            qs = qs.exclude(**{self.attname: self.value})
-        return qs.filter(**{self.attname + '__match': match})
+        qs = self.qs.filter(**{self.attname + '__match': match})
+        if include_self:
+            return qs
+        return qs.exclude(**{self.attname: self.value})
 
     def get_prev_siblings(self, include_self=False):
         if self.value is None:

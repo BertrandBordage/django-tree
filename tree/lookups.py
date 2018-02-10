@@ -7,8 +7,7 @@ class AncestorOf(Lookup):
     def as_sql(self, compiler, connection):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
-        params = lhs_params + rhs_params
-        return '%s @> %s' % (lhs, rhs), params
+        return '%s @> %s' % (lhs, rhs), lhs_params + rhs_params
 
 
 class DescendantOf(Lookup):
@@ -17,8 +16,7 @@ class DescendantOf(Lookup):
     def as_sql(self, compiler, connection):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
-        params = lhs_params + rhs_params
-        return '%s <@ %s' % (lhs, rhs), params
+        return '%s <@ %s' % (lhs, rhs), lhs_params + rhs_params
 
 
 class Match(Lookup):
@@ -27,8 +25,7 @@ class Match(Lookup):
     def as_sql(self, compiler, connection):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
-        params = lhs_params + rhs_params
-        return '%s ~ %s::lquery' % (lhs, rhs), params
+        return '%s ~ %s::lquery' % (lhs, rhs), lhs_params + rhs_params
 
 
 class MatchAny(Lookup):
@@ -37,8 +34,7 @@ class MatchAny(Lookup):
     def as_sql(self, compiler, connection):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
-        params = lhs_params + rhs_params
-        return '%s ? %s::lquery[]' % (lhs, rhs), params
+        return '%s ? %s::lquery[]' % (lhs, rhs), lhs_params + rhs_params
 
 
 class Search(Lookup):
@@ -47,5 +43,4 @@ class Search(Lookup):
     def as_sql(self, compiler, connection):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
-        params = lhs_params + rhs_params
-        return '%s @ %s' % (lhs, rhs), params
+        return '%s @ %s' % (lhs, rhs), lhs_params + rhs_params

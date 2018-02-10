@@ -1,7 +1,8 @@
 from contextlib import contextmanager
 from django.core.exceptions import FieldDoesNotExist
 from django.db import DEFAULT_DB_ALIAS, transaction
-from tree.fields import PathField
+
+from .fields import PathField
 
 
 class TreeModelMixin:
@@ -82,6 +83,17 @@ class TreeModelMixin:
     @classmethod
     def get_roots(cls, path_field=None):
         return cls._get_path_field(path_field).get_roots()
+
+    def delete(self, *args, using=None, **kwargs):
+        assert self.pk is not None, (
+            "%s object can't be deleted because "
+            "its %s attribute is set to None." %
+            (self._meta.object_name, self._meta.pk.attname)
+        )
+        qs = self.get_descendants(include_self=True)
+        if using is not None:
+            qs = qs.using(using)
+        return qs.delete()
 
     @classmethod
     def rebuild_paths(cls, db_alias=DEFAULT_DB_ALIAS, path_field=None):
