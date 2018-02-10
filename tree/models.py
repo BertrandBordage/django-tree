@@ -84,7 +84,7 @@ class TreeModelMixin:
     def get_roots(cls, path_field=None):
         return cls._get_path_field(path_field).get_roots()
 
-    def delete(self, *args, using=None, **kwargs):
+    def delete(self, using=None, **kwargs):
         assert self.pk is not None, (
             "%s object can't be deleted because "
             "its %s attribute is set to None." %
