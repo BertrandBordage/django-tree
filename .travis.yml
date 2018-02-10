@@ -1,16 +1,12 @@
 sudo: false
 language: python
 
-python: 3.6
-
-# work-around for https://github.com/travis-ci/travis-ci/issues/4794
-addons:
-  apt:
-    sources:
-      - deadsnakes
-    packages:
-      - python3.3
-      - python3.5
+python:
+  - 2.7
+  - 3.3
+  - 3.4
+  - 3.5
+  - 3.6
 
 addons:
   postgresql: 9.6
@@ -26,10 +22,6 @@ env:
   - TOXENV=py3.4-django2.0-postgresql
   - TOXENV=py3.5-django2.0-postgresql
   - TOXENV=py3.6-django2.0-postgresql
-
-
-
-sudo: false
 
 install: pip install tox coveralls
 
