@@ -1,6 +1,6 @@
 from django.db import migrations
 from django.db.models import (
-    AutoField, CharField, ForeignKey, PositiveIntegerField, Manager
+    AutoField, CharField, ForeignKey, PositiveIntegerField, Manager, CASCADE,
 )
 from mptt.fields import TreeForeignKey
 from tree.fields import PathField
@@ -25,10 +25,10 @@ class Migration(migrations.Migration):
                 ('rght', PositiveIntegerField(db_index=True, editable=False)),
                 ('tree_id', PositiveIntegerField(db_index=True, editable=False)),
                 ('level', PositiveIntegerField(db_index=True, editable=False)),
-                ('parent', TreeForeignKey('self', blank=True, null=True)),
+                ('parent', TreeForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
             ],
             managers=[
-                ('_default_manager', Manager()),
+                ('objects', Manager()),
             ],
         ),
 
@@ -37,7 +37,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('name', CharField(max_length=50, unique=True, default=get_random_name)),
-                ('parent', ForeignKey('self', blank=True, null=True)),
+                ('parent', ForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
                 ('path', PathField()),
             ],
         ),
@@ -49,7 +49,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('name', CharField(max_length=50, unique=True, default=get_random_name)),
-                ('parent', ForeignKey('self', blank=True, null=True)),
+                ('parent', ForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
             ],
         ),
 

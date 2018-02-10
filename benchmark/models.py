@@ -1,7 +1,7 @@
 from random import choice
 from string import ascii_letters
 
-from django.db.models import Model, CharField, ForeignKey
+from django.db.models import Model, CharField, ForeignKey, CASCADE
 from treebeard.mp_tree import MP_Node
 from treebeard.ns_tree import NS_Node
 from treebeard.al_tree import AL_Node
@@ -17,21 +17,23 @@ def get_random_name():
 class MPTTPlace(MPTTModel):
     name = CharField(max_length=50, unique=True, default=get_random_name)
     parent = TreeForeignKey('self', null=True, blank=True,
-                            related_name='children')
+                            related_name='children', on_delete=CASCADE)
 
     class MPTTMeta:
         order_insertion_by = ('name',)
 
 
-class TreePlace(Model, TreeModelMixin):
+class TreePlace(TreeModelMixin, Model):
     name = CharField(max_length=50, unique=True, default=get_random_name)
-    parent = ForeignKey('self', null=True, blank=True, related_name='children')
+    parent = ForeignKey('self', null=True, blank=True, related_name='children',
+                        on_delete=CASCADE)
     path = PathField()
 
 
 class TreebeardALPlace(AL_Node):
     name = CharField(max_length=50, unique=True, default=get_random_name)
-    parent = ForeignKey('self', null=True, blank=True, related_name='children')
+    parent = ForeignKey('self', null=True, blank=True, related_name='children',
+                        on_delete=CASCADE)
     node_order_by = ('name',)
 
 

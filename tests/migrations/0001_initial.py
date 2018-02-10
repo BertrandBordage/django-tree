@@ -1,4 +1,6 @@
 from django.db import models, migrations
+from django.db.models import CASCADE
+
 from tree.fields import PathField
 from tree.operations import CreateTreeTrigger, CreateTreeIndex
 
@@ -14,7 +16,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('name', models.CharField(max_length=50)),
-                ('parent', models.ForeignKey('self', blank=True, null=True)),
+                ('parent', models.ForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
                 ('path', PathField()),
             ],
             options={

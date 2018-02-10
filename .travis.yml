@@ -1,20 +1,23 @@
 language: python
 
-# We say we use Python 3.5 otherwise we only access by default
-# to Python 2.7, 3.3, & 3.4
+# We say we use Python 3.6 otherwise we only access lower versions by default
 
-python: 3.5
+python: 3.6
 
 addons:
-  postgresql: 9.4
+  postgresql: 9.6
 
 env:
   - TOXENV=py2.7-django1.8-postgresql
   - TOXENV=py3.3-django1.8-postgresql
   - TOXENV=py3.4-django1.8-postgresql
-  - TOXENV=py2.7-django1.9-postgresql
-  - TOXENV=py3.4-django1.9-postgresql
-  - TOXENV=py3.5-django1.9-postgresql
+  - TOXENV=py2.7-django1.11-postgresql
+  - TOXENV=py3.4-django1.11-postgresql
+  - TOXENV=py3.5-django1.11-postgresql
+  - TOXENV=py3.6-django1.11-postgresql
+  - TOXENV=py3.4-django2.0-postgresql
+  - TOXENV=py3.5-django2.0-postgresql
+  - TOXENV=py3.6-django2.0-postgresql
 
 
 

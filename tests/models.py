@@ -1,4 +1,4 @@
-from django.db.models import Model, CharField, ForeignKey
+from django.db.models import Model, CharField, ForeignKey, CASCADE
 
 from tree.fields import PathField
 from tree.models import TreeModelMixin
@@ -6,7 +6,7 @@ from tree.models import TreeModelMixin
 
 class Place(Model, TreeModelMixin):
     name = CharField(max_length=50)
-    parent = ForeignKey('self', null=True, blank=True)
+    parent = ForeignKey('self', null=True, blank=True, on_delete=CASCADE)
     path = PathField()
 
     class Meta:
