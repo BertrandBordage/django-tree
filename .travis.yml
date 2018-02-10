@@ -11,16 +11,13 @@ python:
 addons:
   postgresql: 9.6
 
-env:
-  - tox -v
-
 install: pip install tox coveralls
 
 before_script:
   - psql -c 'CREATE USER tree SUPERUSER;' -U postgres
   - psql -c 'CREATE DATABASE tree OWNER tree;' -U postgres
 
-script: tox -e $TOXENV
+script: tox -v
 
 after_success: coveralls
 
