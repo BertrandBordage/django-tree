@@ -1,8 +1,16 @@
+sudo: false
 language: python
 
-# We say we use Python 3.6 otherwise we only access lower versions by default
-
 python: 3.6
+
+# work-around for https://github.com/travis-ci/travis-ci/issues/4794
+addons:
+  apt:
+    sources:
+      - deadsnakes
+    packages:
+      - python3.3
+      - python3.5
 
 addons:
   postgresql: 9.6
