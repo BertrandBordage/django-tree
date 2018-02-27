@@ -1,8 +1,6 @@
-from django.core.exceptions import ImproperlyConfigured
 from django.db.migrations.operations.base import Operation
 
 from .sql import postgresql
-from .sql.base import DEFAULT_MAX_SIBLINGS, ALPHANUM_LEN
 
 
 class CheckDatabaseMixin:
@@ -37,7 +35,7 @@ class CreateTreeFunctions(Operation, CheckDatabaseMixin):
             schema_editor.execute(sql_query)
 
     def describe(self):
-        return 'Creates functions & extensions required by django-tree'
+        return 'Creates functions required by django-tree'
 
 
 class DeleteTreeFunctions(CreateTreeFunctions):
@@ -48,47 +46,31 @@ class DeleteTreeFunctions(CreateTreeFunctions):
         super(DeleteTreeFunctions, self).database_forwards(*args, **kwargs)
 
     def describe(self):
-        return 'Deletes functions & extensions required by django-tree'
+        return 'Deletes functions required by django-tree'
 
 
 class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
     reversible = True
     atomic = True
 
-    def __init__(self, model_lookup, path_field='path', parent_field='parent',
-                 order_by=None, max_siblings=DEFAULT_MAX_SIBLINGS):
+    def __init__(self, model_lookup, path_field='path', parent_field='parent'):
         self.model_lookup = model_lookup
-        self.path_field = path_field
-        self.parent_field = parent_field
-        if path_field in order_by:
-            raise ImproperlyConfigured(
-                'Cannot use `%s` in `CreateTreeTrigger.order_by`.'
-                % path_field)
-        self.order_by = () if order_by is None else tuple(order_by)
-        if not (isinstance(max_siblings, int) and max_siblings > 0):
-            raise ImproperlyConfigured(
-                '`max_siblings` must be a positive integer, not %s.'
-                % repr(max_siblings))
-        self.max_siblings = max_siblings
-        i = self.max_siblings
-        n = 0
-        while i > 1.0:
-            i /= ALPHANUM_LEN
-            n += 1
-        self.label_size = n
+        self.path_field_lookup = path_field
+        self.parent_field_lookup = parent_field
 
     def get_pre_params(self, model):
         meta = model._meta
         pk = meta.pk
-        path = meta.get_field(self.path_field).attname
-        order_by = self.order_by
+        path_field = meta.get_field(self.path_field_lookup)
+        path_name = path_field.attname
+        order_by = path_field.order_by
         if not (pk.attname in order_by or pk.name in order_by
                 or 'pk' in order_by):
             order_by += ('pk',)
 
         # TODO: Handle related lookups in `order_by`.
         sql_order_by = []
-        update_columns = [path]
+        update_columns = [path_name]
         for field_name in order_by:
             descending = field_name[0] == '-'
             if descending:
@@ -103,10 +85,10 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
         return dict(
             table=meta.db_table,
             pk=meta.pk.attname,
-            parent=meta.get_field(self.parent_field).attname,
-            path=path,
-            max_siblings=self.max_siblings,
-            label_size=self.label_size,
+            parent=meta.get_field(self.parent_field_lookup).attname,
+            path=path_name,
+            max_siblings=path_field.max_siblings,
+            level_size=path_field.level_size,
             update_columns=', '.join(update_columns),
             order_by=", ".join(sql_order_by),
         )
@@ -141,54 +123,6 @@ class DeleteTreeTrigger(CreateTreeTrigger):
 
     def describe(self):
         return 'Deletes the trigger that automatically updates a `PathField`'
-
-
-class CreateTreeIndex(Operation, GetModelMixin, CheckDatabaseMixin):
-    reversible = True
-    atomic = True
-
-    def __init__(self, model_lookup, path_field='path'):
-        self.model_lookup = model_lookup
-        self.path_field = path_field
-        super(CreateTreeIndex, self).__init__()
-
-    def state_forwards(self, app_label, state):
-        pass
-
-    def get_pre_params(self, model):
-        meta = model._meta
-        return {
-            'table': meta.db_table,
-            'path': meta.get_field(self.path_field).attname,
-        }
-
-    def database_forwards(self, app_label, schema_editor,
-                          from_state, to_state):
-        self.check_database_backend(schema_editor)
-        for sql_query in postgresql.CREATE_INDEX_QUERIES:
-            schema_editor.execute(sql_query.format(
-                **self.get_pre_params(self.get_model(app_label, to_state))))
-
-    def database_backwards(self, app_label, schema_editor,
-                           from_state, to_state):
-        self.check_database_backend(schema_editor)
-        for sql_query in postgresql.DROP_INDEX_QUERIES:
-            schema_editor.execute(sql_query.format(
-                **self.get_pre_params(self.get_model(app_label, to_state))))
-
-    def describe(self):
-        return 'Creates an index that speeds up a `PathField`'
-
-
-class DeleteTreeIndex(CreateTreeIndex):
-    def database_forwards(self, *args, **kwargs):
-        super(DeleteTreeIndex, self).database_backwards(*args, **kwargs)
-
-    def database_backwards(self, *args, **kwargs):
-        super(DeleteTreeIndex, self).database_forwards(*args, **kwargs)
-
-    def describe(self):
-        return 'Deletes the index that speeds up a `PathField`'
 
 
 class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):

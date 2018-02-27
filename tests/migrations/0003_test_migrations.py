@@ -1,9 +1,9 @@
 from django.db import migrations
 from tree.fields import PathField
 from tree.operations import (
-    CreateTreeTrigger, RebuildPaths, DeleteTreeTrigger, CreateTreeIndex,
-    DeleteTreeIndex,
+    CreateTreeTrigger, RebuildPaths, DeleteTreeTrigger,
 )
+from tree.sql.base import ALPHANUM_LEN
 
 
 class Migration(migrations.Migration):
@@ -12,12 +12,10 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField('Something', 'path', PathField(null=True)),
-        CreateTreeTrigger('Something', order_by=('name',)),
-        CreateTreeIndex('Something'),
+        migrations.AddField('Something', 'path', PathField(order_by=('name',), max_siblings=ALPHANUM_LEN)),
+        CreateTreeTrigger('Something'),
         RebuildPaths('Something'),
-        migrations.AlterField('Something', 'path', PathField()),
-        DeleteTreeIndex('Something'),
-        DeleteTreeTrigger('Something', order_by=('name',)),
+        migrations.AlterField('Something', 'path', PathField(order_by=('name',), max_siblings=ALPHANUM_LEN*3)),
+        DeleteTreeTrigger('Something'),
         migrations.DeleteModel('Something'),
     ]

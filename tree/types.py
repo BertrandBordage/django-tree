@@ -7,6 +7,7 @@ from .sql.base import to_alphanum, from_alphanum
 class Path:
     def __init__(self, field, value):
         self.field = field
+        self.level_size = self.field.level_size
         self.attname = getattr(self.field, 'attname', None)
         self.field_bound = self.attname is not None
         self.qs = (self.field.model._default_manager.all()
@@ -33,66 +34,60 @@ class Path:
 
     def __lt__(self, other):
         # We simulate the effects of a NULLS LAST.
-        if self.value is None:
+        if not self.value:
             return False
         if isinstance(other, Path):
             other = other.value
-        if other is None:
+        if not other:
             return True
         return self.value < other
 
     def __le__(self, other):
         # We simulate the effects of a NULLS LAST.
-        if self.value is None:
+        if not self.value:
             return False
         if isinstance(other, Path):
             other = other.value
-        if other is None:
+        if not other:
             return True
         return self.value <= other
 
     def __gt__(self, other):
         # We simulate the effects of a NULLS LAST.
-        if self.value is None:
+        if not self.value:
             return True
         if isinstance(other, Path):
             other = other.value
-        if other is None:
+        if not other:
             return False
         return self.value > other
 
     def __ge__(self, other):
         # We simulate the effects of a NULLS LAST.
-        if self.value is None:
+        if not self.value:
             return True
         if isinstance(other, Path):
             other = other.value
-        if other is None:
+        if not other:
             return False
         return self.value >= other
 
     def get_children(self):
-        if self.value is None:
+        if not self.value:
             return self.qs.none()
-        return self.qs.filter(
-            **{self.attname + '__match': self.value + '.*{1}'})
+        return self.qs.filter(**{self.attname + '__child_of': self.value})
 
     def get_ancestors(self, include_self=False):
-        if self.value is None or (self.is_root() and not include_self):
+        if not self.value or (self.is_root() and not include_self):
             return self.qs.none()
-        paths = []
-        path = ''
-        for part in self.value.split('.'):
-            if path:
-                path += '.'
-            path += part
-            paths.append(path)
+        paths = [self.value[:i+self.level_size]
+                 for i in range(0, len(self.value), self.level_size)]
         if not include_self:
             paths.pop()
         return self.qs.filter(**{self.attname + '__in': paths})
 
     def get_descendants(self, include_self=False):
-        if self.value is None:
+        if not self.value:
             return self.qs.none()
         qs = self.qs.filter(**{self.attname + '__descendant_of': self.value})
         if include_self:
@@ -100,18 +95,18 @@ class Path:
         return qs.exclude(**{self.attname: self.value})
 
     def get_siblings(self, include_self=False):
-        if self.value is None:
+        if not self.value:
             return self.qs.none()
-        match = '*{1}'
-        if not self.is_root():
-            match = self.value.rsplit('.', 1)[0] + '.' + match
-        qs = self.qs.filter(**{self.attname + '__match': match})
+
+        qs = self.qs.filter(**{self.attname + '__sibling_of': self.value})
         if include_self:
             return qs
         return qs.exclude(**{self.attname: self.value})
 
     def get_prev_siblings(self, include_self=False):
-        if self.value is None:
+        if not self.value or (
+                not include_self and (self.value[-self.level_size:]
+                                      == self.field.first_sibling_value)):
             return self.qs.none()
         siblings = self.get_siblings(include_self=include_self)
         lookup = '__lte' if include_self else '__lt'
@@ -119,7 +114,7 @@ class Path:
                 .order_by('-' + self.attname))
 
     def get_next_siblings(self, include_self=False):
-        if self.value is None:
+        if not self.value:
             return self.qs.none()
         siblings = self.get_siblings(include_self=include_self)
         lookup = '__gte' if include_self else '__gt'
@@ -127,57 +122,46 @@ class Path:
                 .order_by(self.attname))
 
     def get_prev_sibling(self):
-        if self.value is None:
-            return None
+        if not self.value:
+            return
+        current_label = self.value[-self.level_size:]
+        if current_label == self.field.first_sibling_value:
+            return
 
         # TODO: Handle the case where the trigger is not in place.
 
-        if self.is_root():
-            parent_path = ''
-            current_label = self.value
-        else:
-            parent_path, current_label = self.value.rsplit('.', 1)
-            parent_path += '.'
-        if not current_label.lstrip('0'):
-            return
-        prev_label = parent_path + to_alphanum(
-            from_alphanum(current_label) - 1, len(current_label))
+        prev_label = self.value[:-self.level_size] + to_alphanum(
+            from_alphanum(current_label) - 1, self.level_size)
         return self.qs.get(**{self.attname: prev_label})
 
     def get_next_sibling(self):
-        if self.value is None:
+        if not self.value:
             return None
 
         # TODO: Handle the case where the trigger is not in place.
 
-        if self.is_root():
-            parent_path = ''
-            current_label = self.value
-        else:
-            parent_path, current_label = self.value.rsplit('.', 1)
-            parent_path += '.'
-        next_label = parent_path + to_alphanum(
-            from_alphanum(current_label) + 1, len(current_label))
+        next_label = self.value[:-self.level_size] + to_alphanum(
+            from_alphanum(self.value[-self.level_size:]) + 1, self.level_size)
         return self.qs.filter(**{self.attname: next_label}).first()
 
     def get_level(self):
-        if self.value is not None:
-            return self.value.count('.') + 1
+        if self.value:
+            return len(self.value) // self.level_size
 
     def is_root(self):
-        if self.value is not None:
-            return '.' not in self.value
+        if self.value:
+            return len(self.value) == self.level_size
 
     def is_leaf(self):
-        if self.value is not None:
+        if self.value:
             return not self.get_children().exists()
 
     def is_ancestor_of(self, other, include_self=False):
-        if self.value is None:
+        if not self.value:
             return False
         if isinstance(other, Path):
             other = other.value
-        if other is None:
+        if not other:
             return False
         if not isinstance(other, string_types):
             raise TypeError('`other` must be a `Path` instance or a string.')
@@ -186,11 +170,11 @@ class Path:
         return other.startswith(self.value)
 
     def is_descendant_of(self, other, include_self=False):
-        if self.value is None:
+        if not self.value:
             return False
         if isinstance(other, Path):
             other = other.value
-        if other is None:
+        if not other:
             return False
         if not isinstance(other, string_types):
             raise TypeError('`other` must be a `Path` instance or a string.')

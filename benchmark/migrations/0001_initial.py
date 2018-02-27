@@ -4,7 +4,7 @@ from django.db.models import (
 )
 from mptt.fields import TreeForeignKey
 from tree.fields import PathField
-from tree.operations import CreateTreeTrigger, CreateTreeIndex
+from tree.operations import CreateTreeTrigger
 
 from ..models import get_random_name
 
@@ -38,11 +38,10 @@ class Migration(migrations.Migration):
                 ('id', AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('name', CharField(max_length=50, unique=True, default=get_random_name)),
                 ('parent', ForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
-                ('path', PathField()),
+                ('path', PathField(order_by=('name',), db_index=True)),
             ],
         ),
-        CreateTreeTrigger('TreePlace', order_by=('name',)),
-        CreateTreeIndex('TreePlace'),
+        CreateTreeTrigger('TreePlace'),
 
         migrations.CreateModel(
             name='TreebeardALPlace',

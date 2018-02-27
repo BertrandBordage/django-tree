@@ -38,10 +38,10 @@ class PathTest(TransactionTestCase):
 
     def create_test_places(self):
         self.correct_places_data = [
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
-            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich')]
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime'),
+            ('0001', 'Poitou-Charentes'), ('000100', 'Vienne'),
+            ('00010000', 'Poitiers'), ('01', 'Österreich')]
         france = self.create_place('France')
         yield france
         normandie = self.create_place('Normandie', france)
@@ -73,40 +73,40 @@ class PathTest(TransactionTestCase):
         next(it)
         self.assertPlaces([('00', 'France')])
         next(it)
-        self.assertPlaces([('00', 'France'), ('00.00', 'Normandie')])
+        self.assertPlaces([('00', 'France'), ('0000', 'Normandie')])
         next(it)
-        self.assertPlaces([('00', 'France'), ('00.00', 'Normandie'),
-                           ('00.00.00', 'Seine-Maritime')])
-        next(it)
-        self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'),
-            ('00.00.00', 'Eure'), ('00.00.01', 'Seine-Maritime')])
+        self.assertPlaces([('00', 'France'), ('0000', 'Normandie'),
+                           ('000000', 'Seine-Maritime')])
         next(it)
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime')])
+            ('00', 'France'), ('0000', 'Normandie'),
+            ('000000', 'Eure'), ('000001', 'Seine-Maritime')])
         next(it)
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime')])
+        next(it)
+        self.assertPlaces([
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime'),
             ('01', 'Österreich')])
         next(it)
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('01', 'Österreich'), ('01.00', 'Vienne')])
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime'),
+            ('01', 'Österreich'), ('0100', 'Vienne')])
         next(it)
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.01', 'Poitou-Charentes'), ('01', 'Österreich'),
-            ('01.00', 'Vienne')])
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime'),
+            ('0001', 'Poitou-Charentes'), ('01', 'Österreich'),
+            ('0100', 'Vienne')])
         next(it)
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.01', 'Poitou-Charentes'), ('01', 'Österreich'),
-            ('01.00', 'Vienne'), ('01.00.00', 'Poitiers')])
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime'),
+            ('0001', 'Poitou-Charentes'), ('01', 'Österreich'),
+            ('0100', 'Vienne'), ('010000', 'Poitiers')])
         next(it)
         self.assertPlaces(self.correct_places_data)
 
@@ -120,9 +120,9 @@ class PathTest(TransactionTestCase):
         with self.assertNumQueries(3):
             manche.delete()
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Seine-Maritime'), ('00.01', 'Poitou-Charentes'),
-            ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Seine-Maritime'), ('0001', 'Poitou-Charentes'),
+            ('000100', 'Vienne'), ('00010000', 'Poitiers'),
             ('01', 'Österreich')])
 
         # Branch
@@ -130,8 +130,8 @@ class PathTest(TransactionTestCase):
         with self.assertNumQueries(3):
             normandie.delete()
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Poitou-Charentes'),
-            ('00.00.00', 'Vienne'), ('00.00.00.00', 'Poitiers'),
+            ('00', 'France'), ('0000', 'Poitou-Charentes'),
+            ('000000', 'Vienne'), ('00000000', 'Poitiers'),
             ('01', 'Österreich')])
 
         # Root
@@ -149,10 +149,10 @@ class PathTest(TransactionTestCase):
             osterreich.save()
         self.assertPlaces([
             ('00', 'Autriche'), ('01', 'France'),
-            ('01.00', 'Normandie'), ('01.00.00', 'Eure'),
-            ('01.00.01', 'Manche'), ('01.00.02', 'Seine-Maritime'),
-            ('01.01', 'Poitou-Charentes'), ('01.01.00', 'Vienne'),
-            ('01.01.00.00', 'Poitiers')])
+            ('0100', 'Normandie'), ('010000', 'Eure'),
+            ('010001', 'Manche'), ('010002', 'Seine-Maritime'),
+            ('0101', 'Poitou-Charentes'), ('010100', 'Vienne'),
+            ('01010000', 'Poitiers')])
 
     def test_move_root_to_next_root(self):
         list(self.create_test_places())
@@ -163,32 +163,32 @@ class PathTest(TransactionTestCase):
             france.save()
         self.assertPlaces([
             ('00', 'Österreich'), ('01', 'République française'),
-            ('01.00', 'Normandie'), ('01.00.00', 'Eure'),
-            ('01.00.01', 'Manche'), ('01.00.02', 'Seine-Maritime'),
-            ('01.01', 'Poitou-Charentes'), ('01.01.00', 'Vienne'),
-            ('01.01.00.00', 'Poitiers')])
+            ('0100', 'Normandie'), ('010000', 'Eure'),
+            ('010001', 'Manche'), ('010002', 'Seine-Maritime'),
+            ('0101', 'Poitou-Charentes'), ('010100', 'Vienne'),
+            ('01010000', 'Poitiers')])
 
     def test_move_root_to_prev_branch(self):
         list(self.create_test_places())
 
         little_france = Place.objects.create(name='Île-de-France')
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'),
-            ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
-            ('00.01.00.00', 'Poitiers'), ('01', 'Île-de-France'),
+            ('00', 'France'), ('0000', 'Normandie'),
+            ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime'),
+            ('0001', 'Poitou-Charentes'), ('000100', 'Vienne'),
+            ('00010000', 'Poitiers'), ('01', 'Île-de-France'),
             ('02', 'Österreich')])
 
         little_france.parent = Place.objects.get(name='France')
         with self.assertNumQueries(1):
             little_france.save()
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Île-de-France'),
-            ('00.01', 'Normandie'), ('00.01.00', 'Eure'),
-            ('00.01.01', 'Manche'), ('00.01.02', 'Seine-Maritime'),
-            ('00.02', 'Poitou-Charentes'), ('00.02.00', 'Vienne'),
-            ('00.02.00.00', 'Poitiers'), ('01', 'Österreich')])
+            ('00', 'France'), ('0000', 'Île-de-France'),
+            ('0001', 'Normandie'), ('000100', 'Eure'),
+            ('000101', 'Manche'), ('000102', 'Seine-Maritime'),
+            ('0002', 'Poitou-Charentes'), ('000200', 'Vienne'),
+            ('00020000', 'Poitiers'), ('01', 'Österreich')])
 
     def test_move_root_to_next_branch(self):
         list(self.create_test_places())
@@ -196,41 +196,41 @@ class PathTest(TransactionTestCase):
         bretagne = Place.objects.create(name='Bretagne')
         self.assertPlaces([
             ('00', 'Bretagne'),
-            ('01', 'France'), ('01.00', 'Normandie'),
-            ('01.00.00', 'Eure'),
-            ('01.00.01', 'Manche'), ('01.00.02', 'Seine-Maritime'),
-            ('01.01', 'Poitou-Charentes'), ('01.01.00', 'Vienne'),
-            ('01.01.00.00', 'Poitiers'), ('02', 'Österreich')])
+            ('01', 'France'), ('0100', 'Normandie'),
+            ('010000', 'Eure'),
+            ('010001', 'Manche'), ('010002', 'Seine-Maritime'),
+            ('0101', 'Poitou-Charentes'), ('010100', 'Vienne'),
+            ('01010000', 'Poitiers'), ('02', 'Österreich')])
 
         bretagne.parent = Place.objects.get(name='France')
         with self.assertNumQueries(1):
             bretagne.save()
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Bretagne'), ('00.01', 'Normandie'),
-            ('00.01.00', 'Eure'),
-            ('00.01.01', 'Manche'), ('00.01.02', 'Seine-Maritime'),
-            ('00.02', 'Poitou-Charentes'), ('00.02.00', 'Vienne'),
-            ('00.02.00.00', 'Poitiers'), ('01', 'Österreich')])
+            ('00', 'France'), ('0000', 'Bretagne'), ('0001', 'Normandie'),
+            ('000100', 'Eure'),
+            ('000101', 'Manche'), ('000102', 'Seine-Maritime'),
+            ('0002', 'Poitou-Charentes'), ('000200', 'Vienne'),
+            ('00020000', 'Poitiers'), ('01', 'Österreich')])
 
     def test_move_root_to_prev_leaf(self):
         list(self.create_test_places())
 
         grattenoix = Place.objects.create(name='Grattenoix')
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
-            ('00.01.00.00', 'Poitiers'), ('01', 'Grattenoix'),
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime'),
+            ('0001', 'Poitou-Charentes'), ('000100', 'Vienne'),
+            ('00010000', 'Poitiers'), ('01', 'Grattenoix'),
             ('02', 'Österreich')])
 
         grattenoix.parent = Place.objects.get(name='Seine-Maritime')
         with self.assertNumQueries(1):
             grattenoix.save()
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.00.02.00', 'Grattenoix'), ('00.01', 'Poitou-Charentes'),
-            ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime'),
+            ('00000200', 'Grattenoix'), ('0001', 'Poitou-Charentes'),
+            ('000100', 'Vienne'), ('00010000', 'Poitiers'),
             ('01', 'Österreich')])
 
     def test_move_root_to_next_leaf(self):
@@ -238,20 +238,20 @@ class PathTest(TransactionTestCase):
 
         evreux = Place.objects.create(name='Évreux')
         self.assertPlaces([
-            ('00', 'Évreux'), ('01', 'France'), ('01.00', 'Normandie'),
-            ('01.00.00', 'Eure'), ('01.00.01', 'Manche'),
-            ('01.00.02', 'Seine-Maritime'), ('01.01', 'Poitou-Charentes'),
-            ('01.01.00', 'Vienne'), ('01.01.00.00', 'Poitiers'),
+            ('00', 'Évreux'), ('01', 'France'), ('0100', 'Normandie'),
+            ('010000', 'Eure'), ('010001', 'Manche'),
+            ('010002', 'Seine-Maritime'), ('0101', 'Poitou-Charentes'),
+            ('010100', 'Vienne'), ('01010000', 'Poitiers'),
             ('02', 'Österreich')])
 
         evreux.parent = Place.objects.get(name='Eure')
         with self.assertNumQueries(1):
             evreux.save()
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.00.00', 'Évreux'), ('00.00.01', 'Manche'),
-            ('00.00.02', 'Seine-Maritime'), ('00.01', 'Poitou-Charentes'),
-            ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('00000000', 'Évreux'), ('000001', 'Manche'),
+            ('000002', 'Seine-Maritime'), ('0001', 'Poitou-Charentes'),
+            ('000100', 'Vienne'), ('00010000', 'Poitiers'),
             ('01', 'Österreich')])
 
     # TODO: Add move_branch_to_prev_root.
@@ -268,7 +268,7 @@ class PathTest(TransactionTestCase):
     # TODO: Add move_leaf_to_next_leaf.
 
     def test_max_siblings(self):
-        max_siblings = 108
+        max_siblings = Place._meta.get_field('path').max_siblings
         bulk = [Place(name='Anything') for _ in range(max_siblings)]
         with self.assertNumQueries(1):
             Place.objects.bulk_create(bulk)
@@ -498,7 +498,7 @@ class PathTest(TransactionTestCase):
                 list(france.get_prev_siblings(include_self=True)
                      .values_list('name', flat=True)), ['France'])
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(0):
             self.assertListEqual(
                 list(france.get_prev_siblings()
                      .values_list('name', flat=True)), [])
@@ -512,7 +512,7 @@ class PathTest(TransactionTestCase):
                 list(normandie.get_prev_siblings(include_self=True)
                      .values_list('name', flat=True)), ['Normandie'])
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(0):
             self.assertListEqual(
                 list(normandie.get_prev_siblings()
                      .values_list('name', flat=True)), [])
@@ -656,6 +656,14 @@ class PathTest(TransactionTestCase):
         self.assertTrue(france <= france)
 
         # vs None
+        self.assertFalse(france == '')
+        self.assertTrue(france != '')
+        self.assertTrue(france < '')
+        self.assertTrue(france <= '')
+        self.assertFalse(france > '')
+        self.assertFalse(france >= '')
+
+        # vs None
         self.assertFalse(france == None)
         self.assertTrue(france != None)
         self.assertTrue(france < None)
@@ -747,10 +755,10 @@ class PathTest(TransactionTestCase):
         with Place.disabled_tree_trigger():
             Place.objects.filter(name='France').update(path='2Z')
         self.assertPlaces([
-            ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
-            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
+            ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime'),
+            ('0001', 'Poitou-Charentes'), ('000100', 'Vienne'),
+            ('00010000', 'Poitiers'), ('01', 'Österreich'),
             ('2Z', 'France')])
         with self.assertNumQueries(1):
             Place.rebuild_paths()
@@ -758,25 +766,25 @@ class PathTest(TransactionTestCase):
 
         # Branch
         with Place.disabled_tree_trigger():
-            Place.objects.filter(name='Normandie').update(path='2Z.2Z')
+            Place.objects.filter(name='Normandie').update(path='2Z2Z')
         self.assertPlaces([
-            ('00', 'France'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.00.02', 'Seine-Maritime'),
-            ('00.01', 'Poitou-Charentes'), ('00.01.00', 'Vienne'),
-            ('00.01.00.00', 'Poitiers'), ('01', 'Österreich'),
-            ('2Z.2Z', 'Normandie')])
+            ('00', 'France'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('000002', 'Seine-Maritime'),
+            ('0001', 'Poitou-Charentes'), ('000100', 'Vienne'),
+            ('00010000', 'Poitiers'), ('01', 'Österreich'),
+            ('2Z2Z', 'Normandie')])
         with self.assertNumQueries(1):
             Place.rebuild_paths()
         self.assertPlaces(self.correct_places_data)
 
         # Leaf
         with Place.disabled_tree_trigger():
-            Place.objects.filter(name='Seine-Maritime').update(path='00.2Z')
+            Place.objects.filter(name='Seine-Maritime').update(path='002Z')
         self.assertPlaces([
-            ('00', 'France'), ('00.00', 'Normandie'), ('00.00.00', 'Eure'),
-            ('00.00.01', 'Manche'), ('00.01', 'Poitou-Charentes'),
-            ('00.01.00', 'Vienne'), ('00.01.00.00', 'Poitiers'),
-            ('00.2Z', 'Seine-Maritime'), ('01', 'Österreich')])
+            ('00', 'France'), ('0000', 'Normandie'), ('000000', 'Eure'),
+            ('000001', 'Manche'), ('0001', 'Poitou-Charentes'),
+            ('000100', 'Vienne'), ('00010000', 'Poitiers'),
+            ('002Z', 'Seine-Maritime'), ('01', 'Österreich')])
         with self.assertNumQueries(1):
             Place.rebuild_paths()
         self.assertPlaces(self.correct_places_data)

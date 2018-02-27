@@ -1,7 +1,7 @@
 from django.apps import AppConfig
 
 from .fields import PathField
-from .lookups import DescendantOf, AncestorOf, Match, MatchAny, Search
+from .lookups import AncestorOf, SiblingOf, ChildOf, DescendantOf
 from .transforms import Level
 
 
@@ -10,10 +10,9 @@ class TreeAppConfig(AppConfig):
     verbose_name = 'Tree'
 
     def ready(self):
-        PathField.register_lookup(DescendantOf)
         PathField.register_lookup(AncestorOf)
-        PathField.register_lookup(Match)
-        PathField.register_lookup(MatchAny)
-        PathField.register_lookup(Search)
+        PathField.register_lookup(SiblingOf)
+        PathField.register_lookup(ChildOf)
+        PathField.register_lookup(DescendantOf)
 
         PathField.register_lookup(Level)

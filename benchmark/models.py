@@ -27,7 +27,7 @@ class TreePlace(TreeModelMixin, Model):
     name = CharField(max_length=50, unique=True, default=get_random_name)
     parent = ForeignKey('self', null=True, blank=True, related_name='children',
                         on_delete=CASCADE)
-    path = PathField()
+    path = PathField(order_by=('name',), db_index=True)
 
 
 class TreebeardALPlace(AL_Node):

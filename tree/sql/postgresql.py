@@ -73,14 +73,13 @@ UPDATE_PATHS_FUNCTION = """
         path text := TG_ARGV[2];
         order_by text[] := TG_ARGV[3];
         max_siblings int := TG_ARGV[4];
-        label_size int := TG_ARGV[5];
+        level_size int := TG_ARGV[5];
         order_by_cols text := array_to_string(order_by, ',');
         order_by_cols2 text := 't2.' || array_to_string(order_by, ',t2.');
-        old_path ltree := NULL;
-        new_path ltree;
-        old_parent_path ltree := '';
-        siblings_query lquery;
-        new_parent_path ltree;
+        old_path text := NULL;
+        new_path text;
+        old_parent_path text := NULL;
+        new_parent_path text;
         parent_changed boolean;
         n_siblings integer;
     BEGIN
@@ -89,7 +88,6 @@ UPDATE_PATHS_FUNCTION = """
         END IF;        
 
         IF TG_OP = 'DELETE' THEN
-            {set_siblings_query}
             {update_old_siblings}
             RETURN OLD;
         END IF;
@@ -106,11 +104,11 @@ UPDATE_PATHS_FUNCTION = """
 
         {get_new_parent_path}
         IF new_parent_path IS NULL THEN
-            new_parent_path := ''::ltree;
+            new_parent_path := '';
         END IF;
         IF TG_OP = 'UPDATE' THEN
             -- TODO: Add this behaviour to the model validation.
-            IF new_parent_path <@ old_path THEN
+            IF new_parent_path LIKE old_path || '%' THEN
                 RAISE 'Cannot set itself or a descendant as parent.';
             END IF;
         END IF;
@@ -128,14 +126,13 @@ UPDATE_PATHS_FUNCTION = """
                     'You should increase it then rebuild.', max_siblings;
             END IF;
             IF TG_OP = 'UPDATE' THEN
-                {set_siblings_query}
                 {update_old_siblings}
             END IF;
         END IF;
 
         {get_new_parent_path}
         IF new_parent_path IS NULL THEN
-            new_parent_path := ''::ltree;
+            new_parent_path := '';
         END IF;
 
         {update_new_siblings}
@@ -145,21 +142,15 @@ UPDATE_PATHS_FUNCTION = """
     $$ LANGUAGE plpgsql;
     """.format(
     get_old_paths=format_sql_in_function("""
-        SELECT {USING[OLD]}.{path}, subpath({USING[OLD]}.{path}, 0, -1)
+        SELECT {USING[OLD]}.{path},
+               left({USING[OLD]}.{path}, -({level_size:L})::int)
     """, into=['old_path', 'old_parent_path']),
-    set_siblings_query=format_sql_in_function("""
-        SELECT ((CASE
-            WHEN {USING[old_parent_path]} = ''::ltree
-            THEN ''
-            ELSE {USING[old_parent_path]}::text || '.'
-        END) || '*{{1}}')::lquery
-    """, into=['siblings_query']),
     get_new_path=format_sql_in_function(
         'SELECT {USING[NEW]}.{path}', into=['new_path']),
     rebuild=format_sql_in_function("""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
-                SELECT NULL::int, ''::ltree
+                SELECT {parent}, ''
                 FROM {table_name}
                 WHERE {parent} IS NULL
                 LIMIT 1
@@ -169,7 +160,7 @@ UPDATE_PATHS_FUNCTION = """
                     t1.path || to_alphanum(
                         row_number() OVER (PARTITION BY t1.pk
                                            ORDER BY {order_by_cols2:s}) - 1,
-                        {label_size:L})
+                        {level_size:L})
                 FROM generate_paths AS t1
                 INNER JOIN {table_name} AS t2 ON (
                     t2.{parent} = t1.pk
@@ -189,18 +180,18 @@ UPDATE_PATHS_FUNCTION = """
         WITH RECURSIVE generate_paths(pk, path) AS ((
                 SELECT
                     {pk},
-                    {USING[old_parent_path]} || to_alphanum(from_alphanum(
-                        subpath({path}, nlevel({USING[old_parent_path]}),
-                                1)::text
-                    ) - 1, {label_size:L})
+                    {USING[old_parent_path]} || to_alphanum(
+                        from_alphanum(right({path}, {level_size:L})) - 1,
+                        {level_size:L})
                 FROM {table_name}
                 WHERE
                     {path} > {USING[old_path]}
-                    AND {path} ~ {USING[siblings_query]}
+                    AND {path} LIKE ({USING[old_parent_path]}
+                                     || repeat('_', {level_size:L}))
             ) UNION ALL (
                 SELECT
                     t2.{pk},
-                    t1.path || subpath(t2.{path}, nlevel(t1.path))
+                    t1.path || right(t2.{path}, -length(t1.path))
                 FROM generate_paths AS t1
                 INNER JOIN {table_name} AS t2 ON t2.{parent} = t1.pk
             )
@@ -227,7 +218,7 @@ UPDATE_PATHS_FUNCTION = """
                     {pk},
                     {USING[new_parent_path]} || to_alphanum(
                         row_number() OVER (ORDER BY {order_by_cols:s}) - 1,
-                        {label_size:L})
+                        {level_size:L})
                 FROM ((
                         SELECT *
                         FROM {table_name}
@@ -246,7 +237,7 @@ UPDATE_PATHS_FUNCTION = """
                     t1.path || to_alphanum(
                         row_number() OVER (PARTITION BY t1.pk
                                            ORDER BY {order_by_cols2:s}) - 1,
-                        {label_size:L})
+                        {level_size:L})
                 FROM generate_paths AS t1
                 INNER JOIN {table_name} AS t2 ON t2.{parent} = t1.pk
             )
@@ -290,7 +281,6 @@ REBUILD_PATHS_FUNCTION = """
 
 
 CREATE_FUNCTIONS_QUERIES = (
-    'CREATE EXTENSION IF NOT EXISTS ltree;',
     """
     CREATE OR REPLACE FUNCTION to_alphanum(i bigint,
                                            size smallint) RETURNS text AS $$
@@ -348,7 +338,6 @@ DROP_FUNCTIONS_QUERIES = (
     'DROP FUNCTION IF EXISTS update_paths();',
     'DROP FUNCTION IF EXISTS from_alphanum(label text);',
     'DROP FUNCTION IF EXISTS to_alphanum(i bigint, size smallint);',
-    'DROP EXTENSION IF EXISTS ltree;',
 )
 
 CREATE_TRIGGER_QUERIES = (
@@ -360,7 +349,7 @@ CREATE_TRIGGER_QUERIES = (
     WHEN (pg_trigger_depth() = 0)
     EXECUTE PROCEDURE update_paths(
         '{pk}', '{parent}', '{path}', '{{{order_by}}}',
-        {max_siblings}, {label_size});
+        {max_siblings}, {level_size});
     """,
     """
     CREATE TRIGGER "update_{path}_after"
@@ -370,7 +359,7 @@ CREATE_TRIGGER_QUERIES = (
     WHEN (pg_trigger_depth() = 0)
     EXECUTE PROCEDURE update_paths(
         '{pk}', '{parent}', '{path}', '{{{order_by}}}',
-        {max_siblings}, {label_size});
+        {max_siblings}, {level_size});
     """,
     """
     CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
@@ -396,15 +385,6 @@ DROP_TRIGGER_QUERIES = (
     'DROP TRIGGER IF EXISTS "update_{path}_after" ON "{table}";',
     'DROP TRIGGER IF EXISTS "update_{path}_before" ON "{table}";',
     'DROP FUNCTION IF EXISTS rebuild_{table}_{path}();',
-)
-
-
-CREATE_INDEX_QUERIES = (
-    'CREATE INDEX "{table}_{path}" ON "{table}" USING gist("{path}");',
-)
-
-DROP_INDEX_QUERIES = (
-    'DROP INDEX "{table}_{path}";',
 )
 
 
