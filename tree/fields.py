@@ -46,12 +46,11 @@ class PathField(TextField):
 
         super(PathField, self).__init__(*args, **kwargs)
 
-    def contribute_to_class(self, cls, name, private_only=False):
+    def contribute_to_class(self, cls, name, *args, **kwargs):
         if name in self.order_by:
             raise ImproperlyConfigured(
                 '`PathField.order_by` cannot reference itself.' % name)
-        super(PathField, self).contribute_to_class(cls, name,
-                                                   private_only=private_only)
+        super(PathField, self).contribute_to_class(cls, name, *args, **kwargs)
 
     def deconstruct(self):
         name, path, args, kwargs = super(PathField, self).deconstruct()

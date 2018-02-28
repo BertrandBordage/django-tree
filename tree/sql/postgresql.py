@@ -85,7 +85,7 @@ UPDATE_PATHS_FUNCTION = """
     BEGIN
         IF TG_OP != 'INSERT' THEN
             {get_old_paths}
-        END IF;        
+        END IF;
 
         IF TG_OP = 'DELETE' THEN
             {update_old_siblings}
