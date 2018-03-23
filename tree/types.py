@@ -94,39 +94,45 @@ class Path:
             return qs
         return qs.exclude(**{self.attname: self.value})
 
-    def get_siblings(self, include_self=False):
+    def get_siblings(self, include_self=False, queryset=None):
         if not self.value:
             return self.qs.none()
 
-        qs = self.qs.filter(**{self.attname + '__sibling_of': self.value})
+        qs = self.qs if queryset is None else queryset
+        qs = qs.filter(**{self.attname + '__sibling_of': self.value})
         if include_self:
             return qs
         return qs.exclude(**{self.attname: self.value})
 
-    def get_prev_siblings(self, include_self=False):
+    def get_prev_siblings(self, include_self=False, queryset=None):
         if not self.value or (
                 not include_self and (self.value[-self.level_size:]
                                       == self.field.first_sibling_value)):
             return self.qs.none()
-        siblings = self.get_siblings(include_self=include_self)
+        siblings = self.get_siblings(include_self=include_self,
+                                     queryset=queryset)
         lookup = '__lte' if include_self else '__lt'
         return (siblings.filter(**{self.attname + lookup: self.value})
                 .order_by('-' + self.attname))
 
-    def get_next_siblings(self, include_self=False):
+    def get_next_siblings(self, include_self=False, queryset=None):
         if not self.value:
             return self.qs.none()
-        siblings = self.get_siblings(include_self=include_self)
+        siblings = self.get_siblings(include_self=include_self,
+                                     queryset=queryset)
         lookup = '__gte' if include_self else '__gt'
         return (siblings.filter(**{self.attname + lookup: self.value})
                 .order_by(self.attname))
 
-    def get_prev_sibling(self):
+    def get_prev_sibling(self, queryset=None):
         if not self.value:
             return
         current_label = self.value[-self.level_size:]
         if current_label == self.field.first_sibling_value:
             return
+
+        if queryset is not None:
+            return self.get_prev_siblings(queryset=queryset).first()
 
         # TODO: Handle the case where the trigger is not in place.
 
@@ -134,9 +140,12 @@ class Path:
             from_alphanum(current_label) - 1, self.level_size)
         return self.qs.get(**{self.attname: prev_label})
 
-    def get_next_sibling(self):
+    def get_next_sibling(self, queryset=None):
         if not self.value:
             return None
+
+        if queryset is not None:
+            return self.get_next_siblings(queryset=queryset).first()
 
         # TODO: Handle the case where the trigger is not in place.
 
