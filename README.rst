@@ -40,10 +40,9 @@ of SQL.
 Installation
 ------------
 
-Django-tree requires Django 1.8 or 1.9 and Python 2 or 3.
-For the moment, django-tree is only for PostgreSQL because it uses a specific
-data type not available in other databases. It will be adapted to also use
-a standard text field in the future for other databases, but it may be slower.
+Django-tree requires Django 1.8, 1.11 or 2.0 and Python 2 or 3.
+For the moment, django-tree is only for PostgreSQL.
+It will be adapted in the future for other databases.
 
 After installing the module, you need to add ``'tree',`` to your
 ``INSTALLED_APPS``, then add a ``PathField`` to a model with a
@@ -116,7 +115,7 @@ then rebuild the paths and revert the allowance of ``NULL`` values:
 
 However, the model above is not ordered. The children of a same parent will be
 ordered by primary key. You can specify how children are ordered using the
-``order_by`` argument of ``CreateTreeTrigger``. If needed, you can add a field
+``order_by`` argument of ``PathField``. If needed, you can add a field
 for users to explicitly order these objects, typically a position field.
 Example model:
 
@@ -131,7 +130,7 @@ Example model:
         name = CharField(max_length=30)
         parent = ForeignKey('self', null=True, blank=True)
         position = IntegerField(default=1)
-        path = PathField()
+        path = PathField(order_by=['position', 'name'])
         public = BooleanField(default=False)
 
         class Meta:
@@ -152,7 +151,7 @@ And the corresponding migration:
         operations = [
             migrations.AddField('YourModel', 'position',
                                 models.IntegerField(default=1))
-            CreateTreeTrigger('YourModel', order_by=('position', 'name')),
+            CreateTreeTrigger('YourModel'),
         ]
 
 Here, the children of a same parent will be ordered by position, and then
@@ -215,7 +214,7 @@ Example to show you most of the possibilities:
         # The trigger is restored after that, even if there an error occurred.
         pass
 
-There is also a bunch of less useful lookups, transforms and functions
+There is also a bunch of less useful lookups and transforms
 available. They will be documented with examples in the future.
 
 
