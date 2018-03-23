@@ -1,41 +1,9 @@
 from contextlib import contextmanager
-from django.core.exceptions import FieldDoesNotExist
+
 from django.db import DEFAULT_DB_ALIAS, transaction
+from django.db.models import Model
 
-from .fields import PathField
-
-
-def _get_path_fields(model, name=None):
-    if name is None:
-        return [f for f in model._meta.fields if isinstance(f, PathField)]
-    return [model._meta.get_field(name)]
-
-
-def _get_path_field(model, name):
-    path_fields = _get_path_fields(model, name)
-    n = len(path_fields)
-    if n == 0:
-        raise FieldDoesNotExist(
-            'A `PathField` needs to be defined '
-            'in order to use `TreeModelMixin`.')
-    if n == 1:
-        return path_fields[0]
-    raise ValueError(
-        'You need to specify which `PathField` to use for this query '
-        'among these values: %s' % [f.name for f in path_fields])
-
-
-class TreeQuerySetMixin:
-    def _get_path_field_name(self, name):
-        return _get_path_field(self.model, name).name
-
-    def get_descendants(self, include_self=False, path_field=None):
-        name = self._get_path_field_name(path_field)
-        # TODO: Avoids doing an extra query.
-        pattern = r'^(%s)' % '|'.join(self.values_list(name, flat=True))
-        if not include_self:
-            pattern += r'.'
-        return self.filter(**{name + '__regex': pattern})
+from .query import _get_path_fields, _get_path_field, TreeManager
 
 
 class TreeModelMixin:
@@ -61,25 +29,29 @@ class TreeModelMixin:
         return (self._get_path_value(path_field)
                 .get_descendants(include_self=include_self))
 
-    def get_siblings(self, include_self=False, path_field=None):
+    def get_siblings(self, include_self=False, queryset=None, path_field=None):
         return (self._get_path_value(path_field)
-                .get_siblings(include_self=include_self))
+                .get_siblings(include_self=include_self, queryset=queryset))
 
-    def get_prev_siblings(self, include_self=False, path_field=None):
+    def get_prev_siblings(self, include_self=False, queryset=None,
+                          path_field=None):
         return (self._get_path_value(path_field)
-                .get_prev_siblings(include_self=include_self))
+                .get_prev_siblings(include_self=include_self,
+                                   queryset=queryset))
 
-    def get_next_siblings(self, include_self=False, path_field=None):
+    def get_next_siblings(self, include_self=False, queryset=None,
+                          path_field=None):
         return (self._get_path_value(path_field)
-                .get_next_siblings(include_self=include_self))
+                .get_next_siblings(include_self=include_self,
+                                   queryset=queryset))
 
-    def get_prev_sibling(self, path_field=None):
+    def get_prev_sibling(self, queryset=None, path_field=None):
         return (self._get_path_value(path_field)
-                .get_prev_sibling())
+                .get_prev_sibling(queryset=queryset))
 
-    def get_next_sibling(self, path_field=None):
+    def get_next_sibling(self, queryset=None, path_field=None):
         return (self._get_path_value(path_field)
-                .get_next_sibling())
+                .get_next_sibling(queryset=queryset))
 
     def get_level(self, path_field=None):
         return self._get_path_value(path_field).get_level()
@@ -153,3 +125,10 @@ class TreeModelMixin:
             yield
         finally:
             cls.enable_tree_trigger(db_alias=db_alias, path_field=path_field)
+
+
+class TreeModel(TreeModelMixin, Model):
+    objects = TreeManager()
+
+    class Meta:
+        abstract = True
