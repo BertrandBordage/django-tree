@@ -40,6 +40,10 @@ class TreeQuerySetMixin:
 
 class TreeModelMixin:
     @classmethod
+    def _get_path_fields(cls, name):
+        return _get_path_fields(cls, name)
+
+    @classmethod
     def _get_path_field(cls, name):
         return _get_path_field(cls, name)
 
