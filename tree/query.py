@@ -1,3 +1,4 @@
+import django
 from django.core.exceptions import FieldDoesNotExist
 from django.db.models import QuerySet
 from django.db.models.manager import BaseManager
@@ -44,4 +45,5 @@ class TreeQuerySet(TreeQuerySetMixin, QuerySet):
 
 
 class TreeManager(BaseManager.from_queryset(TreeQuerySet)):
-    pass
+    if django.VERSION <= (1, 8):
+        use_for_related_fields = True
