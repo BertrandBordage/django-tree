@@ -157,9 +157,10 @@ class Benchmark:
             bbox_transform=plt.gcf().transFigure,
             fancybox=True, shadow=True, ncol=3)
 
+        filename = ('%s - %s.svg' % (database_name,
+                                     test_name)).replace(' ', '_')
         plt.savefig(
-            os.path.join(self.results_path,
-                         '%s - %s.svg' % (database_name, test_name)),
+            os.path.join(self.results_path, filename),
             bbox_extra_artists=(legend,), bbox_inches='tight',
         )
 
