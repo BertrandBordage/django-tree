@@ -29,7 +29,7 @@ from .models import Place
 # TODO: Test unusual table names.
 
 
-class PathTest(TransactionTestCase):
+class CommonTest(TransactionTestCase):
     maxDiff = 1000
 
     def create_place(self, name, parent=None, n_queries=1):
@@ -60,6 +60,9 @@ class PathTest(TransactionTestCase):
         vienne.save()
         yield vienne
 
+    def create_all_test_places(self):
+        list(self.create_test_places())
+
     def assertPlaces(self, values, queryset=None, n_queries=1):
         with self.assertNumQueries(n_queries):
             if queryset is None:
@@ -68,6 +71,8 @@ class PathTest(TransactionTestCase):
             self.assertListEqual([(p.path.value, p.name) for p in places],
                                  values)
 
+
+class PathTest(CommonTest):
     def test_insert(self):
         it = self.create_test_places()
         next(it)
@@ -111,7 +116,7 @@ class PathTest(TransactionTestCase):
         self.assertPlaces(self.correct_places_data)
 
     def test_delete(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         self.assertPlaces(self.correct_places_data)
 
@@ -141,7 +146,7 @@ class PathTest(TransactionTestCase):
         self.assertPlaces([('00', 'Österreich')])
 
     def test_move_root_to_prev_root(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         osterreich = Place.objects.get(name='Österreich')
         osterreich.name = 'Autriche'
@@ -155,7 +160,7 @@ class PathTest(TransactionTestCase):
             ('01010000', 'Poitiers')])
 
     def test_move_root_to_next_root(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         france = Place.objects.get(name='France')
         france.name = 'République française'
@@ -169,7 +174,7 @@ class PathTest(TransactionTestCase):
             ('01010000', 'Poitiers')])
 
     def test_move_root_to_prev_branch(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         little_france = Place.objects.create(name='Île-de-France')
         self.assertPlaces([
@@ -191,7 +196,7 @@ class PathTest(TransactionTestCase):
             ('00020000', 'Poitiers'), ('01', 'Österreich')])
 
     def test_move_root_to_next_branch(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         bretagne = Place.objects.create(name='Bretagne')
         self.assertPlaces([
@@ -213,7 +218,7 @@ class PathTest(TransactionTestCase):
             ('00020000', 'Poitiers'), ('01', 'Österreich')])
 
     def test_move_root_to_prev_leaf(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         grattenoix = Place.objects.create(name='Grattenoix')
         self.assertPlaces([
@@ -234,7 +239,7 @@ class PathTest(TransactionTestCase):
             ('01', 'Österreich')])
 
     def test_move_root_to_next_leaf(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         evreux = Place.objects.create(name='Évreux')
         self.assertPlaces([
@@ -287,7 +292,7 @@ class PathTest(TransactionTestCase):
                 Place.objects.create(name='Anything')
 
     def test_get_level(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         with self.assertNumQueries(1):
             data = [(p.get_level(), p.name) for p in Place.objects.all()]
@@ -297,20 +302,20 @@ class PathTest(TransactionTestCase):
                 (4, 'Poitiers'), (1, 'Österreich')])
 
     def test_is_root(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         places = [p.name for p in Place.objects.all() if p.is_root()]
         self.assertListEqual(places, ['France', 'Österreich'])
 
     def test_is_leaf(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         places = [p.name for p in Place.objects.all() if p.is_leaf()]
         self.assertListEqual(places, ['Eure', 'Manche', 'Seine-Maritime',
                                       'Poitiers', 'Österreich'])
 
     def test_get_children(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         # Root
 
@@ -342,7 +347,7 @@ class PathTest(TransactionTestCase):
                      .values_list('name', flat=True)), [])
 
     def test_get_ancestors(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         # Root
 
@@ -388,7 +393,7 @@ class PathTest(TransactionTestCase):
                      .values_list('name', flat=True)), ['France', 'Normandie'])
 
     def test_get_descendants(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         # Root
 
@@ -439,7 +444,7 @@ class PathTest(TransactionTestCase):
                      .values_list('name', flat=True)), [])
 
     def test_get_siblings(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         # Root
 
@@ -486,8 +491,59 @@ class PathTest(TransactionTestCase):
                 list(seine_maritime.get_siblings()
                      .values_list('name', flat=True)), ['Eure', 'Manche'])
 
+    def test_filtered_get_siblings(self):
+        self.create_all_test_places()
+        queryset = Place.objects.filter(name__lt='O')
+
+        # Root
+
+        france = Place.objects.get(name='France')
+
+        with self.assertNumQueries(1):
+            self.assertListEqual(
+                list(france.get_siblings(include_self=True, queryset=queryset)
+                     .values_list('name', flat=True)),
+                ['France'])
+
+        with self.assertNumQueries(1):
+            self.assertListEqual(
+                list(france.get_siblings(queryset=queryset)
+                     .values_list('name', flat=True)), [])
+
+        # Branch
+
+        normandie = Place.objects.get(name='Normandie')
+
+        with self.assertNumQueries(1):
+            self.assertListEqual(
+                list(normandie.get_siblings(include_self=True,
+                                            queryset=queryset)
+                     .values_list('name', flat=True)),
+                ['Normandie'])
+
+        with self.assertNumQueries(1):
+            self.assertListEqual(
+                list(normandie.get_siblings(queryset=queryset)
+                     .values_list('name', flat=True)), [])
+
+        # Leaf
+
+        seine_maritime = Place.objects.get(name='Seine-Maritime')
+
+        with self.assertNumQueries(1):
+            self.assertListEqual(
+                list(seine_maritime.get_siblings(include_self=True,
+                                                 queryset=queryset)
+                     .values_list('name', flat=True)),
+                ['Eure', 'Manche'])
+
+        with self.assertNumQueries(1):
+            self.assertListEqual(
+                list(seine_maritime.get_siblings(queryset=queryset)
+                     .values_list('name', flat=True)), ['Eure', 'Manche'])
+
     def test_get_prev_siblings(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         # Root
 
@@ -533,7 +589,7 @@ class PathTest(TransactionTestCase):
                      .values_list('name', flat=True)), ['Manche', 'Eure'])
 
     def test_get_next_siblings(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         # Root
 
@@ -581,17 +637,17 @@ class PathTest(TransactionTestCase):
                      .values_list('name', flat=True)), [])
 
     def test_get_prev_sibling(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         # Root
         france = Place.objects.get(name='France')
         with self.assertNumQueries(0):
-            self.assertEqual(france.get_prev_sibling(), None)
+            self.assertIsNone(france.get_prev_sibling())
 
         # Branch
         normandie = Place.objects.get(name='Normandie')
         with self.assertNumQueries(0):
-            self.assertEqual(normandie.get_prev_sibling(), None)
+            self.assertIsNone(normandie.get_prev_sibling())
 
         # Leaf
         seine_maritime = Place.objects.get(name='Seine-Maritime')
@@ -600,7 +656,7 @@ class PathTest(TransactionTestCase):
                 seine_maritime.get_prev_sibling().name, 'Manche')
 
     def test_get_next_sibling(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         # Root
         france = Place.objects.get(name='France')
@@ -616,7 +672,49 @@ class PathTest(TransactionTestCase):
         # Leaf
         seine_maritime = Place.objects.get(name='Seine-Maritime')
         with self.assertNumQueries(1):
-            self.assertEqual(seine_maritime.get_next_sibling(), None)
+            self.assertIsNone(seine_maritime.get_next_sibling())
+
+    def test_filtered_get_prev_sibling(self):
+        self.create_all_test_places()
+        queryset = Place.objects.filter(name__lt='O')
+
+        # Root
+        france = Place.objects.get(name='France')
+        with self.assertNumQueries(0):
+            self.assertIsNone(france.get_prev_sibling(queryset=queryset))
+
+        # Branch
+        normandie = Place.objects.get(name='Normandie')
+        with self.assertNumQueries(0):
+            self.assertIsNone(normandie.get_prev_sibling(queryset=queryset))
+
+        # Leaf
+        seine_maritime = Place.objects.get(name='Seine-Maritime')
+        with self.assertNumQueries(1):
+            self.assertEqual(
+                seine_maritime.get_prev_sibling(queryset=queryset).name,
+                'Manche')
+
+    def test_filtered_get_next_sibling(self):
+        self.create_all_test_places()
+        queryset = Place.objects.filter(name__lt='P')
+
+        # Root
+        france = Place.objects.get(name='France')
+        with self.assertNumQueries(1):
+            self.assertEqual(france.get_next_sibling(queryset=queryset).name,
+                             'Österreich')
+
+        # Branch
+        normandie = Place.objects.get(name='Normandie')
+        with self.assertNumQueries(1):
+            self.assertIsNone(normandie.get_next_sibling(queryset=queryset))
+
+        # Leaf
+        seine_maritime = Place.objects.get(name='Seine-Maritime')
+        with self.assertNumQueries(1):
+            self.assertIsNone(
+                seine_maritime.get_next_sibling(queryset=queryset))
 
     def test_new_path(self):
         place = Place()
@@ -634,18 +732,18 @@ class PathTest(TransactionTestCase):
         with self.assertNumQueries(0):
             self.assertListEqual(list(place.get_next_siblings()), [])
         with self.assertNumQueries(0):
-            self.assertEqual(place.get_prev_sibling(), None)
+            self.assertIsNone(place.get_prev_sibling())
         with self.assertNumQueries(0):
-            self.assertEqual(place.get_next_sibling(), None)
+            self.assertIsNone(place.get_next_sibling())
         with self.assertNumQueries(0):
-            self.assertEqual(place.get_level(), None)
+            self.assertIsNone(place.get_level())
         with self.assertNumQueries(0):
-            self.assertEqual(place.is_root(), None)
+            self.assertIsNone(place.is_root())
         with self.assertNumQueries(0):
-            self.assertEqual(place.is_leaf(), None)
+            self.assertIsNone(place.is_leaf())
 
     def test_comparisons(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         france = Place.objects.get(name='France').path
         self.assertTrue(france == france)
@@ -710,7 +808,7 @@ class PathTest(TransactionTestCase):
         self.assertFalse(normandie >= osterreich)
 
     def test_is_ancestor_of(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         for place in Place.objects.all():
             self.assertFalse(place.is_ancestor_of(place))
@@ -720,7 +818,7 @@ class PathTest(TransactionTestCase):
                 self.assertTrue(ancestor.is_ancestor_of(place))
 
     def test_is_descendant_of(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         for place in Place.objects.all():
             self.assertFalse(place.is_descendant_of(place))
@@ -730,13 +828,13 @@ class PathTest(TransactionTestCase):
                 self.assertTrue(descendant.is_descendant_of(place))
 
     def test_get_roots(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         self.assertPlaces([('00', 'France'), ('01', 'Österreich')],
                           queryset=Place.get_roots())
 
     def test_rebuild(self):
-        list(self.create_test_places())
+        self.create_all_test_places()
 
         with Place.disabled_tree_trigger():
             for i, place in enumerate(Place.objects.order_by('name')):
@@ -809,3 +907,35 @@ class PathTest(TransactionTestCase):
             with transaction.atomic():
                 with self.assertNumQueries(1):
                     a.save()
+
+
+class QuerySetTest(CommonTest):
+    def test_get_descendants(self):
+        self.create_all_test_places()
+        
+        places = Place.objects.filter(name__in=('Normandie', 'Österreich'))
+        self.assertPlaces([
+            ('0000', 'Normandie'), ('01', 'Österreich')],
+            places)
+
+        self.assertPlaces([
+            ('000000', 'Eure'), ('000001', 'Manche'),
+            ('000002', 'Seine-Maritime')],
+            places.get_descendants())
+        self.assertPlaces([
+            ('0000', 'Normandie'), ('000000', 'Eure'), ('000001', 'Manche'),
+            ('000002', 'Seine-Maritime'), ('01', 'Österreich')],
+            places.get_descendants(include_self=True))
+
+        osterreich = Place.objects.get(name='Österreich')
+        self.create_place('Vienne (AU)', osterreich)
+
+        self.assertPlaces([
+            ('000000', 'Eure'), ('000001', 'Manche'),
+            ('000002', 'Seine-Maritime'), ('0100', 'Vienne (AU)')],
+            places.get_descendants())
+        self.assertPlaces([
+            ('0000', 'Normandie'), ('000000', 'Eure'), ('000001', 'Manche'),
+            ('000002', 'Seine-Maritime'),
+            ('01', 'Österreich'), ('0100', 'Vienne (AU)')],
+            places.get_descendants(include_self=True))
