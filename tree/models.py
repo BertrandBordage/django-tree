@@ -5,26 +5,43 @@ from django.db import DEFAULT_DB_ALIAS, transaction
 from .fields import PathField
 
 
+def _get_path_fields(model, name=None):
+    if name is None:
+        return [f for f in model._meta.fields if isinstance(f, PathField)]
+    return [model._meta.get_field(name)]
+
+
+def _get_path_field(model, name):
+    path_fields = _get_path_fields(model, name)
+    n = len(path_fields)
+    if n == 0:
+        raise FieldDoesNotExist(
+            'A `PathField` needs to be defined '
+            'in order to use `TreeModelMixin`.')
+    if n == 1:
+        return path_fields[0]
+    raise ValueError(
+        'You need to specify which `PathField` to use for this query '
+        'among these values: %s' % [f.name for f in path_fields])
+
+
+class TreeQuerySetMixin:
+    def _get_path_field_name(self, name):
+        return _get_path_field(self.model, name).name
+
+    def get_descendants(self, include_self=False, path_field=None):
+        name = self._get_path_field_name(path_field)
+        # TODO: Avoids doing an extra query.
+        pattern = r'^(%s)' % '|'.join(self.values_list(name, flat=True))
+        if not include_self:
+            pattern += r'.'
+        return self.filter(**{name + '__regex': pattern})
+
+
 class TreeModelMixin:
     @classmethod
-    def _get_path_fields(cls, name=None):
-        if name is None:
-            return [f for f in cls._meta.fields if isinstance(f, PathField)]
-        return [cls._meta.get_field(name)]
-
-    @classmethod
     def _get_path_field(cls, name):
-        path_fields = cls._get_path_fields(name)
-        n = len(path_fields)
-        if n == 0:
-            raise FieldDoesNotExist(
-                'A `PathField` needs to be defined '
-                'in order to use `TreeModelMixin`.')
-        if n == 1:
-            return path_fields[0]
-        raise ValueError(
-            'You need to specify which `PathField` to use for this query '
-            'among these values: %s' % [f.name for f in path_fields])
+        return _get_path_field(cls, name)
 
     def _get_path_value(self, path_field):
         return getattr(self, self._get_path_field(path_field).name)
