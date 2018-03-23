@@ -1,7 +1,6 @@
-import django
 from django.core.exceptions import FieldDoesNotExist
 from django.db.models import QuerySet
-from django.db.models.manager import BaseManager
+from django.db.models.manager import Manager
 
 from .fields import PathField
 
@@ -44,6 +43,5 @@ class TreeQuerySet(TreeQuerySetMixin, QuerySet):
     pass
 
 
-class TreeManager(BaseManager.from_queryset(TreeQuerySet)):
-    if django.VERSION <= (1, 8):
-        use_for_related_fields = True
+class TreeManager(Manager.from_queryset(TreeQuerySet)):
+    pass
