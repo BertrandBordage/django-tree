@@ -139,7 +139,7 @@ class Benchmark:
             self.add_data(model, test_name, count, value, y_label=y_label)
 
     def plot(self, df, database_name, test_name, y_label):
-        means = df.rolling(70).mean()
+        means = df.rolling(max(df.index.max() // 20, 1)).mean()
         ax = means.plot(
             title=test_name, alpha=0.8,
             xlim=(0, means.index.max() * 1.05),
@@ -210,7 +210,7 @@ class Benchmark:
         max_values_series = group_by.max()['Value']
         stats_df['Value'] = ((stats_df['Value'] - min_values_series)
                              / (max_values_series - min_values_series))
-        stats_df['Value'] = stats_df['Value'].fillna(1.0)
+        stats_df['Value'] = stats_df['Value'].fillna(0.0)
         stats_df = stats_df.groupby(['Y label', 'Implementation']).mean()
         stats_df['Value'] = ((20 * (1 - stats_df['Value']))
                              .apply(lambda f: '%.1f / 20' % f))
@@ -257,12 +257,12 @@ class GetRootMixin:
               if self.model in (TreebeardMPPlace, TreebeardNSPlace)
               else qs.filter(parent__isnull=True))
         self.root = qs[qs.count() // 2]
-        super(GetRootMixin, self).setup()
+        super().setup()
 
 
 class GetBranchMixin:
     def setup(self):
-        super(GetBranchMixin, self).setup()
+        super().setup()
 
         qs = self.model._default_manager.all()
         if hasattr(self, 'root'):
@@ -452,6 +452,18 @@ class TestGetDescendantsLeaf(GetLeafMixin, BenchmarkTest):
         list(self.leaf.get_descendants())
 
 
+@Benchmark.register_test('Get descendants from queryset',
+                         (MPTTPlace, TreePlace))
+class TestGetDescendantsFromQuerySet(BenchmarkTest):
+    def setup(self):
+        self.qs = self.model._default_manager.annotate(
+            n=F('pk') % 5).filter(n=0)
+        super().setup()
+
+    def run(self):
+        list(self.qs.get_descendants())
+
+
 #
 # Descendants count
 #
@@ -509,7 +521,7 @@ class TestGetFilteredDescendantsCountRoot(GetRootMixin, BenchmarkTest):
     def setup(self):
         if self.model is TreebeardALPlace:
             raise SkipTest
-        super(TestGetFilteredDescendantsCountRoot, self).setup()
+        super().setup()
 
     def run(self):
         self.root.get_descendants().filter(pk__contains='1').count()
@@ -520,7 +532,7 @@ class TestGetFilteredDescendantsCountBranch(GetBranchMixin, BenchmarkTest):
     def setup(self):
         if self.model is TreebeardALPlace:
             raise SkipTest
-        super(TestGetFilteredDescendantsCountBranch, self).setup()
+        super().setup()
 
     def run(self):
         self.branch.get_descendants().filter(pk__contains='1').count()
@@ -531,7 +543,7 @@ class TestGetFilteredDescendantsCountLeaf(GetLeafMixin, BenchmarkTest):
     def setup(self):
         if self.model is TreebeardALPlace:
             raise SkipTest
-        super(TestGetFilteredDescendantsCountLeaf, self).setup()
+        super().setup()
 
     def run(self):
         self.leaf.get_descendants().filter(pk__contains='1').count()
