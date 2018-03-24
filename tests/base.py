@@ -919,8 +919,6 @@ class PathTest(CommonTest):
         with connection.cursor() as cursor:
             cursor.execute('SELECT %s;', [place1.path])
         place2 = self.create_place('place2', place1)
-        # place2 = Place.objects.get(name='place2')
-        print(place2.parent, place2.path.value)
         with connection.cursor() as cursor:
             cursor.execute('SELECT %s;', [place2.path])
 
