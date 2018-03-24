@@ -203,6 +203,6 @@ else:
 
     def adapt_path(path):
         v = path.value
-        return AsIs(v) if v is None else QuotedString
+        return AsIs(v) if v is None else QuotedString(v)
 
     register_adapter(Path, adapt_path)

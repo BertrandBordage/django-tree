@@ -2,6 +2,8 @@
 
 from __future__ import unicode_literals
 
+from unittest import expectedFailure
+
 from django.db import transaction, InternalError, connection
 from django.test import TransactionTestCase
 
@@ -34,7 +36,9 @@ class CommonTest(TransactionTestCase):
 
     def create_place(self, name, parent=None, n_queries=1):
         with self.assertNumQueries(n_queries):
-            return Place.objects.create(name=name, parent=parent)
+            p = Place.objects.create(name=name, parent=parent)
+        # We fetch the object again to populate the path.
+        return Place.objects.get(pk=p.pk)
 
     def create_test_places(self):
         self.correct_places_data = [
@@ -73,10 +77,12 @@ class CommonTest(TransactionTestCase):
 
 
 class PathTest(CommonTest):
+    # This cannot work because Django only uses `RETURNING id`.
+    @expectedFailure
     def test_path_on_creation(self):
-        place1 = self.create_place('place1')
+        place1 = Place.objects.create(name='place1')
         self.assertEqual(place1.path.value, '00')
-        place2 = self.create_place('place2', place1)
+        place2 = Place.objects.create(name='place2', parent=place1)
         self.assertEqual(place2.path.value, '0000')
 
     def test_insert(self):
