@@ -4,7 +4,7 @@ from django.utils.six import string_types
 from .sql.base import to_alphanum, from_alphanum
 
 
-class Path:
+class Path(object):
     def __init__(self, field, value):
         self.field = field
         self.level_size = self.field.level_size
@@ -199,7 +199,7 @@ try:
 except ImportError:
     pass
 else:
-    from psycopg2.extensions import adapt, register_adapter, AsIs
+    from psycopg2.extensions import register_adapter, AsIs
 
     def adapt_path(path):
         return AsIs(path.value)
