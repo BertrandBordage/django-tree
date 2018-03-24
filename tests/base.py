@@ -2,7 +2,7 @@
 
 from __future__ import unicode_literals
 
-from django.db import transaction, InternalError
+from django.db import transaction, InternalError, connection
 from django.test import TransactionTestCase
 
 from .models import Place
@@ -907,6 +907,11 @@ class PathTest(CommonTest):
             with transaction.atomic():
                 with self.assertNumQueries(1):
                     a.save()
+
+    def test_path_in_cursor(self):
+        place = self.create_place('test')
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT %s;', [place.path])
 
 
 class QuerySetTest(CommonTest):
