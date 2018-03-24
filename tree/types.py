@@ -199,9 +199,10 @@ try:
 except ImportError:
     pass
 else:
-    from psycopg2.extensions import register_adapter, AsIs
+    from psycopg2.extensions import register_adapter, AsIs, QuotedString
 
     def adapt_path(path):
-        return AsIs(path.value)
+        v = path.value
+        return AsIs(v) if v is None else QuotedString
 
     register_adapter(Path, adapt_path)
