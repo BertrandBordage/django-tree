@@ -199,9 +199,9 @@ try:
 except ImportError:
     pass
 else:
-    from psycopg2.extensions import adapt, register_adapter, AsIs
+    from psycopg2.extensions import adapt, register_adapter
 
     def adapt_path(path):
-        return AsIs('%s::ltree' % adapt(path.value))
+        return adapt(path.value)
 
     register_adapter(Path, adapt_path)
