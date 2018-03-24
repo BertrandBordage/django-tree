@@ -202,6 +202,6 @@ else:
     from psycopg2.extensions import adapt, register_adapter, AsIs
 
     def adapt_path(path):
-        return AsIs('%s' % adapt(path.value))
+        return AsIs(path.value)
 
     register_adapter(Path, adapt_path)
