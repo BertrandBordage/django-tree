@@ -73,6 +73,12 @@ class CommonTest(TransactionTestCase):
 
 
 class PathTest(CommonTest):
+    def test_path_on_creation(self):
+        place1 = self.create_place('place1')
+        self.assertEqual(place1.path.value, '00')
+        place2 = self.create_place('place2', place1)
+        self.assertEqual(place2.path.value, '0000')
+
     def test_insert(self):
         it = self.create_test_places()
         next(it)
@@ -909,9 +915,14 @@ class PathTest(CommonTest):
                     a.save()
 
     def test_path_in_cursor(self):
-        place = self.create_place('test')
+        place1 = self.create_place('place1')
         with connection.cursor() as cursor:
-            cursor.execute('SELECT %s;', [place.path])
+            cursor.execute('SELECT %s;', [place1.path])
+        place2 = self.create_place('place2', place1)
+        # place2 = Place.objects.get(name='place2')
+        print(place2.parent, place2.path.value)
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT %s;', [place2.path])
 
 
 class QuerySetTest(CommonTest):
