@@ -66,7 +66,7 @@ class PathField(TextField):
             kwargs['order_by'] = self.order_by
         return name, path, args, kwargs
 
-    def from_db_value(self, value, expression, connection, context):
+    def from_db_value(self, value, expression, connection):
         if isinstance(value, Path):
             return value
         return Path(self, value)

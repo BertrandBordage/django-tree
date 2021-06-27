@@ -1,5 +1,4 @@
 from django.db.models import QuerySet
-from django.utils.six import string_types
 
 from .sql.base import to_alphanum, from_alphanum
 
@@ -172,7 +171,7 @@ class Path(object):
             other = other.value
         if not other:
             return False
-        if not isinstance(other, string_types):
+        if not isinstance(other, str):
             raise TypeError('`other` must be a `Path` instance or a string.')
         if not include_self and self.value == other:
             return False
@@ -185,7 +184,7 @@ class Path(object):
             other = other.value
         if not other:
             return False
-        if not isinstance(other, string_types):
+        if not isinstance(other, str):
             raise TypeError('`other` must be a `Path` instance or a string.')
         if not include_self and self.value == other:
             return False
