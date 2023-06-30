@@ -1,5 +1,8 @@
+import operator
+from functools import reduce
+
 from django.core.exceptions import FieldDoesNotExist
-from django.db.models import QuerySet
+from django.db.models import QuerySet, Q
 from django.db.models.manager import Manager
 
 from .fields import PathField
@@ -31,12 +34,17 @@ class TreeQuerySetMixin:
 
     def get_descendants(self, include_self=False, path_field=None):
         name = self._get_path_field_name(path_field)
-        # TODO: Avoids doing an extra query.
-        pattern = r'^(%s)' % '|'.join([
-            p.value for p in self.values_list(name, flat=True)])
+        # TODO: Avoid doing an extra query.
+        ancestor_paths = list(self.values_list(name, flat=True))
+        queryset = self.model.objects.all()
         if not include_self:
-            pattern += r'.'
-        return self.model.objects.filter(**{name + '__regex': pattern})
+            queryset = queryset.exclude(**{name + '__in': ancestor_paths})
+        return queryset.filter(
+            reduce(operator.or_, [
+                Q(**{name + '__descendant_of': ancestor_path})
+                for ancestor_path in ancestor_paths
+            ])
+        )
 
 
 class TreeQuerySet(TreeQuerySetMixin, QuerySet):

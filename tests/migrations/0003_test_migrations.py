@@ -3,7 +3,6 @@ from tree.fields import PathField
 from tree.operations import (
     CreateTreeTrigger, RebuildPaths, DeleteTreeTrigger,
 )
-from tree.sql.base import ALPHANUM_LEN
 
 
 class Migration(migrations.Migration):
@@ -12,10 +11,10 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField('Something', 'path', PathField(order_by=('name',), max_siblings=ALPHANUM_LEN)),
+        migrations.AddField('Something', 'path', PathField(order_by=('name',))),
         CreateTreeTrigger('Something'),
         RebuildPaths('Something'),
-        migrations.AlterField('Something', 'path', PathField(order_by=('name',), max_siblings=ALPHANUM_LEN*3)),
+        migrations.AlterField('Something', 'path', PathField(order_by=('name',))),
         DeleteTreeTrigger('Something'),
         migrations.DeleteModel('Something'),
     ]

@@ -1,12 +1,12 @@
 from contextlib import contextmanager
 
+from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
-from django.db.models import TextField
+from django.db.models import DecimalField
 from django.utils.translation import ugettext_lazy as _
 
 from .sql import postgresql
-from .sql.base import DEFAULT_MAX_SIBLINGS, ALPHANUM_LEN, PAD_CHAR
 from .types import Path
 
 
@@ -15,34 +15,21 @@ from .types import Path
 # TODO: Implement an alternative using regex for other db backends.
 
 
-class PathField(TextField):
+class PathField(ArrayField):
     description = _('Tree path')
 
     def __init__(self, *args, **kwargs):
-        kwargs.setdefault('editable', False)
-        self.original_default = kwargs.get('default')
-        kwargs['default'] = lambda: Path(self, self.original_default)
-        for kwarg in ('null', 'unique'):
+        for kwarg in ('base_field', 'default', 'null', 'unique'):
             if kwarg in kwargs:
                 raise ImproperlyConfigured('Cannot set `PathField.%s`.'
                                            % kwarg)
+
+        kwargs['base_field'] = DecimalField(max_digits=20, decimal_places=10)
+        kwargs['default'] = lambda: Path(self, None)
+        kwargs.setdefault('editable', False)
         kwargs['null'] = True
 
         self.order_by = tuple(kwargs.pop('order_by', ()))
-
-        max_siblings = kwargs.pop('max_siblings', DEFAULT_MAX_SIBLINGS)
-        if not (isinstance(max_siblings, int) and max_siblings > 0):
-            raise ImproperlyConfigured(
-                '`max_siblings` must be a positive integer, not %s.'
-                % repr(max_siblings))
-        self.max_siblings = max_siblings
-        i = self.max_siblings
-        n = 0
-        while i > 1.0:
-            i /= ALPHANUM_LEN
-            n += 1
-        self.level_size = n
-        self.first_sibling_value = PAD_CHAR * self.level_size
 
         super(PathField, self).__init__(*args, **kwargs)
 
@@ -54,14 +41,11 @@ class PathField(TextField):
 
     def deconstruct(self):
         name, path, args, kwargs = super(PathField, self).deconstruct()
+        del kwargs['base_field']
         if not kwargs['editable']:
             del kwargs['editable']
         del kwargs['default']
         del kwargs['null']
-        if self.original_default is not None:
-            kwargs['default'] = self.original_default
-        if self.max_siblings != DEFAULT_MAX_SIBLINGS:
-            kwargs['max_siblings'] = self.max_siblings
         if self.order_by != ():
             kwargs['order_by'] = self.order_by
         return name, path, args, kwargs
@@ -84,7 +68,7 @@ class PathField(TextField):
     # TODO: Move this method to a queryset.
     def get_roots(self):
         return self.model._default_manager.filter(
-            **{self.attname + '__level': 1})
+            **{self.attname + '__len': 1})
 
     def _check_database_backend(self, db_alias):
         if connections[db_alias].vendor != 'postgresql':

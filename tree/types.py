@@ -1,12 +1,9 @@
 from django.db.models import QuerySet
 
-from .sql.base import to_alphanum, from_alphanum
-
 
 class Path(object):
     def __init__(self, field, value):
         self.field = field
-        self.level_size = self.field.level_size
         self.attname = getattr(self.field, 'attname', None)
         self.field_bound = self.attname is not None
         self.qs = (self.field.model._default_manager.all()
@@ -79,11 +76,10 @@ class Path(object):
     def get_ancestors(self, include_self=False):
         if not self.value or (self.is_root() and not include_self):
             return self.qs.none()
-        paths = [self.value[:i+self.level_size]
-                 for i in range(0, len(self.value), self.level_size)]
+        path = self.value
         if not include_self:
-            paths.pop()
-        return self.qs.filter(**{self.attname + '__in': paths})
+            path = path[:-1]
+        return self.qs.filter(**{self.attname + '__ancestor_of': path})
 
     def get_descendants(self, include_self=False):
         if not self.value:
@@ -104,9 +100,7 @@ class Path(object):
         return qs.exclude(**{self.attname: self.value})
 
     def get_prev_siblings(self, include_self=False, queryset=None):
-        if not self.value or (
-                not include_self and (self.value[-self.level_size:]
-                                      == self.field.first_sibling_value)):
+        if not self.value:
             return self.qs.none()
         siblings = self.get_siblings(include_self=include_self,
                                      queryset=queryset)
@@ -126,39 +120,22 @@ class Path(object):
     def get_prev_sibling(self, queryset=None):
         if not self.value:
             return
-        current_label = self.value[-self.level_size:]
-        if current_label == self.field.first_sibling_value:
-            return
 
-        if queryset is not None:
-            return self.get_prev_siblings(queryset=queryset).first()
-
-        # TODO: Handle the case where the trigger is not in place.
-
-        prev_label = self.value[:-self.level_size] + to_alphanum(
-            from_alphanum(current_label) - 1, self.level_size)
-        return self.qs.get(**{self.attname: prev_label})
+        return self.get_prev_siblings(queryset=queryset).first()
 
     def get_next_sibling(self, queryset=None):
         if not self.value:
             return None
 
-        if queryset is not None:
-            return self.get_next_siblings(queryset=queryset).first()
-
-        # TODO: Handle the case where the trigger is not in place.
-
-        next_label = self.value[:-self.level_size] + to_alphanum(
-            from_alphanum(self.value[-self.level_size:]) + 1, self.level_size)
-        return self.qs.filter(**{self.attname: next_label}).first()
+        return self.get_next_siblings(queryset=queryset).first()
 
     def get_level(self):
         if self.value:
-            return len(self.value) // self.level_size
+            return len(self.value)
 
     def is_root(self):
         if self.value:
-            return len(self.value) == self.level_size
+            return len(self.value) == 1
 
     def is_leaf(self):
         if self.value:
@@ -171,11 +148,13 @@ class Path(object):
             other = other.value
         if not other:
             return False
-        if not isinstance(other, str):
-            raise TypeError('`other` must be a `Path` instance or a string.')
+        if not isinstance(other, list):
+            raise TypeError(
+                '`other` must be a `Path` instance or a list of decimals.'
+            )
         if not include_self and self.value == other:
             return False
-        return other.startswith(self.value)
+        return other[:len(self.value)] == self.value
 
     def is_descendant_of(self, other, include_self=False):
         if not self.value:
@@ -184,11 +163,13 @@ class Path(object):
             other = other.value
         if not other:
             return False
-        if not isinstance(other, str):
-            raise TypeError('`other` must be a `Path` instance or a string.')
+        if not isinstance(other, list):
+            raise TypeError(
+                '`other` must be a `Path` instance or a list of decimals.'
+            )
         if not include_self and self.value == other:
             return False
-        return self.value.startswith(other)
+        return self.value[:len(other)] == other
 
 
 # Tells psycopg2 how to prepare a Path object for the database,
@@ -198,10 +179,9 @@ try:
 except ImportError:
     pass
 else:
-    from psycopg2.extensions import register_adapter, AsIs, QuotedString
+    from psycopg2.extensions import register_adapter, adapt
 
     def adapt_path(path):
-        v = path.value
-        return AsIs(v) if v is None else QuotedString(v)
+        return adapt(path.value)
 
     register_adapter(Path, adapt_path)

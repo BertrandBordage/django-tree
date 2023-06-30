@@ -7,7 +7,10 @@ class AncestorOf(Lookup):
     def as_sql(self, compiler, connection):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
-        return "%s LIKE %s || '%%%%'" % (rhs, lhs), rhs_params + lhs_params
+        return (
+            '%s = (%s)[:array_length(%s, 1)]' % (lhs, rhs, lhs),
+            lhs_params + rhs_params + lhs_params,
+        )
 
 
 class SiblingOf(Lookup):
@@ -16,10 +19,10 @@ class SiblingOf(Lookup):
     def as_sql(self, compiler, connection):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
-        level_size = self.lhs.output_field.level_size
-        return "%s LIKE left(%s, %s) || '%s'" % (
-            lhs, rhs, -level_size, '_' * level_size,
-        ), lhs_params + rhs_params
+        return (
+            'trim_array(%s, 1) = trim_array(%s, 1)' % (lhs, rhs),
+            lhs_params + rhs_params,
+        )
 
 
 class ChildOf(Lookup):
@@ -28,9 +31,7 @@ class ChildOf(Lookup):
     def as_sql(self, compiler, connection):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
-        return "%s LIKE %s || '%s'" % (
-            lhs, rhs, '_' * self.lhs.output_field.level_size,
-        ), lhs_params + rhs_params
+        return 'trim_array(%s, 1) = %s' % (lhs, rhs), lhs_params + rhs_params
 
 
 class DescendantOf(Lookup):
@@ -39,4 +40,7 @@ class DescendantOf(Lookup):
     def as_sql(self, compiler, connection):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
-        return "%s LIKE %s || '%%%%'" % (lhs, rhs), lhs_params + rhs_params
+        return (
+            '(%s)[:array_length(%s, 1)] = %s' % (lhs, rhs, rhs),
+            lhs_params + rhs_params + rhs_params,
+        )

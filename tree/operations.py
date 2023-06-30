@@ -87,8 +87,6 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
             pk=meta.pk.attname,
             parent=meta.get_field(self.parent_field_lookup).attname,
             path=path_name,
-            max_siblings=path_field.max_siblings,
-            level_size=path_field.level_size,
             update_columns=', '.join(update_columns),
             order_by=", ".join(sql_order_by),
         )

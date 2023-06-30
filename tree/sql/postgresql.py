@@ -3,8 +3,6 @@ from string import Formatter
 
 from django.db import DEFAULT_DB_ALIAS, connections
 
-from .base import ALPHANUM, ALPHANUM_LEN
-
 
 class Arg:
     pattern = '%{position}${format_type}'
@@ -72,16 +70,13 @@ UPDATE_PATHS_FUNCTION = """
         parent text := TG_ARGV[1];
         path text := TG_ARGV[2];
         order_by text[] := TG_ARGV[3];
-        max_siblings int := TG_ARGV[4];
-        level_size int := TG_ARGV[5];
         order_by_cols text := array_to_string(order_by, ',');
         order_by_cols2 text := 't2.' || array_to_string(order_by, ',t2.');
-        old_path text := NULL;
-        new_path text;
-        old_parent_path text := NULL;
-        new_parent_path text;
+        old_path decimal[] := NULL;
+        new_path decimal[];
+        old_parent_path decimal[] := NULL;
+        new_parent_path decimal[];
         parent_changed boolean;
-        n_siblings integer;
     BEGIN
         IF TG_OP != 'INSERT' THEN
             {get_old_paths}
@@ -94,7 +89,7 @@ UPDATE_PATHS_FUNCTION = """
 
         IF TG_OP = 'UPDATE' THEN
             {get_new_path}
-            IF new_path = '__rebuild__' THEN
+            IF new_path = '{{NULL}}'::decimal[] THEN
                 {rebuild}
                 {set_new_path}
                 RETURN NEW;
@@ -103,12 +98,9 @@ UPDATE_PATHS_FUNCTION = """
 
 
         {get_new_parent_path}
-        IF new_parent_path IS NULL THEN
-            new_parent_path := '';
-        END IF;
         IF TG_OP = 'UPDATE' THEN
             -- TODO: Add this behaviour to the model validation.
-            IF new_parent_path LIKE old_path || '%' THEN
+            IF new_parent_path[:array_length(old_path, 1)] = old_path THEN
                 RAISE 'Cannot set itself or a descendant as parent.';
             END IF;
         END IF;
@@ -120,20 +112,12 @@ UPDATE_PATHS_FUNCTION = """
         END IF;
 
         IF parent_changed THEN
-            {get_n_siblings}
-            IF n_siblings = max_siblings THEN
-                RAISE '`max_siblings` (%) has been reached.\n'
-                    'You should increase it then rebuild.', max_siblings;
-            END IF;
             IF TG_OP = 'UPDATE' THEN
                 {update_old_siblings}
             END IF;
         END IF;
 
         {get_new_parent_path}
-        IF new_parent_path IS NULL THEN
-            new_parent_path := '';
-        END IF;
 
         {update_new_siblings}
         {set_new_path}
@@ -143,24 +127,25 @@ UPDATE_PATHS_FUNCTION = """
     """.format(
     get_old_paths=format_sql_in_function("""
         SELECT {USING[OLD]}.{path},
-               left({USING[OLD]}.{path}, -({level_size:L})::int)
+               trim_array({USING[OLD]}.{path}, 1)
     """, into=['old_path', 'old_parent_path']),
     get_new_path=format_sql_in_function(
         'SELECT {USING[NEW]}.{path}', into=['new_path']),
     rebuild=format_sql_in_function("""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
-                SELECT {parent}, ''
+                SELECT {parent}, NULL::decimal[]
                 FROM {table_name}
                 WHERE {parent} IS NULL
                 LIMIT 1
             ) UNION ALL (
                 SELECT
                     t2.{pk},
-                    t1.path || to_alphanum(
+                    array_append(
+                        t1.path, 
                         row_number() OVER (PARTITION BY t1.pk
-                                           ORDER BY {order_by_cols2:s}) - 1,
-                        {level_size:L})
+                                           ORDER BY {order_by_cols2:s}) - 1
+                    )
                 FROM generate_paths AS t1
                 INNER JOIN {table_name} AS t2 ON (
                     t2.{parent} = t1.pk
@@ -180,18 +165,18 @@ UPDATE_PATHS_FUNCTION = """
         WITH RECURSIVE generate_paths(pk, path) AS ((
                 SELECT
                     {pk},
-                    {USING[old_parent_path]} || to_alphanum(
-                        from_alphanum(right({path}, {level_size:L})) - 1,
-                        {level_size:L})
+                    array_append(
+                        {USING[old_parent_path]},
+                        {path}[array_length({path}, 1)] - 1
+                    )
                 FROM {table_name}
                 WHERE
                     {path} > {USING[old_path]}
-                    AND {path} LIKE ({USING[old_parent_path]}
-                                     || repeat('_', {level_size:L}))
+                    AND trim_array({path}, 1) = {USING[old_parent_path]}
             ) UNION ALL (
                 SELECT
                     t2.{pk},
-                    t1.path || right(t2.{path}, -length(t1.path))
+                    t1.path || t2.{path}[array_length(t1.path, 1) + 1:]
                 FROM generate_paths AS t1
                 INNER JOIN {table_name} AS t2 ON t2.{parent} = t1.pk
             )
@@ -203,11 +188,6 @@ UPDATE_PATHS_FUNCTION = """
     get_parent_changed=format_sql_in_function("""
         SELECT COALESCE({USING[OLD]}.{parent} != {USING[NEW]}.{parent}, TRUE)
     """, into=['parent_changed']),
-    get_n_siblings=format_sql_in_function("""
-        SELECT COUNT(*) FROM {table_name}
-        WHERE {parent} = {USING[NEW]}.{parent}
-            OR ({USING[NEW]}.{parent} IS NULL AND {parent} IS NULL)
-    """, into=['n_siblings']),
     get_new_parent_path=format_sql_in_function("""
         SELECT {path} FROM {table_name} WHERE {pk} = {USING[NEW]}.{parent}
     """, into=['new_parent_path']),
@@ -216,9 +196,10 @@ UPDATE_PATHS_FUNCTION = """
         WITH RECURSIVE generate_paths(pk, path) AS ((
                 SELECT
                     {pk},
-                    {USING[new_parent_path]} || to_alphanum(
-                        row_number() OVER (ORDER BY {order_by_cols:s}) - 1,
-                        {level_size:L})
+                    array_append(
+                        {USING[new_parent_path]},
+                        row_number() OVER (ORDER BY {order_by_cols:s}) - 1
+                    )
                 FROM ((
                         SELECT *
                         FROM {table_name}
@@ -234,10 +215,11 @@ UPDATE_PATHS_FUNCTION = """
             ) UNION ALL (
                 SELECT
                     t2.{pk},
-                    t1.path || to_alphanum(
+                    array_append(
+                        t1.path,
                         row_number() OVER (PARTITION BY t1.pk
-                                           ORDER BY {order_by_cols2:s}) - 1,
-                        {level_size:L})
+                                           ORDER BY {order_by_cols2:s}) - 1
+                    )
                 FROM generate_paths AS t1
                 INNER JOIN {table_name} AS t2 ON t2.{parent} = t1.pk
             )
@@ -252,7 +234,6 @@ UPDATE_PATHS_FUNCTION = """
             OR ({USING[NEW]}.{pk} IS NULL AND pk IS NULL)
     """, into=['new_path']),
     set_new_path=format_sql_in_function("""
-        -- FIXME: `json_populate_record` is not available in PostgreSQL < 9.3.
         SELECT *
         FROM json_populate_record({USING[NEW]},
                                   '{{"{path:s}": "{new_path:s}"}}'::json)
@@ -269,7 +250,7 @@ REBUILD_PATHS_FUNCTION = """
     $$ LANGUAGE plpgsql;
     """.format(
     format_sql_in_function("""
-        UPDATE {table_name} SET {path} = '__rebuild__' FROM (
+        UPDATE {table_name} SET {path} = '{{NULL}}'::decimal[] FROM (
             SELECT * FROM {table_name}
             WHERE {parent} IS NULL
             LIMIT 1
@@ -281,46 +262,6 @@ REBUILD_PATHS_FUNCTION = """
 
 
 CREATE_FUNCTIONS_QUERIES = (
-    """
-    CREATE OR REPLACE FUNCTION to_alphanum(i bigint,
-                                           size smallint) RETURNS text AS $$
-    DECLARE
-        ALPHANUM text := '{}';
-        ALPHANUM_LEN int := {};
-        label text := '';
-        remainder int := 0;
-    BEGIN
-        LOOP
-            remainder := i % ALPHANUM_LEN;
-            i := i / ALPHANUM_LEN;
-            label := substring(ALPHANUM from remainder+1 for 1) || label;
-            IF i = 0 THEN
-                RETURN lpad(label, size, '0');
-            END IF;
-        END LOOP;
-    END;
-    $$ LANGUAGE plpgsql;
-    """.format(ALPHANUM, ALPHANUM_LEN),
-    """
-    CREATE OR REPLACE FUNCTION from_alphanum(label text) RETURNS bigint AS $$
-    DECLARE
-        ALPHANUM text := '{}';
-        ALPHANUM_LEN int := {};
-        pos int := 0;
-        size smallint := length(label);
-        i bigint := 0;
-    BEGIN
-        LOOP
-            i := i * ALPHANUM_LEN
-                   + position(substring(label from pos for 1) in ALPHANUM) - 1;
-            IF pos = size THEN
-                RETURN i;
-            END IF;
-            pos := pos + 1;
-        END LOOP;
-    END;
-    $$ LANGUAGE plpgsql;
-    """.format(ALPHANUM, ALPHANUM_LEN),
     UPDATE_PATHS_FUNCTION,
     REBUILD_PATHS_FUNCTION,
 )
@@ -336,8 +277,6 @@ DROP_FUNCTIONS_QUERIES = (
                                           parent text, path text);
     """,
     'DROP FUNCTION IF EXISTS update_paths();',
-    'DROP FUNCTION IF EXISTS from_alphanum(label text);',
-    'DROP FUNCTION IF EXISTS to_alphanum(i bigint, size smallint);',
 )
 
 CREATE_TRIGGER_QUERIES = (
@@ -348,8 +287,8 @@ CREATE_TRIGGER_QUERIES = (
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
     EXECUTE PROCEDURE update_paths(
-        '{pk}', '{parent}', '{path}', '{{{order_by}}}',
-        {max_siblings}, {level_size});
+        '{pk}', '{parent}', '{path}', '{{{order_by}}}'
+    );
     """,
     """
     CREATE TRIGGER "update_{path}_after"
@@ -358,8 +297,8 @@ CREATE_TRIGGER_QUERIES = (
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
     EXECUTE PROCEDURE update_paths(
-        '{pk}', '{parent}', '{path}', '{{{order_by}}}',
-        {max_siblings}, {level_size});
+        '{pk}', '{parent}', '{path}', '{{{order_by}}}'
+    );
     """,
     """
     CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
