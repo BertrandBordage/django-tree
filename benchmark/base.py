@@ -775,8 +775,52 @@ class TestCreateLeaf(GetLeafMixin, BenchmarkTest):
 
 
 #
+# Save without any change
+#
+
+
+@Benchmark.register_test('Save without change [root]', y_label=WRITE_LATENCY)
+class TestSaveRootWithoutChange(GetRootMixin, BenchmarkTest):
+    def run(self):
+        self.root.save()
+
+
+@Benchmark.register_test('Save without change [branch]', y_label=WRITE_LATENCY)
+class TestSaveBranchWithoutChange(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        self.branch.save()
+
+
+@Benchmark.register_test('Save without change [leaf]', y_label=WRITE_LATENCY)
+class TestSaveLeafWithoutChange(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        self.leaf.save()
+
+
+#
 # Move
 #
+
+
+@Benchmark.register_test('Move [same root path]', y_label=WRITE_LATENCY)
+class TestMoveSameRootPath(GetRootMixin, BenchmarkTest):
+    def run(self):
+        self.root.name += ' 2'
+        self.root.save()
+
+
+@Benchmark.register_test('Move [same branch path]', y_label=WRITE_LATENCY)
+class TestMoveSameBranchPath(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        self.branch.name += ' 2'
+        self.branch.save()
+
+
+@Benchmark.register_test('Move [same leaf path]', y_label=WRITE_LATENCY)
+class TestMoveSameLeafPath(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        self.leaf.name += ' 2'
+        self.leaf.save()
 
 
 @Benchmark.register_test(
