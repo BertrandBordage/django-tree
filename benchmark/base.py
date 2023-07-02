@@ -245,7 +245,7 @@ class BenchmarkTest:
 class TestDiskUsage(BenchmarkTest):
     def run(self):
         with connections[self.benchmark.current_db_alias].cursor() as cursor:
-            cursor.execute("SELECT pg_relation_size('%s');"
+            cursor.execute("SELECT pg_total_relation_size('%s');"
                            % self.model._meta.db_table)
             return cursor.fetchone()[0]
 
