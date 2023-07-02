@@ -70,20 +70,28 @@ UPDATE_PATHS_FUNCTION = """
         parent text := TG_ARGV[1];
         path text := TG_ARGV[2];
         order_by text[] := TG_ARGV[3];
+        reversed_order_by text[] := TG_ARGV[4];
+        where_columns text[] := TG_ARGV[5];
+        prev_sibling_where_clause text := NULL;
+        prev_sibling_decimal decimal := NULL;
+        next_sibling_where_clause text := NULL;
+        next_sibling_decimal decimal := NULL;
         order_by_cols text := array_to_string(order_by, ',');
+        reversed_order_by_cols text := array_to_string(reversed_order_by, ',');
         order_by_cols2 text := 't2.' || array_to_string(order_by, ',t2.');
         old_path decimal[] := NULL;
         new_path decimal[];
-        old_parent_path decimal[] := NULL;
         new_parent_path decimal[];
-        parent_changed boolean;
     BEGIN
         IF TG_OP != 'INSERT' THEN
-            {get_old_paths}
+            {get_old_path}
         END IF;
 
         IF TG_OP = 'DELETE' THEN
-            {update_old_siblings}
+            -- TODO: Bulk delete descendants of the current row,
+            --       if the parent foreign key has `on_delete=CASCADE`
+            --       and it is compatible with Django’s Collector.
+            --       Do the equivalent with `SET_NULL`.
             RETURN OLD;
         END IF;
 
@@ -104,31 +112,46 @@ UPDATE_PATHS_FUNCTION = """
                 RAISE 'Cannot set itself or a descendant as parent.';
             END IF;
         END IF;
+        
+        {get_prev_sibling_where_clause}
+        {get_prev_sibling_decimal}
+        {get_next_sibling_where_clause}
+        {get_next_sibling_decimal}
 
-        IF TG_OP = 'INSERT' THEN
-            parent_changed := TRUE;
+        IF prev_sibling_decimal IS NULL AND next_sibling_decimal IS NULL THEN
+            prev_sibling_decimal := 0;
+            next_sibling_decimal := 0;
         ELSE
-            {get_parent_changed}
-        END IF;
-
-        IF parent_changed THEN
-            IF TG_OP = 'UPDATE' THEN
-                {update_old_siblings}
+            IF prev_sibling_decimal IS NULL THEN
+                -- We use `- 2` so that the middle between prev and next
+                -- will be next - 1, that way the new lower bound
+                -- is the former lower bound - 1.
+                prev_sibling_decimal := coalesce(next_sibling_decimal, 0) - 2;
+            END IF;
+            IF next_sibling_decimal IS NULL THEN
+                -- We use `+ 2` so that the middle between prev and next
+                -- will be prev + 1, that way the new upper bound
+                -- is the former upper bound + 1.
+                next_sibling_decimal := coalesce(prev_sibling_decimal, 0) + 2;
             END IF;
         END IF;
+        new_path := array_append(
+            new_parent_path,
+            (prev_sibling_decimal + next_sibling_decimal) / 2
+        );
 
-        {get_new_parent_path}
+        IF TG_OP = 'UPDATE' THEN
+            {update_descendants}
+        END IF;
 
-        {update_new_siblings}
         {set_new_path}
         RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
     """.format(
-    get_old_paths=format_sql_in_function("""
-        SELECT {USING[OLD]}.{path},
-               trim_array({USING[OLD]}.{path}, 1)
-    """, into=['old_path', 'old_parent_path']),
+    get_old_path=format_sql_in_function("""
+        SELECT {USING[OLD]}.{path}
+    """, into=['old_path']),
     get_new_path=format_sql_in_function(
         'SELECT {USING[NEW]}.{path}', into=['new_path']),
     rebuild=format_sql_in_function("""
@@ -160,79 +183,57 @@ UPDATE_PATHS_FUNCTION = """
         SELECT path FROM generate_paths
         WHERE pk = {USING[OLD]}.{pk}
     """, into=['new_path']),
-    update_old_siblings=format_sql_in_function("""
-        -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
-        WITH RECURSIVE generate_paths(pk, path) AS ((
-                SELECT
-                    {pk},
-                    array_append(
-                        {USING[old_parent_path]},
-                        {path}[array_length({path}, 1)] - 1
-                    )
-                FROM {table_name}
-                WHERE
-                    {path} > {USING[old_path]}
-                    AND trim_array({path}, 1) = {USING[old_parent_path]}
-            ) UNION ALL (
-                SELECT
-                    t2.{pk},
-                    t1.path || t2.{path}[array_length(t1.path, 1) + 1:]
-                FROM generate_paths AS t1
-                INNER JOIN {table_name} AS t2 ON t2.{parent} = t1.pk
-            )
-        )
-        UPDATE {table_name} AS t2 SET {path} = t1.path
-        FROM generate_paths AS t1
-        WHERE t2.{pk} = t1.pk
-    """),
-    get_parent_changed=format_sql_in_function("""
-        SELECT COALESCE({USING[OLD]}.{parent} != {USING[NEW]}.{parent}, TRUE)
-    """, into=['parent_changed']),
     get_new_parent_path=format_sql_in_function("""
         SELECT {path} FROM {table_name} WHERE {pk} = {USING[NEW]}.{parent}
     """, into=['new_parent_path']),
-    update_new_siblings=format_sql_in_function("""
-        -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
-        WITH RECURSIVE generate_paths(pk, path) AS ((
-                SELECT
-                    {pk},
-                    array_append(
-                        {USING[new_parent_path]},
-                        row_number() OVER (ORDER BY {order_by_cols:s}) - 1
-                    )
-                FROM ((
-                        SELECT *
-                        FROM {table_name}
-                        WHERE (
-                            {parent} = {USING[NEW]}.{parent}
-                            OR ({USING[NEW]}.{parent} IS NULL
-                                AND {parent} IS NULL)
-                        ) AND COALESCE({pk} != {USING[NEW]}.{pk}, TRUE)
-                    ) UNION ALL (
-                        SELECT {USING[NEW]}.*
-                    )
-                ) AS t
-            ) UNION ALL (
-                SELECT
-                    t2.{pk},
-                    array_append(
-                        t1.path,
-                        row_number() OVER (PARTITION BY t1.pk
-                                           ORDER BY {order_by_cols2:s}) - 1
-                    )
-                FROM generate_paths AS t1
-                INNER JOIN {table_name} AS t2 ON t2.{parent} = t1.pk
+    # FIXME: This clause is wrong when using multiple `order_by` columns!
+    # FIXME: The way we quote JSON values here is probably incorrect!
+    # FIXME: We should not strip NULLs from the WHERE clause.
+    get_prev_sibling_where_clause=format_sql_in_function("""
+        SELECT COALESCE(array_to_string(array_agg(column_name || ' <= ' || quote_literal(value)), ' AND '), 'TRUE')
+        FROM json_each_text(json_strip_nulls(row_to_json({USING[NEW]}))) AS data(column_name, value)
+        INNER JOIN unnest({USING[where_columns]}) AS columns(where_column) ON where_column = column_name
+    """, into=['prev_sibling_where_clause']),
+    get_prev_sibling_decimal=format_sql_in_function("""
+        SELECT {path}[array_length({path}, 1)]
+        FROM {table_name}
+        WHERE
+            {prev_sibling_where_clause:s}
+            AND (
+                {parent} = {USING[NEW]}.{parent}
+                OR ({USING[NEW]}.{parent} IS NULL AND {parent} IS NULL)
             )
-        ), updated AS (
-            UPDATE {table_name} AS t2 SET {path} = t1.path
-            FROM generate_paths AS t1
-            WHERE t2.{pk} = t1.pk AND t2.{pk} != {USING[NEW]}.{pk}
-                AND (t2.{path} IS NULL OR t2.{path} != t1.path)
-        )
-        SELECT path FROM generate_paths
-        WHERE pk = {USING[NEW]}.{pk}
-            OR ({USING[NEW]}.{pk} IS NULL AND pk IS NULL)
-    """, into=['new_path']),
+            AND {pk} != {USING[NEW]}.{pk}
+        ORDER BY {reversed_order_by_cols:s}
+        LIMIT 1
+    """, into=['prev_sibling_decimal']),
+    # FIXME: This clause is wrong when using multiple `order_by` columns!
+    # FIXME: The way we quote JSON values here is probably incorrect!
+    # FIXME: We should not strip NULLs from the WHERE clause.
+    get_next_sibling_where_clause=format_sql_in_function("""
+        SELECT COALESCE(array_to_string(array_agg(column_name || ' >= ' || quote_literal(value)), ' AND '), 'TRUE')
+        FROM json_each_text(json_strip_nulls(row_to_json({USING[NEW]}))) AS data(column_name, value)
+        INNER JOIN unnest({USING[where_columns]}) AS columns(where_column) ON where_column = column_name
+    """, into=['next_sibling_where_clause']),
+    get_next_sibling_decimal=format_sql_in_function("""
+        SELECT {path}[array_length({path}, 1)]
+        FROM {table_name}
+        WHERE
+            {next_sibling_where_clause:s}
+            AND (
+                {parent} = {USING[NEW]}.{parent}
+                OR ({USING[NEW]}.{parent} IS NULL AND {parent} IS NULL)
+            )
+            AND {pk} != {USING[NEW]}.{pk}
+        ORDER BY {order_by_cols:s}
+        LIMIT 1
+    """, into=['next_sibling_decimal']),
+    update_descendants=format_sql_in_function("""
+        UPDATE {table_name}
+        SET {path} = {USING[new_path]}
+            || {path}[array_length({USING[OLD]}.{path}, 1) + 1:]
+        WHERE {path}[:array_length({USING[OLD]}.{path}, 1)] = {USING[OLD]}.{path} AND {pk} != {USING[OLD]}.{pk}
+    """),
     set_new_path=format_sql_in_function("""
         SELECT *
         FROM json_populate_record({USING[NEW]},
@@ -287,7 +288,8 @@ CREATE_TRIGGER_QUERIES = (
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
     EXECUTE PROCEDURE update_paths(
-        '{pk}', '{parent}', '{path}', '{{{order_by}}}'
+        '{pk}', '{parent}', '{path}',
+        '{{{order_by}}}', '{{{reversed_order_by}}}', '{{{where_columns}}}'
     );
     """,
     """
@@ -297,7 +299,8 @@ CREATE_TRIGGER_QUERIES = (
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
     EXECUTE PROCEDURE update_paths(
-        '{pk}', '{parent}', '{path}', '{{{order_by}}}'
+        '{pk}', '{parent}', '{path}',
+        '{{{order_by}}}', '{{{reversed_order_by}}}', '{{{where_columns}}}'
     );
     """,
     """

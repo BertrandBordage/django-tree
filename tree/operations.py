@@ -69,26 +69,35 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
             order_by += ('pk',)
 
         # TODO: Handle related lookups in `order_by`.
+        sql_where = []
         sql_order_by = []
-        update_columns = [path_name]
+        sql_reversed_order_by = []
         for field_name in order_by:
             descending = field_name[0] == '-'
             if descending:
                 field_name = field_name[1:]
             field = (meta.pk if field_name == 'pk'
                      else meta.get_field(field_name))
-            update_columns.append('"%s"' % field.attname)
+            if field_name != 'pk':
+                quoted_field_name = '"%s"' % field.attname
+                sql_where.append(quoted_field_name)
             sql_order_by.append(
                 '\\"%s\\" %s' % (field.attname,
                                  ('DESC' if descending else 'ASC')))
+            sql_reversed_order_by.append(
+                '\\"%s\\" %s' % (field.attname,
+                                 ('ASC' if descending else 'DESC')))
 
+        update_columns = [path_name, *sql_where]
         return dict(
             table=meta.db_table,
             pk=meta.pk.attname,
             parent=meta.get_field(self.parent_field_lookup).attname,
             path=path_name,
             update_columns=', '.join(update_columns),
-            order_by=", ".join(sql_order_by),
+            where_columns=', '.join(sql_where),
+            order_by=', '.join(sql_order_by),
+            reversed_order_by=', '.join(sql_reversed_order_by),
         )
 
     def state_forwards(self, app_label, state):
