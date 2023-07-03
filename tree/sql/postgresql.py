@@ -72,6 +72,10 @@ UPDATE_PATHS_FUNCTION = """
         order_by text[] := TG_ARGV[3];
         reversed_order_by text[] := TG_ARGV[4];
         where_columns text[] := TG_ARGV[5];
+        where_column text;
+        parent_unchanged bool;
+        column_unchanged bool;
+        row_unchanged bool := true;
         prev_sibling_where_clause text := NULL;
         prev_sibling_decimal decimal := NULL;
         next_sibling_where_clause text := NULL;
@@ -102,6 +106,23 @@ UPDATE_PATHS_FUNCTION = """
                 {set_new_path}
                 RETURN NEW;
             END IF;
+
+            -- Optimizations to speed up saving
+            -- when the relevant tree data is unchanged.
+            {get_parent_unchanged}
+            IF parent_unchanged THEN
+                FOREACH where_column IN ARRAY where_columns LOOP
+                    {get_column_unchanged}
+                    IF NOT column_unchanged THEN
+                        row_unchanged := false;
+                        EXIT;
+                    END IF;
+                END LOOP;
+                IF row_unchanged THEN
+                    RETURN NEW;
+                END IF;
+            END IF;
+
         END IF;
 
 
@@ -183,6 +204,18 @@ UPDATE_PATHS_FUNCTION = """
         SELECT path FROM generate_paths
         WHERE pk = {USING[OLD]}.{pk}
     """, into=['new_path']),
+    get_parent_unchanged=format_sql_in_function("""
+        SELECT
+            {USING[OLD]}.{parent} IS NULL
+            AND {USING[NEW]}.{parent} IS NULL
+            OR {USING[OLD]}.{parent} = {USING[NEW]}.{parent}
+    """, into=['parent_unchanged']),
+    get_column_unchanged=format_sql_in_function("""
+        SELECT
+            {USING[OLD]}.{where_column} IS NULL
+            AND {USING[NEW]}.{where_column} IS NULL
+            OR {USING[OLD]}.{where_column} = {USING[NEW]}.{where_column}
+    """, into=['column_unchanged']),
     get_new_parent_path=format_sql_in_function("""
         SELECT {path} FROM {table_name} WHERE {pk} = {USING[NEW]}.{parent}
     """, into=['new_parent_path']),
