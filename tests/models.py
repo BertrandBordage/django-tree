@@ -7,10 +7,10 @@ from tree.models import TreeModel
 class Place(TreeModel):
     name = CharField(max_length=50)
     parent = ForeignKey('self', null=True, blank=True, on_delete=CASCADE)
-    path = PathField(order_by=('name',))
+    path = PathField(order_by=['name'])
 
     class Meta:
-        ordering = ('path', 'name')
+        ordering = ['path', 'name']
         indexes = [
-            *PathField.get_indexes('path'),
+            *PathField.get_indexes('place', 'path'),
         ]

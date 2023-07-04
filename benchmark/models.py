@@ -31,7 +31,7 @@ class TreePlace(TreeModel):
 
     class Meta:
         indexes = [
-            *PathField.get_indexes('path'),
+            *PathField.get_indexes('treeplace', 'path'),
         ]
 
 

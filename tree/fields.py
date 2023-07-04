@@ -19,15 +19,15 @@ class PathField(ArrayField):
     description = _('Tree path')
 
     @classmethod
-    def get_indexes(cls, path_field_name: str):
+    def get_indexes(cls, table_name: str, path_field_name: str):
         return [
             Index(
                 Func(F(path_field_name), 1, function='trim_array'),
-                name=f'{path_field_name}_parent_index',
+                name=f'{table_name}_{path_field_name}_parent_index',
             ),
             Index(
                 F(f'{path_field_name}__len'),
-                name=f'{path_field_name}_length_index',
+                name=f'{table_name}_{path_field_name}_length_index',
             ),
         ]
 

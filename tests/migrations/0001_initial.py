@@ -2,6 +2,7 @@ from django.db import models, migrations
 from django.db.models import CASCADE, Index, Func, F
 
 from tree.fields import PathField
+from tree.models import TreeModelMixin
 from tree.operations import CreateTreeTrigger
 
 
@@ -20,12 +21,13 @@ class Migration(migrations.Migration):
                 ('path', PathField(order_by=('name',))),
             ],
             options={
-                'ordering': ('path', 'name'),
+                'ordering': ['path', 'name'],
                 'indexes': [
-                    Index(Func(F('path'), 1, function='trim_array'), name='path_parent_index'),
-                    Index(F('path__len'), name='path_length_index'),
+                    Index(Func(F('path'), 1, function='trim_array'), name='place_path_parent_index'),
+                    Index(F('path__len'), name='place_path_length_index'),
                 ],
             },
+            bases=(TreeModelMixin, models.Model),
         ),
         CreateTreeTrigger('tests.Place'),
     ]
