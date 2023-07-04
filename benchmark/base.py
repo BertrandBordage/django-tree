@@ -131,16 +131,19 @@ class Benchmark:
             if model is not tested_model:
                 continue
             benchmark_test = test_class(self, model)
-            with transaction.atomic(using=self.current_db_alias):
-                try:
-                    benchmark_test.setup()
-                except SkipTest:
-                    value = elapsed_time = None
+            try:
+                benchmark_test.setup()
+            except SkipTest:
+                value = elapsed_time = None
+            else:
+                start = time()
+                if benchmark_test.rollback:
+                    with transaction.atomic(using=self.current_db_alias):
+                        value = benchmark_test.run()
+                        connection.needs_rollback = True
                 else:
-                    start = time()
                     value = benchmark_test.run()
-                    elapsed_time = time() - start
-                connection.needs_rollback = True
+                elapsed_time = time() - start
             if value is None:
                 value = elapsed_time
             self.add_data(model, test_name, count, value, y_label=y_label)
@@ -248,6 +251,8 @@ class Benchmark:
 
 
 class BenchmarkTest:
+    rollback: bool = False
+
     def __init__(self, benchmark, model):
         self.benchmark = benchmark
         self.model = model
@@ -257,6 +262,10 @@ class BenchmarkTest:
 
     def run(self):
         raise NotImplementedError
+
+
+class BenchmarkWriteTest(BenchmarkTest):
+    rollback = True
 
 
 @Benchmark.register_test('Table disk usage (including indexes)',
@@ -715,27 +724,27 @@ class TestGetRoots(BenchmarkTest):
 
 
 @Benchmark.register_test('Rebuild paths', MPTTPlace, y_label=WRITE_LATENCY)
-class TestRebuildPaths(BenchmarkTest):
+class TestRebuildPaths(BenchmarkWriteTest):
     def run(self):
         self.model._default_manager.rebuild()
 
 
 @Benchmark.register_test('Rebuild paths', TreePlace, y_label=WRITE_LATENCY)
-class TestRebuildPaths(BenchmarkTest):
+class TestRebuildPaths(BenchmarkWriteTest):
     def run(self):
         self.model.rebuild_paths()
 
 
 @Benchmark.register_test('Rebuild paths', (TreebeardALPlace, TreebeardNSPlace),
                          y_label=WRITE_LATENCY)
-class TestRebuildPaths(BenchmarkTest):
+class TestRebuildPaths(BenchmarkWriteTest):
     def setup(self):
         raise SkipTest
 
 
 @Benchmark.register_test('Rebuild paths', TreebeardMPPlace,
                          y_label=WRITE_LATENCY)
-class TestRebuildPaths(BenchmarkTest):
+class TestRebuildPaths(BenchmarkWriteTest):
     def run(self):
         self.model.fix_tree()
 
@@ -748,7 +757,7 @@ class TestRebuildPaths(BenchmarkTest):
 @Benchmark.register_test(
     'Create [root]',
     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-class TestCreateRoot(BenchmarkTest):
+class TestCreateRoot(BenchmarkWriteTest):
     def run(self):
         self.model.objects.create()
 
@@ -756,7 +765,7 @@ class TestCreateRoot(BenchmarkTest):
 @Benchmark.register_test(
     'Create [root]',
     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-class TestCreateRoot(BenchmarkTest):
+class TestCreateRoot(BenchmarkWriteTest):
     def run(self):
         self.model.add_root()
 
@@ -764,7 +773,7 @@ class TestCreateRoot(BenchmarkTest):
 @Benchmark.register_test(
     'Create [branch]',
     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-class TestCreateBranch(GetRootMixin, BenchmarkTest):
+class TestCreateBranch(GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.model.objects.create(parent=self.root)
 
@@ -772,7 +781,7 @@ class TestCreateBranch(GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Create [branch]',
     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-class TestCreateBranch(GetRootMixin, BenchmarkTest):
+class TestCreateBranch(GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.add_child()
 
@@ -780,7 +789,7 @@ class TestCreateBranch(GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Create [leaf]',
     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-class TestCreateLeaf(GetLeafMixin, BenchmarkTest):
+class TestCreateLeaf(GetLeafMixin, BenchmarkWriteTest):
     def run(self):
         self.model.objects.create(parent=self.leaf)
 
@@ -788,7 +797,7 @@ class TestCreateLeaf(GetLeafMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Create [leaf]',
     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-class TestCreateLeaf(GetLeafMixin, BenchmarkTest):
+class TestCreateLeaf(GetLeafMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.add_child()
 
@@ -799,19 +808,19 @@ class TestCreateLeaf(GetLeafMixin, BenchmarkTest):
 
 
 @Benchmark.register_test('Save without change [root]', y_label=WRITE_LATENCY)
-class TestSaveRootWithoutChange(GetRootMixin, BenchmarkTest):
+class TestSaveRootWithoutChange(GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.save()
 
 
 @Benchmark.register_test('Save without change [branch]', y_label=WRITE_LATENCY)
-class TestSaveBranchWithoutChange(GetBranchMixin, BenchmarkTest):
+class TestSaveBranchWithoutChange(GetBranchMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.save()
 
 
 @Benchmark.register_test('Save without change [leaf]', y_label=WRITE_LATENCY)
-class TestSaveLeafWithoutChange(GetLeafMixin, BenchmarkTest):
+class TestSaveLeafWithoutChange(GetLeafMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.save()
 
@@ -822,21 +831,21 @@ class TestSaveLeafWithoutChange(GetLeafMixin, BenchmarkTest):
 
 
 @Benchmark.register_test('Move [same root path]', y_label=WRITE_LATENCY)
-class TestMoveSameRootPath(GetRootMixin, BenchmarkTest):
+class TestMoveSameRootPath(GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.name += ' 2'
         self.root.save()
 
 
 @Benchmark.register_test('Move [same branch path]', y_label=WRITE_LATENCY)
-class TestMoveSameBranchPath(GetBranchMixin, BenchmarkTest):
+class TestMoveSameBranchPath(GetBranchMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.name += ' 2'
         self.branch.save()
 
 
 @Benchmark.register_test('Move [same leaf path]', y_label=WRITE_LATENCY)
-class TestMoveSameLeafPath(GetLeafMixin, BenchmarkTest):
+class TestMoveSameLeafPath(GetLeafMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.name += ' 2'
         self.leaf.save()
@@ -845,7 +854,7 @@ class TestMoveSameLeafPath(GetLeafMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [root to branch]',
     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-class TestMoveRootToBranch(GetBranchMixin, GetRootMixin, BenchmarkTest):
+class TestMoveRootToBranch(GetBranchMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.parent = self.branch
         self.root.save()
@@ -854,7 +863,7 @@ class TestMoveRootToBranch(GetBranchMixin, GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [root to branch]',
     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-class TestMoveRootToBranch(GetBranchMixin, GetRootMixin, BenchmarkTest):
+class TestMoveRootToBranch(GetBranchMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.move(self.branch, pos='sorted-child')
 
@@ -862,7 +871,7 @@ class TestMoveRootToBranch(GetBranchMixin, GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [root to leaf]',
     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkTest):
+class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.parent = self.leaf
         self.root.save()
@@ -871,7 +880,7 @@ class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [root to leaf]',
     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkTest):
+class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.move(self.leaf, pos='sorted-child')
 
@@ -879,7 +888,7 @@ class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [branch to root]',
     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-class TestMoveBranchToRoot(GetBranchMixin, BenchmarkTest):
+class TestMoveBranchToRoot(GetBranchMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.parent = None
         self.branch.save()
@@ -888,7 +897,7 @@ class TestMoveBranchToRoot(GetBranchMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [branch to root]',
     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-class TestMoveBranchToRoot(GetBranchMixin, GetRootMixin, BenchmarkTest):
+class TestMoveBranchToRoot(GetBranchMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.move(self.root, pos='sorted-sibling')
 
@@ -896,7 +905,7 @@ class TestMoveBranchToRoot(GetBranchMixin, GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [branch to leaf]',
     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkTest):
+class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.parent = self.leaf
         self.branch.save()
@@ -905,7 +914,7 @@ class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [branch to leaf]',
     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkTest):
+class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.move(self.leaf, pos='sorted-child')
 
@@ -913,7 +922,7 @@ class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [leaf to root]',
     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-class TestMoveLeafToRoot(GetLeafMixin, BenchmarkTest):
+class TestMoveLeafToRoot(GetLeafMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.parent = None
         self.leaf.save()
@@ -922,7 +931,7 @@ class TestMoveLeafToRoot(GetLeafMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [leaf to root]',
     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-class TestMoveLeafToRoot(GetLeafMixin, GetRootMixin, BenchmarkTest):
+class TestMoveLeafToRoot(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.move(self.root, pos='sorted-sibling')
 
@@ -930,7 +939,7 @@ class TestMoveLeafToRoot(GetLeafMixin, GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [leaf to branch]',
     (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
-class TestMoveLeafToBranch(GetLeafMixin, GetRootMixin, BenchmarkTest):
+class TestMoveLeafToBranch(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.parent = self.root
         self.leaf.save()
@@ -939,7 +948,7 @@ class TestMoveLeafToBranch(GetLeafMixin, GetRootMixin, BenchmarkTest):
 @Benchmark.register_test(
     'Move [leaf to branch]',
     (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
-class TestMoveLeafToBranch(GetLeafMixin, GetRootMixin, BenchmarkTest):
+class TestMoveLeafToBranch(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.move(self.root, pos='sorted-child')
 
@@ -950,18 +959,18 @@ class TestMoveLeafToBranch(GetLeafMixin, GetRootMixin, BenchmarkTest):
 
 
 @Benchmark.register_test('Delete [root]', y_label=WRITE_LATENCY)
-class TestDeleteRoot(GetRootMixin, BenchmarkTest):
+class TestDeleteRoot(GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.delete()
 
 
 @Benchmark.register_test('Delete [branch]', y_label=WRITE_LATENCY)
-class TestDeleteBranch(GetBranchMixin, BenchmarkTest):
+class TestDeleteBranch(GetBranchMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.delete()
 
 
 @Benchmark.register_test('Delete [leaf]', y_label=WRITE_LATENCY)
-class TestDeleteLeaf(GetLeafMixin, BenchmarkTest):
+class TestDeleteLeaf(GetLeafMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.delete()
