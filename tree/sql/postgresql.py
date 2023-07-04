@@ -87,14 +87,6 @@ UPDATE_PATHS_FUNCTION = """
         new_path decimal[];
         new_parent_path decimal[];
     BEGIN
-        IF TG_OP = 'DELETE' THEN
-            -- TODO: Bulk delete descendants of the current row,
-            --       if the parent foreign key has `on_delete=CASCADE`
-            --       and it is compatible with Django’s Collector.
-            --       Do the equivalent with `SET_NULL`.
-            RETURN OLD;
-        END IF;
-
         IF TG_OP = 'UPDATE' THEN
             {get_old_path}
             {get_new_path}
@@ -320,17 +312,6 @@ CREATE_TRIGGER_QUERIES = (
     );
     """,
     """
-    CREATE TRIGGER "update_{path}_after"
-    AFTER DELETE
-    ON "{table}"
-    FOR EACH ROW
-    WHEN (pg_trigger_depth() = 0)
-    EXECUTE PROCEDURE update_paths(
-        '{pk}', '{parent}', '{path}',
-        '{{{order_by}}}', '{{{reversed_order_by}}}', '{{{where_columns}}}'
-    );
-    """,
-    """
     CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
     BEGIN
         PERFORM rebuild_paths('{table}', '{pk}', '{parent}', '{path}');
@@ -351,7 +332,6 @@ DROP_TRIGGER_QUERIES = (
     # TODO: Find a way to delete this unique constraint
     #       somewhere else.
     'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{table}_{path}_unique";'
-    'DROP TRIGGER IF EXISTS "update_{path}_after" ON "{table}";',
     'DROP TRIGGER IF EXISTS "update_{path}_before" ON "{table}";',
     'DROP FUNCTION IF EXISTS rebuild_{table}_{path}();',
 )
@@ -364,8 +344,6 @@ def rebuild(table, path_field, db_alias=DEFAULT_DB_ALIAS):
 
 def disable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
-        cursor.execute('ALTER TABLE "{}" DISABLE TRIGGER "update_{}_after";'
-                       .format(table, path_field))
         cursor.execute('ALTER TABLE "{}" DISABLE TRIGGER "update_{}_before";'
                        .format(table, path_field))
 
@@ -373,6 +351,4 @@ def disable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
 def enable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
         cursor.execute('ALTER TABLE "{}" ENABLE TRIGGER "update_{}_before";'
-                       .format(table, path_field))
-        cursor.execute('ALTER TABLE "{}" ENABLE TRIGGER "update_{}_after";'
                        .format(table, path_field))
