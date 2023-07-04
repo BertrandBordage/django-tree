@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
-from django.db.models import DecimalField
+from django.db.models import DecimalField, Index, Func, F
 from django.utils.translation import ugettext_lazy as _
 
 from .sql import postgresql
@@ -12,11 +12,24 @@ from .types import Path
 
 # TODO: Handle ManyToManyField('self') instead of ForeignKey('self').
 # TODO: Add queryset methods like `get_descendants` in a mixin.
-# TODO: Implement an alternative using regex for other db backends.
+# TODO: Implement an alternative for other db backends.
 
 
 class PathField(ArrayField):
     description = _('Tree path')
+
+    @classmethod
+    def get_indexes(cls, path_field_name: str):
+        return [
+            Index(
+                Func(F(path_field_name), 1, function='trim_array'),
+                name=f'{path_field_name}_parent_index',
+            ),
+            Index(
+                F(f'{path_field_name}__len'),
+                name=f'{path_field_name}_length_index',
+            ),
+        ]
 
     def __init__(self, *args, **kwargs):
         for kwarg in ('base_field', 'default', 'null', 'unique'):

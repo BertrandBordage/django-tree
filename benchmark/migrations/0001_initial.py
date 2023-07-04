@@ -1,6 +1,7 @@
 from django.db import migrations
 from django.db.models import (
     AutoField, CharField, ForeignKey, PositiveIntegerField, Manager, CASCADE,
+    Index, Func, F,
 )
 from mptt.fields import TreeForeignKey
 from tree.fields import PathField
@@ -40,6 +41,12 @@ class Migration(migrations.Migration):
                 ('parent', ForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
                 ('path', PathField(order_by=('name',), db_index=True)),
             ],
+            options={
+                'indexes': [
+                    Index(Func(F('path'), 1, function='trim_array'), name='path_parent_index'),
+                    Index(F('path__len'), name='path_length_index'),
+                ],
+            },
         ),
         CreateTreeTrigger('TreePlace'),
 

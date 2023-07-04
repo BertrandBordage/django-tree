@@ -29,6 +29,11 @@ class TreePlace(TreeModel):
                         on_delete=CASCADE)
     path = PathField(order_by=('name',), db_index=True)
 
+    class Meta:
+        indexes = [
+            *PathField.get_indexes('path'),
+        ]
+
 
 class TreebeardALPlace(AL_Node):
     name = CharField(max_length=50, unique=True, default=get_random_name)

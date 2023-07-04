@@ -1,5 +1,5 @@
 from django.db import models, migrations
-from django.db.models import CASCADE
+from django.db.models import CASCADE, Index, Func, F
 
 from tree.fields import PathField
 from tree.operations import CreateTreeTrigger
@@ -21,6 +21,10 @@ class Migration(migrations.Migration):
             ],
             options={
                 'ordering': ('path', 'name'),
+                'indexes': [
+                    Index(Func(F('path'), 1, function='trim_array'), name='path_parent_index'),
+                    Index(F('path__len'), name='path_length_index'),
+                ],
             },
         ),
         CreateTreeTrigger('tests.Place'),

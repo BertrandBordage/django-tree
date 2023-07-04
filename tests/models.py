@@ -11,3 +11,6 @@ class Place(TreeModel):
 
     class Meta:
         ordering = ('path', 'name')
+        indexes = [
+            *PathField.get_indexes('path'),
+        ]
