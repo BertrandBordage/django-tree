@@ -114,7 +114,6 @@ UPDATE_PATHS_FUNCTION = """
 
         END IF;
 
-
         {get_new_parent_path}
         IF TG_OP = 'UPDATE' THEN
             -- TODO: Add this behaviour to the model validation.
@@ -122,7 +121,7 @@ UPDATE_PATHS_FUNCTION = """
                 RAISE 'Cannot set itself or a descendant as parent.';
             END IF;
         END IF;
-        
+
         {get_prev_sibling_where_clause}
         {get_prev_sibling_decimal}
         {get_next_sibling_where_clause}
@@ -261,29 +260,8 @@ UPDATE_PATHS_FUNCTION = """
 )
 
 
-REBUILD_PATHS_FUNCTION = """
-    CREATE OR REPLACE FUNCTION rebuild_paths(
-        table_name text, pk text, parent text, path text) RETURNS void AS $$
-    BEGIN
-        {}
-    END;
-    $$ LANGUAGE plpgsql;
-    """.format(
-    format_sql_in_function("""
-        UPDATE {table_name} SET {path} = '{{NULL}}'::decimal[] FROM (
-            SELECT * FROM {table_name}
-            WHERE {parent} IS NULL
-            LIMIT 1
-            FOR UPDATE
-        ) AS t
-        WHERE {table_name}.{pk} = t.{pk}
-    """),
-)
-
-
 CREATE_FUNCTIONS_QUERIES = (
     UPDATE_PATHS_FUNCTION,
-    REBUILD_PATHS_FUNCTION,
 )
 # We escape the modulo operator '%' otherwise Django considers it
 # as a placeholder for a parameter.
@@ -292,10 +270,6 @@ CREATE_FUNCTIONS_QUERIES = [s.replace('%', '%%')
 
 
 DROP_FUNCTIONS_QUERIES = (
-    """
-    DROP FUNCTION IF EXISTS rebuild_paths(table_name text, pk text,
-                                          parent text, path text);
-    """,
     'DROP FUNCTION IF EXISTS update_paths();',
 )
 
@@ -306,7 +280,7 @@ CREATE_TRIGGER_QUERIES = (
     ON "{table}"
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
-    EXECUTE PROCEDURE update_paths(
+    EXECUTE FUNCTION update_paths(
         '{pk}', '{parent}', '{path}',
         '{{{order_by}}}', '{{{reversed_order_by}}}', '{{{where_columns}}}'
     );
@@ -314,7 +288,13 @@ CREATE_TRIGGER_QUERIES = (
     """
     CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
     BEGIN
-        PERFORM rebuild_paths('{table}', '{pk}', '{parent}', '{path}');
+        UPDATE {table} SET {path} = '{{NULL}}'::decimal[] FROM (
+            SELECT * FROM {table}
+            WHERE {parent} IS NULL
+            LIMIT 1
+            FOR UPDATE
+        ) AS t
+        WHERE {table}.{pk} = t.{pk};
     END;
     $$ LANGUAGE plpgsql;
     """,
@@ -333,7 +313,6 @@ DROP_TRIGGER_QUERIES = (
     #       somewhere else.
     'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{table}_{path}_unique";'
     'DROP TRIGGER IF EXISTS "update_{path}_before" ON "{table}";',
-    'DROP FUNCTION IF EXISTS rebuild_{table}_{path}();',
 )
 
 
