@@ -79,7 +79,11 @@ class Path(object):
         path = self.value
         if not include_self:
             path = path[:-1]
-        return self.qs.filter(**{self.attname + '__ancestor_of': path})
+        # Using the lookup `ancestor_of` here is slower,
+        # so we explicitly specify the ancestors’ paths.
+        return self.qs.filter(**{self.attname + '__in': [
+            path[:i] for i in range(1, len(path) + 1)
+        ]})
 
     def get_descendants(self, include_self=False):
         if not self.value:
