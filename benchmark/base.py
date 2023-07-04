@@ -2,9 +2,10 @@ from __future__ import print_function
 from collections import Iterable
 import os
 from time import time
+from typing import Type
 
 from django.db import connections, router, transaction
-from django.db.models import Max, F
+from django.db.models import Max, F, Model
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import pandas as pd
@@ -43,8 +44,13 @@ class Benchmark:
     }
     results_path = 'benchmark/results/'
 
-    def __init__(self, run_django_tree_only: bool = False):
+    def __init__(
+        self,
+        run_django_tree_only: bool = False,
+        db_optimization_interval: int = 100,
+    ):
         self.run_django_tree_only = run_django_tree_only
+        self.db_optimization_interval = db_optimization_interval
         self.data = []
         self.router = router.routers[0]
 
@@ -165,6 +171,16 @@ class Benchmark:
             bbox_extra_artists=(legend,), bbox_inches='tight',
         )
 
+    def force_update_db_stats_and_indexes(self, model: Type[Model]):
+        with connections[self.current_db_alias].cursor() as cursor:
+            # This makes sure the table statistics are
+            # up to date and the disk usage is optimised.
+            cursor.execute(
+                'VACUUM FULL ANALYZE "%s";' % model._meta.db_table)
+            # This makes sure the indexes are up to date.
+            cursor.execute(
+                'REINDEX TABLE "%s";' % model._meta.db_table)
+
     def run(self):
         self.create_databases()
 
@@ -190,14 +206,8 @@ class Benchmark:
                     progress.update(count - progress.n)
                     self.add_data(model, 'Create all objects', count,
                                   elapsed_time, y_label=WRITE_LATENCY)
-                    with connection.cursor() as cursor:
-                        # This makes sure the table statistics are
-                        # up to date and the disk usage is optimised.
-                        cursor.execute(
-                            'VACUUM ANALYZE "%s";' % model._meta.db_table)
-                        # This makes sure the indexes are up to date.
-                        cursor.execute(
-                            'REINDEX TABLE "%s";' % model._meta.db_table)
+                    if count % self.db_optimization_interval == 0:
+                        self.force_update_db_stats_and_indexes(model)
                     self.run_tests(model, count)
                 # We delete the objects to avoid impacting
                 # the following tests and to clear some disk space.
