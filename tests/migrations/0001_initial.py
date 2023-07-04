@@ -30,4 +30,23 @@ class Migration(migrations.Migration):
             bases=(TreeModelMixin, models.Model),
         ),
         CreateTreeTrigger('tests.Place'),
+        migrations.CreateModel(
+            name='Person',
+            fields=[
+                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('first_name', models.CharField(blank=True, max_length=20)),
+                ('last_name', models.CharField(max_length=50)),
+                ('parent', models.ForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
+                ('path', PathField(order_by=('last_name', 'first_name'), size=None)),
+            ],
+            options={
+                'ordering': ['path'],
+                'indexes': [
+                    Index(Func(F('path'), 1, function='trim_array'), name='person_path_parent_index'),
+                    Index(F('path__len'), name='person_path_length_index')
+                ],
+            },
+            bases=(TreeModelMixin, models.Model),
+        ),
+        CreateTreeTrigger('tests.Person'),
     ]

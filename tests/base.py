@@ -8,12 +8,11 @@ from unittest import expectedFailure
 from django.db import transaction, InternalError, connection
 from django.test import TransactionTestCase
 
-from .models import Place
+from .models import Place, Person
 
 
 # TODO: Test same order_by values.
 # TODO: Test order_by with descending orders.
-# TODO: Test with multiple `order_by` columns.
 # TODO: Test what happens when we move a node after itself
 #       while staying in the same siblinghood
 #       (it should not create a hole at the former position).
@@ -1131,6 +1130,89 @@ class PathTest(CommonTest):
         place2 = self.create_place('place2', place1)
         with connection.cursor() as cursor:
             cursor.execute('SELECT %s;', [place2.path])
+
+
+class MultipleOrderByFieldsTest(TransactionTestCase):
+    def setUp(self):
+        self.correct_raw_persons_data = [
+            (path(-0.5), 'Leopold', 'Mozart'),
+            (path(-0.5, -1), 'Maria Anna', 'Mozart'),
+            (path(-0.5, 0), 'Wolfgang Amadeus', 'Mozart'),
+            (path(-0.4375), '', 'Strauss'),
+            (path(-0.375), 'Johann (father)', 'Strauss'),
+            (path(-0.375, 0), 'Johann (son)', 'Strauss'),
+            (path(-0.25), 'Piotr Ilyich', 'Tchaikovski'),
+            (path(0), 'Antonio Lucio', 'Vivaldi'),
+        ]
+        self.correct_persons_data = [
+            (path(0), 'Leopold', 'Mozart'),
+            (path(0, 0), 'Maria Anna', 'Mozart'),
+            (path(0, 1), 'Wolfgang Amadeus', 'Mozart'),
+            (path(1), '', 'Strauss'),
+            (path(2), 'Johann (father)', 'Strauss'),
+            (path(2, 0), 'Johann (son)', 'Strauss'),
+            (path(3), 'Piotr Ilyich', 'Tchaikovski'),
+            (path(4), 'Antonio Lucio', 'Vivaldi'),
+        ]
+        self.vivaldi = Person.objects.create(
+            first_name='Antonio Lucio', last_name='Vivaldi',
+        )
+        self.wolfgang_mozart = Person.objects.create(
+            first_name='Wolfgang Amadeus', last_name='Mozart',
+        )
+        self.leopold_mozart = Person.objects.create(
+            first_name='Leopold', last_name='Mozart',
+        )
+        self.wolfgang_mozart.parent = self.leopold_mozart
+        self.wolfgang_mozart.save()
+        self.maria_anna_mozart = Person.objects.create(
+            parent=self.leopold_mozart,
+            first_name='Maria Anna', last_name='Mozart',
+        )
+        self.tchaikovski = Person.objects.create(
+            first_name='Piotr Ilyich', last_name='Tchaikovski',
+        )
+        self.strauss_father = Person.objects.create(
+            first_name='Johann (father)', last_name='Strauss',
+        )
+        self.strauss_son = Person.objects.create(
+            parent=self.strauss_father,
+            first_name='Johann (son)', last_name='Strauss',
+        )
+        self.strauss = Person.objects.create(
+            last_name='Strauss',
+        )
+
+    def assertPersons(self, values, queryset=None, n_queries=1):
+        with self.assertNumQueries(n_queries):
+            if queryset is None:
+                queryset = Person.objects.all()
+            persons = list(queryset)
+            self.assertListEqual(
+                [(p.path.value, p.first_name, p.last_name) for p in persons],
+                values,
+            )
+
+    def test_rebuild(self):
+        self.assertPersons(self.correct_raw_persons_data)
+        with Person.disabled_tree_trigger():
+            for i, person in enumerate(
+                Person.objects.order_by('-last_name', '-first_name')
+            ):
+                person.path = [i]
+                person.save()
+        self.assertPersons([
+            (path(0), 'Antonio Lucio', 'Vivaldi'),
+            (path(1), 'Piotr Ilyich', 'Tchaikovski'),
+            (path(2), 'Johann (son)', 'Strauss'),
+            (path(3), 'Johann (father)', 'Strauss'),
+            (path(4), '', 'Strauss'),
+            (path(5), 'Wolfgang Amadeus', 'Mozart'),
+            (path(6), 'Maria Anna', 'Mozart'),
+            (path(7), 'Leopold', 'Mozart'),
+        ])
+        Person.rebuild_paths()
+        self.assertPersons(self.correct_persons_data)
 
 
 class QuerySetTest(CommonTest):
