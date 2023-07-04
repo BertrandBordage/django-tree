@@ -87,10 +87,6 @@ UPDATE_PATHS_FUNCTION = """
         new_path decimal[];
         new_parent_path decimal[];
     BEGIN
-        IF TG_OP != 'INSERT' THEN
-            {get_old_path}
-        END IF;
-
         IF TG_OP = 'DELETE' THEN
             -- TODO: Bulk delete descendants of the current row,
             --       if the parent foreign key has `on_delete=CASCADE`
@@ -100,6 +96,7 @@ UPDATE_PATHS_FUNCTION = """
         END IF;
 
         IF TG_OP = 'UPDATE' THEN
+            {get_old_path}
             {get_new_path}
             IF new_path = '{{NULL}}'::decimal[] THEN
                 {rebuild}
@@ -156,12 +153,11 @@ UPDATE_PATHS_FUNCTION = """
                 next_sibling_decimal := coalesce(prev_sibling_decimal, 0) + 2;
             END IF;
         END IF;
-        new_path := array_append(
-            new_parent_path,
-            (prev_sibling_decimal + next_sibling_decimal) / 2
-        );
+        new_path := new_parent_path || (
+            prev_sibling_decimal + next_sibling_decimal
+        ) / 2;
 
-        IF TG_OP = 'UPDATE' THEN
+        IF TG_OP = 'UPDATE' AND new_path != old_path THEN
             {update_descendants}
         END IF;
 
@@ -185,11 +181,9 @@ UPDATE_PATHS_FUNCTION = """
             ) UNION ALL (
                 SELECT
                     t2.{pk},
-                    array_append(
-                        t1.path, 
-                        row_number() OVER (PARTITION BY t1.pk
-                                           ORDER BY {order_by_cols2:s}) - 1
-                    )
+                    t1.path || row_number() OVER (
+                        PARTITION BY t1.pk ORDER BY {order_by_cols2:s}
+                    ) - 1
                 FROM generate_paths AS t1
                 INNER JOIN {table_name} AS t2 ON (
                     t2.{parent} = t1.pk

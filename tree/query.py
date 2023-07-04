@@ -28,6 +28,7 @@ def _get_path_field(model, name):
         'among these values: %s' % [f.name for f in path_fields])
 
 
+# TODO: Implement a faster `QuerySet.delete` and add it to the benchmark.
 class TreeQuerySetMixin:
     def _get_path_field_name(self, name):
         return _get_path_field(self.model, name).name
