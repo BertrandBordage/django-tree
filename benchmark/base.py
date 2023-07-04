@@ -43,7 +43,8 @@ class Benchmark:
     }
     results_path = 'benchmark/results/'
 
-    def __init__(self):
+    def __init__(self, run_django_tree_only: bool = False):
+        self.run_django_tree_only = run_django_tree_only
         self.data = []
         self.router = router.routers[0]
 
@@ -172,6 +173,8 @@ class Benchmark:
             connection = connections[db_alias]
 
             for model in sorted(self.models, key=lambda m: m.__name__):
+                if self.run_django_tree_only and model is not TreePlace:
+                    continue
                 print('-' * 50)
                 print('%s on %s' % (self.models[model], connection.vendor))
                 it = self.populate_database(model)
@@ -200,8 +203,14 @@ class Benchmark:
                 # the following tests and to clear some disk space.
                 model.objects.all().delete()
 
-        df = pd.DataFrame(self.data)
-        df.to_csv(os.path.join(self.results_path, 'data.csv'), index=False)
+        csv_path = os.path.join(self.results_path, 'data.csv')
+        if self.run_django_tree_only:
+            df = pd.read_csv(csv_path)
+            df = df[df['Implementation'] != self.models[TreePlace]]
+            df = df.append(pd.DataFrame(self.data))
+        else:
+            df = pd.DataFrame(self.data)
+        df.to_csv(csv_path, index=False)
 
         stats_df = df.set_index(['Database', 'Test name', 'Count'])
         stats_df.sort_index(inplace=True)
