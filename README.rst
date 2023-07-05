@@ -12,7 +12,7 @@ Fast and easy tree structures.
 .. image:: http://img.shields.io/coveralls/BertrandBordage/django-tree/master.svg?style=flat-square
    :target: https://coveralls.io/r/BertrandBordage/django-tree?branch=master
 
-**In alpha, it can’t be used yet in production.**
+**In beta, it can’t be used yet in production.**
 
 This tool works in a very similar way to **django-mptt**
 and **django-treebeard**, however it’s so different in conception
@@ -35,6 +35,20 @@ Compared to these solutions, django-tree aims to have these advantages
 However, there is nothing groundbreaking here: this is only the result of
 a proper use of the latest Django improvements, combined with a good knowledge
 of SQL.
+
+
+Benchmark
+---------
+
+`The detailed benchmark <benchmark/results/results.rst>`_ gives a good idea
+on how well django-tree performs compared to other Django solutions.
+All that while being simpler to use, more robust and fully generalized to raw SQL, bulk etc.
+
+A few noteworthy extracts of the benchmark (less is better):
+
+.. image:: benchmark/results/postgresql_-_Create_all_objects.svg
+.. image:: benchmark/results/postgresql_-_Rebuild_paths.svg
+.. image:: benchmark/results/postgresql_-_Create_[root].svg
 
 
 Installation

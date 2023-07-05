@@ -18,9 +18,6 @@ class GetModelMixin:
                 else get_model(app_label, self.model_lookup))
 
 
-# FIXME: Add a new operation `DeleteOldTreeFunctions` and use it in a new migration.
-
-
 class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
     reversible = True
     atomic = True
