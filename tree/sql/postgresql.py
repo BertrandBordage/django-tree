@@ -1,277 +1,202 @@
-from collections import OrderedDict
-from string import Formatter
+from typing import List, Optional, Type
 
 from django.db import DEFAULT_DB_ALIAS, connections
+from django.db.models import Model
+
+from .base import (
+    quote_ident, get_prev_sibling_where_clause, get_next_sibling_where_clause,
+    compare_columns,
+)
 
 
-class Arg:
-    pattern = '%{position}${format_type}'
-    format_types = ('I', 'L', 's')
+def execute_format(
+    sql: str,
+    *args: str,
+    using: Optional[List[str]] = None,
+    into: Optional[List[str]] = None,
+):
+    if using is None:
+        using = []
+    if into is None:
+        into = []
 
-    def __init__(self, position):
-        self.position = position
+    sql = sql.replace("'", "''")
 
-    def __format__(self, format_spec):
-        if format_spec and format_spec not in self.format_types:
-            raise ValueError("Unknown format_spec '%s'" % format_spec)
-        if not format_spec and self.format_types:
-            format_spec = self.format_types[0]
-        return self.pattern.format(position=self.position,
-                                   format_type=format_spec)
-
-
-class UsingArg(Arg):
-    pattern = '${position}'
-    format_types = ()
+    args = ', ' + (', '.join(args)) if args else ''
+    using = ' USING ' + ', '.join(using) if using else ''
+    into = ' INTO ' + ', '.join(into) if into else ''
+    return f"EXECUTE format('{sql}'{args}){using}{into};"
 
 
-class AnyArg(OrderedDict):
-    arg_class = Arg
+def get_update_paths_function_creation(
+    model: Type[Model], path_field_lookup: str, parent_field_lookup: str,
+):
+    meta = model._meta
+    pk = meta.pk
+    path_field = meta.get_field(path_field_lookup)
+    order_by = path_field.order_by
+    if not (pk.attname in order_by or pk.name in order_by
+            or 'pk' in order_by):
+        order_by += ('pk',)
 
-    def __init__(self, *args, **kwargs):
-        super(AnyArg, self).__init__(*args, **kwargs)
-        self.position = 1
+    # TODO: Handle related lookups in `order_by`.
+    where_columns = []
+    sql_order_by = []
+    sql_reversed_order_by = []
+    for field_name in order_by:
+        descending = field_name[0] == '-'
+        if descending:
+            field_name = field_name[1:]
+        field = (meta.pk if field_name == 'pk'
+                 else meta.get_field(field_name))
+        quoted_field_name = quote_ident(field.attname)
+        if field_name != 'pk':
+            where_columns.append(quoted_field_name)
+        sql_order_by.append(
+            f'{quoted_field_name} {"DESC" if descending else "ASC"}'
+        )
+        sql_reversed_order_by.append(
+            f'{quoted_field_name} {"ASC" if descending else "DESC"}'
+        )
 
-    def __getitem__(self, item):
-        if item not in self:
-            self[item] = self.arg_class(self.position)
-            self.position += 1
-        return super(AnyArg, self).__getitem__(item)
+    table = meta.db_table
+    pk = quote_ident(meta.pk.attname)
+    parent = quote_ident(meta.get_field(parent_field_lookup).attname)
+    path = quote_ident(path_field.attname)
+    sql_t2_order_by = ', '.join([
+        f't2.{ordered_column}' for ordered_column in sql_order_by
+    ])
+    sql_order_by = ', '.join(sql_order_by)
+    sql_reversed_order_by = ', '.join(sql_reversed_order_by)
 
-
-class AnyUsingArg(AnyArg):
-    arg_class = UsingArg
-
-
-def format_sql_in_function(sql, into=None):
-    kwargs = AnyArg({'USING': AnyUsingArg()})
-    # TODO: Replace Formatter with sql.format(**kwargs) when dropping Python 2.
-    sql = Formatter().vformat(sql, (), kwargs).replace("'", "''")
-    using = kwargs.pop('USING')
-    args = ', '.join([k for k in kwargs])
-    if args:
-        args = ', ' + args
-
-    extra = ''
-    if into is not None:
-        extra += ' INTO ' + ', '.join(into)
-    if using:
-        extra += ' USING ' + ', '.join([a for a in using])
-
-    return "EXECUTE format('%s'%s)%s;" % (sql, args, extra)
-
-
-# TODO: Add `LIMIT 1` where appropriate to see if it optimises a bit.
-UPDATE_PATHS_FUNCTION = """
-    CREATE OR REPLACE FUNCTION update_paths() RETURNS trigger AS $$
-    DECLARE
-        table_name text := TG_TABLE_NAME;
-        pk text := TG_ARGV[0];
-        parent text := TG_ARGV[1];
-        path text := TG_ARGV[2];
-        order_by text[] := TG_ARGV[3];
-        reversed_order_by text[] := TG_ARGV[4];
-        where_columns text[] := TG_ARGV[5];
-        where_column text;
-        parent_unchanged bool;
-        column_unchanged bool;
-        row_unchanged bool := true;
-        prev_sibling_where_clause text := NULL;
-        prev_sibling_decimal decimal := NULL;
-        next_sibling_where_clause text := NULL;
-        next_sibling_decimal decimal := NULL;
-        order_by_cols text := array_to_string(order_by, ',');
-        reversed_order_by_cols text := array_to_string(reversed_order_by, ',');
-        order_by_cols2 text := 't2.' || array_to_string(order_by, ',t2.');
-        old_path decimal[] := NULL;
-        new_path decimal[];
-        new_parent_path decimal[];
-    BEGIN
-        IF TG_OP = 'UPDATE' THEN
-            {get_old_path}
-            {get_new_path}
-            IF new_path = '{{NULL}}'::decimal[] THEN
-                {rebuild}
-                {set_new_path}
-                RETURN NEW;
-            END IF;
-
-            -- Optimizations to speed up saving
-            -- when the relevant tree data is unchanged.
-            {get_parent_unchanged}
-            IF parent_unchanged THEN
-                FOREACH where_column IN ARRAY where_columns LOOP
-                    {get_column_unchanged}
-                    IF NOT column_unchanged THEN
-                        row_unchanged := false;
-                        EXIT;
-                    END IF;
-                END LOOP;
-                IF row_unchanged THEN
-                    RETURN NEW;
-                END IF;
-            END IF;
-
-        END IF;
-
-        {get_new_parent_path}
-        IF TG_OP = 'UPDATE' THEN
-            -- TODO: Add this behaviour to the model validation.
-            IF new_parent_path[:array_length(old_path, 1)] = old_path THEN
-                RAISE 'Cannot set itself or a descendant as parent.';
-            END IF;
-        END IF;
-
-        {get_prev_sibling_where_clause}
-        {get_prev_sibling_decimal}
-        {get_next_sibling_where_clause}
-        {get_next_sibling_decimal}
-
-        IF prev_sibling_decimal IS NULL AND next_sibling_decimal IS NULL THEN
-            prev_sibling_decimal := 0;
-            next_sibling_decimal := 0;
-        ELSE
-            IF prev_sibling_decimal IS NULL THEN
-                -- We use `- 2` so that the middle between prev and next
-                -- will be next - 1, that way the new lower bound
-                -- is the former lower bound - 1.
-                prev_sibling_decimal := coalesce(next_sibling_decimal, 0) - 2;
-            END IF;
-            IF next_sibling_decimal IS NULL THEN
-                -- We use `+ 2` so that the middle between prev and next
-                -- will be prev + 1, that way the new upper bound
-                -- is the former upper bound + 1.
-                next_sibling_decimal := coalesce(prev_sibling_decimal, 0) + 2;
-            END IF;
-        END IF;
-        new_path := new_parent_path || (
-            prev_sibling_decimal + next_sibling_decimal
-        ) / 2;
-
-        IF TG_OP = 'UPDATE' AND new_path != old_path THEN
-            {update_descendants}
-        END IF;
-
-        {set_new_path}
-        RETURN NEW;
-    END;
-    $$ LANGUAGE plpgsql;
-    """.format(
-    get_old_path=format_sql_in_function("""
-        SELECT {USING[OLD]}.{path}
-    """, into=['old_path']),
-    get_new_path=format_sql_in_function(
-        'SELECT {USING[NEW]}.{path}', into=['new_path']),
-    rebuild=format_sql_in_function("""
+    rebuild = execute_format(f"""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
                 SELECT {parent}, NULL::decimal[]
-                FROM {table_name}
+                FROM {table}
                 WHERE {parent} IS NULL
                 LIMIT 1
             ) UNION ALL (
                 SELECT
                     t2.{pk},
                     t1.path || row_number() OVER (
-                        PARTITION BY t1.pk ORDER BY {order_by_cols2:s}
+                        PARTITION BY t1.pk ORDER BY {sql_t2_order_by}
                     ) - 1
                 FROM generate_paths AS t1
-                INNER JOIN {table_name} AS t2 ON (
+                INNER JOIN {table} AS t2 ON (
                     t2.{parent} = t1.pk
                     OR (t1.pk IS NULL AND t2.{parent} IS NULL))
             )
         ), updated AS (
-            UPDATE {table_name} AS t2 SET {path} = t1.path
+            UPDATE {table} AS t2 SET {path} = t1.path
             FROM generate_paths AS t1
-            WHERE t2.{pk} = t1.pk AND t2.{pk} != {USING[OLD]}.{pk}
+            WHERE t2.{pk} = t1.pk AND t2.{pk} != $1.{pk}
                 AND (t2.{path} IS NULL OR t2.{path} != t1.path)
         )
         SELECT path FROM generate_paths
-        WHERE pk = {USING[OLD]}.{pk}
-    """, into=['new_path']),
-    get_parent_unchanged=format_sql_in_function("""
-        SELECT
-            {USING[OLD]}.{parent} IS NULL
-            AND {USING[NEW]}.{parent} IS NULL
-            OR {USING[OLD]}.{parent} = {USING[NEW]}.{parent}
-    """, into=['parent_unchanged']),
-    get_column_unchanged=format_sql_in_function("""
-        SELECT
-            {USING[OLD]}.{where_column} IS NULL
-            AND {USING[NEW]}.{where_column} IS NULL
-            OR {USING[OLD]}.{where_column} = {USING[NEW]}.{where_column}
-    """, into=['column_unchanged']),
-    get_new_parent_path=format_sql_in_function("""
-        SELECT {path} FROM {table_name} WHERE {pk} = {USING[NEW]}.{parent}
-    """, into=['new_parent_path']),
-    # FIXME: This clause is wrong when using multiple `order_by` columns!
-    # FIXME: The way we quote JSON values here is probably incorrect!
-    # FIXME: We should not strip NULLs from the WHERE clause.
-    get_prev_sibling_where_clause=format_sql_in_function("""
-        SELECT COALESCE(array_to_string(array_agg(column_name || ' <= ' || quote_literal(value)), ' AND '), 'TRUE')
-        FROM json_each_text(json_strip_nulls(row_to_json({USING[NEW]}))) AS data(column_name, value)
-        INNER JOIN unnest({USING[where_columns]}) AS columns(where_column) ON where_column = column_name
-    """, into=['prev_sibling_where_clause']),
-    get_prev_sibling_decimal=format_sql_in_function("""
+        WHERE pk = $1.{pk}
+    """, using=['OLD'], into=[f'NEW.{path}'])
+
+    get_new_parent_path = execute_format(f"""
+        SELECT {path} FROM {table} WHERE {pk} = $1.{parent}
+    """, using=['NEW'], into=['new_parent_path'])
+
+    get_prev_sibling_decimal = execute_format(f"""
         SELECT {path}[array_length({path}, 1)]
-        FROM {table_name}
+        FROM {table}
         WHERE
-            {prev_sibling_where_clause:s}
-            AND (
-                {parent} = {USING[NEW]}.{parent}
-                OR ({USING[NEW]}.{parent} IS NULL AND {parent} IS NULL)
-            )
-            AND {pk} != {USING[NEW]}.{pk}
-        ORDER BY {reversed_order_by_cols:s}
+            {get_prev_sibling_where_clause(where_columns, '$1')}
+            AND ({compare_columns(parent, f'$1.{parent}')})
+            AND {pk} != $1.{pk}
+        ORDER BY {sql_reversed_order_by}
         LIMIT 1
-    """, into=['prev_sibling_decimal']),
-    # FIXME: This clause is wrong when using multiple `order_by` columns!
-    # FIXME: The way we quote JSON values here is probably incorrect!
-    # FIXME: We should not strip NULLs from the WHERE clause.
-    get_next_sibling_where_clause=format_sql_in_function("""
-        SELECT COALESCE(array_to_string(array_agg(column_name || ' >= ' || quote_literal(value)), ' AND '), 'TRUE')
-        FROM json_each_text(json_strip_nulls(row_to_json({USING[NEW]}))) AS data(column_name, value)
-        INNER JOIN unnest({USING[where_columns]}) AS columns(where_column) ON where_column = column_name
-    """, into=['next_sibling_where_clause']),
-    get_next_sibling_decimal=format_sql_in_function("""
+    """, using=['NEW'], into=['prev_sibling_decimal'])
+
+    get_next_sibling_decimal = execute_format(f"""
         SELECT {path}[array_length({path}, 1)]
-        FROM {table_name}
+        FROM {table}
         WHERE
-            {next_sibling_where_clause:s}
-            AND (
-                {parent} = {USING[NEW]}.{parent}
-                OR ({USING[NEW]}.{parent} IS NULL AND {parent} IS NULL)
-            )
-            AND {pk} != {USING[NEW]}.{pk}
-        ORDER BY {order_by_cols:s}
+            {get_next_sibling_where_clause(where_columns, '$1')}
+            AND ({compare_columns(parent, f'$1.{parent}')})
+            AND {pk} != $1.{pk}
+        ORDER BY {sql_order_by}
         LIMIT 1
-    """, into=['next_sibling_decimal']),
-    update_descendants=format_sql_in_function("""
-        UPDATE {table_name}
-        SET {path} = {USING[new_path]}
-            || {path}[array_length({USING[OLD]}.{path}, 1) + 1:]
-        WHERE {path}[:array_length({USING[OLD]}.{path}, 1)] = {USING[OLD]}.{path} AND {pk} != {USING[OLD]}.{pk}
-    """),
-    set_new_path=format_sql_in_function("""
-        SELECT *
-        FROM json_populate_record({USING[NEW]},
-                                  '{{"{path:s}": "{new_path:s}"}}'::json)
-    """, into=['NEW']),
-)
+    """, using=['NEW'], into=['next_sibling_decimal'])
 
+    update_descendants = execute_format(f"""
+        UPDATE {table}
+        SET {path} = $1.{path}
+            || {path}[array_length($2.{path}, 1) + 1:]
+        WHERE {path}[:array_length($2.{path}, 1)] = $2.{path} AND {pk} != $2.{pk}
+    """, using=['NEW', 'OLD'])
 
-CREATE_FUNCTIONS_QUERIES = (
-    UPDATE_PATHS_FUNCTION,
-)
-# We escape the modulo operator '%' otherwise Django considers it
-# as a placeholder for a parameter.
-CREATE_FUNCTIONS_QUERIES = [s.replace('%', '%%')
-                            for s in CREATE_FUNCTIONS_QUERIES]
+    row_unchanged = ' AND '.join([
+        '('
+        + compare_columns(f'OLD.{where_column}', f'NEW.{where_column}')
+        + ')'
+        for where_column in [parent, *where_columns]
+    ])
 
+    # TODO: Add `LIMIT 1` where appropriate to see if it optimises a bit.
+    return f"""
+        CREATE OR REPLACE FUNCTION update_{table}_{path}_paths() RETURNS trigger AS $$
+        DECLARE
+            prev_sibling_decimal decimal := NULL;
+            next_sibling_decimal decimal := NULL;
+            new_parent_path decimal[];
+        BEGIN
+            IF TG_OP = 'UPDATE' THEN
+                IF NEW.{path} = '{{NULL}}'::decimal[] THEN
+                    {rebuild}
+                    RETURN NEW;
+                END IF;
 
-DROP_FUNCTIONS_QUERIES = (
-    'DROP FUNCTION IF EXISTS update_paths();',
-)
+                IF {row_unchanged} THEN
+                    RETURN NEW;
+                END IF;
+            END IF;
+
+            {get_new_parent_path}
+            IF TG_OP = 'UPDATE' THEN
+                -- TODO: Add this behaviour to the model validation.
+                IF new_parent_path[:array_length(OLD.{path}, 1)] = OLD.{path} THEN
+                    RAISE 'Cannot set itself or a descendant as parent.';
+                END IF;
+            END IF;
+
+            {get_prev_sibling_decimal}
+            {get_next_sibling_decimal}
+
+            IF prev_sibling_decimal IS NULL AND next_sibling_decimal IS NULL THEN
+                prev_sibling_decimal := 0;
+                next_sibling_decimal := 0;
+            ELSE
+                IF prev_sibling_decimal IS NULL THEN
+                    -- We use `- 2` so that the middle between prev and next
+                    -- will be next - 1, that way the new lower bound
+                    -- is the former lower bound - 1.
+                    prev_sibling_decimal := coalesce(next_sibling_decimal, 0) - 2;
+                END IF;
+                IF next_sibling_decimal IS NULL THEN
+                    -- We use `+ 2` so that the middle between prev and next
+                    -- will be prev + 1, that way the new upper bound
+                    -- is the former upper bound + 1.
+                    next_sibling_decimal := coalesce(prev_sibling_decimal, 0) + 2;
+                END IF;
+            END IF;
+            NEW.{path} = new_parent_path || (
+                prev_sibling_decimal + next_sibling_decimal
+            ) / 2;
+
+            IF TG_OP = 'UPDATE' AND NEW.{path} != OLD.{path} THEN
+                {update_descendants}
+            END IF;
+
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+
 
 CREATE_TRIGGER_QUERIES = (
     """
@@ -280,10 +205,7 @@ CREATE_TRIGGER_QUERIES = (
     ON "{table}"
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
-    EXECUTE FUNCTION update_paths(
-        '{pk}', '{parent}', '{path}',
-        '{{{order_by}}}', '{{{reversed_order_by}}}', '{{{where_columns}}}'
-    );
+    EXECUTE FUNCTION update_{table}_{path}_paths();
     """,
     """
     CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
@@ -313,21 +235,26 @@ DROP_TRIGGER_QUERIES = (
     #       somewhere else.
     'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{table}_{path}_unique";'
     'DROP TRIGGER IF EXISTS "update_{path}_before" ON "{table}";',
+    'DROP FUNCTION IF EXISTS update_{table}_{path}_paths();',
 )
 
 
 def rebuild(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
-        cursor.execute('SELECT rebuild_{}_{}();'.format(table, path_field))
+        cursor.execute(f'SELECT rebuild_{table}_{path_field}();')
 
 
 def disable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
-        cursor.execute('ALTER TABLE "{}" DISABLE TRIGGER "update_{}_before";'
-                       .format(table, path_field))
+        cursor.execute(
+            f'ALTER TABLE "{table}" '
+            f'DISABLE TRIGGER "update_{path_field}_before";'
+        )
 
 
 def enable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
-        cursor.execute('ALTER TABLE "{}" ENABLE TRIGGER "update_{}_before";'
-                       .format(table, path_field))
+        cursor.execute(
+            f'ALTER TABLE "{table}" '
+            f'ENABLE TRIGGER "update_{path_field}_before";'
+        )

@@ -1,6 +1,7 @@
 from django.db.migrations.operations.base import Operation
 
 from .sql import postgresql
+from .sql.base import quote_ident
 
 
 class CheckDatabaseMixin:
@@ -17,36 +18,7 @@ class GetModelMixin:
                 else get_model(app_label, self.model_lookup))
 
 
-class CreateTreeFunctions(Operation, CheckDatabaseMixin):
-    reversible = True
-    atomic = True
-
-    def state_forwards(self, app_label, state):
-        pass
-
-    def database_forwards(self, app_label, schema_editor, from_state, to_state):
-        self.check_database_backend(schema_editor)
-        for sql_query in postgresql.CREATE_FUNCTIONS_QUERIES:
-            schema_editor.execute(sql_query)
-
-    def database_backwards(self, app_label, schema_editor, from_state, to_state):
-        self.check_database_backend(schema_editor)
-        for sql_query in postgresql.DROP_FUNCTIONS_QUERIES:
-            schema_editor.execute(sql_query)
-
-    def describe(self):
-        return 'Creates functions required by django-tree'
-
-
-class DeleteTreeFunctions(CreateTreeFunctions):
-    def database_forwards(self, *args, **kwargs):
-        super(DeleteTreeFunctions, self).database_backwards(*args, **kwargs)
-
-    def database_backwards(self, *args, **kwargs):
-        super(DeleteTreeFunctions, self).database_forwards(*args, **kwargs)
-
-    def describe(self):
-        return 'Deletes functions required by django-tree'
+# FIXME: Add a new operation `DeleteOldTreeFunctions` and use it in a new migration.
 
 
 class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
@@ -60,44 +32,30 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
 
     def get_pre_params(self, model):
         meta = model._meta
-        pk = meta.pk
         path_field = meta.get_field(self.path_field_lookup)
-        path_name = path_field.attname
+        parent_field = meta.get_field(self.parent_field_lookup)
         order_by = path_field.order_by
-        if not (pk.attname in order_by or pk.name in order_by
-                or 'pk' in order_by):
-            order_by += ('pk',)
 
         # TODO: Handle related lookups in `order_by`.
-        sql_where = []
-        sql_order_by = []
-        sql_reversed_order_by = []
+        path = quote_ident(path_field.attname)
+        update_columns = [path]
         for field_name in order_by:
             descending = field_name[0] == '-'
             if descending:
                 field_name = field_name[1:]
-            field = (meta.pk if field_name == 'pk'
-                     else meta.get_field(field_name))
-            if field_name != 'pk':
-                quoted_field_name = '"%s"' % field.attname
-                sql_where.append(quoted_field_name)
-            sql_order_by.append(
-                '\\"%s\\" %s' % (field.attname,
-                                 ('DESC' if descending else 'ASC')))
-            sql_reversed_order_by.append(
-                '\\"%s\\" %s' % (field.attname,
-                                 ('ASC' if descending else 'DESC')))
 
-        update_columns = [path_name, *sql_where]
+            if field_name == 'pk':
+                continue
+
+            quoted_field_name = quote_ident(meta.get_field(field_name).attname)
+            update_columns.append(quoted_field_name)
+
         return dict(
-            table=meta.db_table,
-            pk=meta.pk.attname,
-            parent=meta.get_field(self.parent_field_lookup).attname,
-            path=path_name,
+            table=quote_ident(meta.db_table),
+            pk=quote_ident(meta.pk.attname),
+            parent=quote_ident(parent_field.attname),
+            path=path,
             update_columns=', '.join(update_columns),
-            where_columns=', '.join(sql_where),
-            order_by=', '.join(sql_order_by),
-            reversed_order_by=', '.join(sql_reversed_order_by),
         )
 
     def state_forwards(self, app_label, state):
@@ -106,9 +64,19 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
     def database_forwards(self, app_label, schema_editor,
                           from_state, to_state):
         self.check_database_backend(schema_editor)
+        model = self.get_model(app_label, to_state)
+        # We escape the modulo operator '%' otherwise Django considers it
+        # as a placeholder for a parameter.
+        schema_editor.execute(
+            postgresql.get_update_paths_function_creation(
+                model=model,
+                path_field_lookup=self.path_field_lookup,
+                parent_field_lookup=self.parent_field_lookup,
+            ).replace('%', '%%')
+        )
         for sql_query in postgresql.CREATE_TRIGGER_QUERIES:
             schema_editor.execute(sql_query.format(
-                **self.get_pre_params(self.get_model(app_label, to_state))))
+                **self.get_pre_params(model=model)))
 
     def database_backwards(self, app_label, schema_editor,
                            from_state, to_state):

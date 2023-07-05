@@ -1135,13 +1135,13 @@ class PathTest(CommonTest):
 class MultipleOrderByFieldsTest(TransactionTestCase):
     def setUp(self):
         self.correct_raw_persons_data = [
-            (path(-0.5), 'Leopold', 'Mozart'),
-            (path(-0.5, -1), 'Maria Anna', 'Mozart'),
-            (path(-0.5, 0), 'Wolfgang Amadeus', 'Mozart'),
-            (path(-0.4375), '', 'Strauss'),
-            (path(-0.375), 'Johann (father)', 'Strauss'),
-            (path(-0.375, 0), 'Johann (son)', 'Strauss'),
-            (path(-0.25), 'Piotr Ilyich', 'Tchaikovski'),
+            (path(-2), 'Leopold', 'Mozart'),
+            (path(-2, -1), 'Maria Anna', 'Mozart'),
+            (path(-2, 0), 'Wolfgang Amadeus', 'Mozart'),
+            (path(-1.75), '', 'Strauss'),
+            (path(-1.5), 'Johann (father)', 'Strauss'),
+            (path(-1.5, 0), 'Johann (son)', 'Strauss'),
+            (path(-1), 'Piotr Ilyich', 'Tchaikovski'),
             (path(0), 'Antonio Lucio', 'Vivaldi'),
         ]
         self.correct_persons_data = [

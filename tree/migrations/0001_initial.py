@@ -1,8 +1,9 @@
 from django.db import migrations
-from tree.operations import CreateTreeFunctions
 
 
 class Migration(migrations.Migration):
     operations = [
-        CreateTreeFunctions(),
+        # There used to be an operation here, which is no longer relevant.
+        # We keep the migration to avoid messing with existing deployments
+        # of django-tree.
     ]
