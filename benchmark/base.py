@@ -2,7 +2,7 @@ from __future__ import print_function
 from collections import Iterable
 import os
 from time import time
-from typing import Type
+from typing import Type, List, Optional
 
 from django.db import connections, router, transaction
 from django.db.models import Max, F, Model
@@ -48,9 +48,11 @@ class Benchmark:
         self,
         run_django_tree_only: bool = False,
         db_optimization_interval: int = 100,
+        selected_tests: Optional[List[str]] = None,
     ):
         self.run_django_tree_only = run_django_tree_only
         self.db_optimization_interval = db_optimization_interval
+        self.selected_tests = selected_tests
         self.data = []
         self.router = router.routers[0]
 
@@ -128,7 +130,10 @@ class Benchmark:
     def run_tests(self, tested_model, count):
         connection = connections[self.current_db_alias]
         for (test_name, model, y_label), test_class in self.tests.items():
-            if model is not tested_model:
+            if model is not tested_model or (
+                self.selected_tests is not None
+                and test_name not in self.selected_tests
+            ):
                 continue
             benchmark_test = test_class(self, model)
             try:
@@ -242,6 +247,8 @@ class Benchmark:
         df.set_index('Count', inplace=True)
         for database_name in df['Database'].unique():
             for test_name in df['Test name'].unique():
+                if test_name not in self.selected_tests:
+                    continue
                 sub_df = df[(df['Database'] == database_name)
                             & (df['Test name'] == test_name)]
                 y_labels = sub_df['Y label'].unique()
