@@ -44,7 +44,12 @@ class Migration(migrations.Migration):
             options={
                 'indexes': [
                     Index(Func(F('path'), 1, function='trim_array'), name='treeplace_path_parent_index'),
-                    Index(F('path__len'), name='treeplace_path_length_index'),
+                    Index(F('path__level'), name='treeplace_path_level_index'),
+                    Index(F('path__0_1'), name='treeplace_path_slice_1_index'),
+                    Index(F('path__0_2'), name='treeplace_path_slice_2_index'),
+                    Index(F('path__0_3'), name='treeplace_path_slice_3_index'),
+                    Index(F('path__0_4'), name='treeplace_path_slice_4_index'),
+                    Index(F('path__0_5'), name='treeplace_path_slice_5_index'),
                 ],
             },
         ),

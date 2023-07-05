@@ -71,7 +71,9 @@ class Path(object):
     def get_children(self):
         if not self.value:
             return self.qs.none()
-        return self.qs.filter(**{self.attname + '__child_of': self.value})
+        return self.qs.filter(**{
+            f'{self.attname}__child_of': self.value,
+        })
 
     def get_ancestors(self, include_self=False):
         if not self.value or (self.is_root() and not include_self):
@@ -88,17 +90,23 @@ class Path(object):
     def get_descendants(self, include_self=False):
         if not self.value:
             return self.qs.none()
-        qs = self.qs.filter(**{self.attname + '__descendant_of': self.value})
+        # Using the lookup `descendant_of` here is slower,
+        # so we explicitly specify the path slicing comparison.
+        qs = self.qs.filter(**{
+            f'{self.attname}__0_{len(self.value)}': self.value,
+        })
         if include_self:
             return qs
-        return qs.exclude(**{self.attname: self.value})
+        return qs.filter(**{f'{self.attname}__level__gt': len(self.value)})
 
     def get_siblings(self, include_self=False, queryset=None):
         if not self.value:
             return self.qs.none()
 
         qs = self.qs if queryset is None else queryset
-        qs = qs.filter(**{self.attname + '__sibling_of': self.value})
+        qs = qs.filter(**{
+            self.attname + '__sibling_of': self.value,
+        })
         if include_self:
             return qs
         return qs.exclude(**{self.attname: self.value})

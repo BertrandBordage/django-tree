@@ -19,16 +19,28 @@ class PathField(ArrayField):
     description = _('Tree path')
 
     @classmethod
-    def get_indexes(cls, table_name: str, path_field_name: str):
+    def get_indexes(
+        cls,
+        table_name: str,
+        path_field_name: str,
+        max_indexed_level: int = 5,
+    ):
         return [
             Index(
                 Func(F(path_field_name), 1, function='trim_array'),
                 name=f'{table_name}_{path_field_name}_parent_index',
             ),
             Index(
-                F(f'{path_field_name}__len'),
-                name=f'{table_name}_{path_field_name}_length_index',
+                F(f'{path_field_name}__level'),
+                name=f'{table_name}_{path_field_name}_level_index',
             ),
+            *[
+                Index(
+                    F(f'{path_field_name}__0_{level}'),
+                    name=f'{table_name}_{path_field_name}_slice_{level}_index',
+                )
+                for level in range(1, max_indexed_level + 1)
+            ]
         ]
 
     def __init__(self, *args, **kwargs):
@@ -80,8 +92,9 @@ class PathField(ArrayField):
 
     # TODO: Move this method to a queryset.
     def get_roots(self):
-        return self.model._default_manager.filter(
-            **{self.attname + '__len': 1})
+        return self.model._default_manager.filter(**{
+            f'{self.attname}__level': 1,
+        })
 
     def _check_database_backend(self, db_alias):
         if connections[db_alias].vendor != 'postgresql':

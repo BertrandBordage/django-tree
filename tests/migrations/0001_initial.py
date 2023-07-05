@@ -24,7 +24,12 @@ class Migration(migrations.Migration):
                 'ordering': ['path', 'name'],
                 'indexes': [
                     Index(Func(F('path'), 1, function='trim_array'), name='place_path_parent_index'),
-                    Index(F('path__len'), name='place_path_length_index'),
+                    Index(F('path__level'), name='place_path_level_index'),
+                    Index(F('path__0_1'), name='place_path_slice_1_index'),
+                    Index(F('path__0_2'), name='place_path_slice_2_index'),
+                    Index(F('path__0_3'), name='place_path_slice_3_index'),
+                    Index(F('path__0_4'), name='place_path_slice_4_index'),
+                    Index(F('path__0_5'), name='place_path_slice_5_index'),
                 ],
             },
             bases=(TreeModelMixin, models.Model),
