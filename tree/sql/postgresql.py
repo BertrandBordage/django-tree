@@ -5,7 +5,7 @@ from django.db.models import Model
 
 from .base import (
     quote_ident, get_prev_sibling_where_clause, get_next_sibling_where_clause,
-    compare_columns,
+    compare_columns, join_and,
 )
 
 
@@ -106,7 +106,7 @@ def get_update_paths_function_creation(
         FROM {table}
         WHERE
             {get_prev_sibling_where_clause(where_columns, '$1')}
-            AND ({compare_columns(parent, f'$1.{parent}')})
+            AND {compare_columns(parent, f'$1.{parent}')}
             AND {pk} != $1.{pk}
         ORDER BY {sql_reversed_order_by}
         LIMIT 1
@@ -117,7 +117,7 @@ def get_update_paths_function_creation(
         FROM {table}
         WHERE
             {get_next_sibling_where_clause(where_columns, '$1')}
-            AND ({compare_columns(parent, f'$1.{parent}')})
+            AND {compare_columns(parent, f'$1.{parent}')}
             AND {pk} != $1.{pk}
         ORDER BY {sql_order_by}
         LIMIT 1
@@ -130,10 +130,8 @@ def get_update_paths_function_creation(
         WHERE {path}[:array_length($2.{path}, 1)] = $2.{path} AND {pk} != $2.{pk}
     """, using=['NEW', 'OLD'])
 
-    row_unchanged = ' AND '.join([
-        '('
-        + compare_columns(f'OLD.{where_column}', f'NEW.{where_column}')
-        + ')'
+    row_unchanged = join_and([
+        compare_columns(f'OLD.{where_column}', f'NEW.{where_column}')
         for where_column in [parent, *where_columns]
     ])
 
@@ -153,14 +151,6 @@ def get_update_paths_function_creation(
 
                 IF {row_unchanged} THEN
                     RETURN NEW;
-                END IF;
-            END IF;
-
-            {get_new_parent_path}
-            IF TG_OP = 'UPDATE' THEN
-                -- TODO: Add this behaviour to the model validation.
-                IF new_parent_path[:array_length(OLD.{path}, 1)] = OLD.{path} THEN
-                    RAISE 'Cannot set itself or a descendant as parent.';
                 END IF;
             END IF;
 
@@ -184,11 +174,30 @@ def get_update_paths_function_creation(
                     next_sibling_decimal := coalesce(prev_sibling_decimal, 0) + 2;
                 END IF;
             END IF;
+            
+            -- Preserve the current path when it is still relevant,
+            -- even though it might not be at the middle between prev and next.
+            IF TG_OP = 'UPDATE'
+                AND {compare_columns(f'NEW.{parent}', f'OLD.{parent}')}
+                AND OLD.{path}[array_length(OLD.{path}, 1)]
+                    BETWEEN prev_sibling_decimal AND next_sibling_decimal
+            THEN
+                RETURN NEW;
+            END IF;
+            
+            {get_new_parent_path}
+            IF TG_OP = 'UPDATE' THEN
+                -- TODO: Add this behaviour to the model validation.
+                IF new_parent_path[:array_length(OLD.{path}, 1)] = OLD.{path} THEN
+                    RAISE 'Cannot set itself or a descendant as parent.';
+                END IF;
+            END IF;
+            
             NEW.{path} = new_parent_path || (
                 prev_sibling_decimal + next_sibling_decimal
             ) / 2;
 
-            IF TG_OP = 'UPDATE' AND NEW.{path} != OLD.{path} THEN
+            IF TG_OP = 'UPDATE' THEN
                 {update_descendants}
             END IF;
 
