@@ -68,6 +68,9 @@ class Path:
             return False
         return self.value >= other
 
+    def __iter__(self):
+        return iter(self.value)
+
     def get_children(self):
         if not self.value:
             return self.qs.none()
