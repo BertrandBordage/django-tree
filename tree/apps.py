@@ -16,3 +16,6 @@ class TreeAppConfig(AppConfig):
         PathField.register_lookup(DescendantOf)
 
         PathField.register_lookup(Level)
+
+        # Loads signals
+        from . import signals

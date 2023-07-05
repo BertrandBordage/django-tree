@@ -26,7 +26,6 @@ from .models import Place, Person
 #       a concurrent node creation/update.
 # TODO: Test if breaking a transaction reverts the changes done by the trigger
 #       when updating nodes during that transaction.
-# TODO: Test path arrays.
 # TODO: Test non-integer primary keys.
 # TODO: Test other `on_delete` behaviour than `CASCADE`.
 # TODO: Test unusual table names.
@@ -101,15 +100,22 @@ class CommonTest(TransactionTestCase):
 class PathTest(CommonTest):
     maxDiff = None
 
-    # This cannot work because Django only uses `RETURNING id`.
-    # TODO: Maybe add a signal to automatically refresh
-    #       `PathField`s `post_save` to make this test possible?
-    @expectedFailure
     def test_path_on_creation(self):
-        place1 = Place.objects.create(name='place1')
-        self.assertEqual(place1.path.value, path(0))
-        place2 = Place.objects.create(name='place2', parent=place1)
-        self.assertEqual(place2.path.value, path(0, 0))
+        with self.assertNumQueries(1):
+            place1 = Place.objects.create(name='place1')
+        # 1 query because the path got deferred,  forcing Django to run
+        # a new query to get the updated value when we need it. Same below.
+        with self.assertNumQueries(1):
+            self.assertEqual(place1.path.value, path(0))
+        with self.assertNumQueries(1):
+            place2 = Place.objects.create(name='place2', parent=place1)
+        with self.assertNumQueries(1):
+            self.assertEqual(place2.path.value, path(0, 0))
+        with self.assertNumQueries(1):
+            place2.parent = None
+            place2.save()
+        with self.assertNumQueries(1):
+            self.assertEqual(place2.path.value, path(1))
 
     def test_insert(self):
         it = self.create_test_places()
