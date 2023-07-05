@@ -127,13 +127,13 @@ class Benchmark:
 
         return inner
 
+    def skip_test(self, test_name: str) -> bool:
+        return self.selected_tests and test_name not in self.selected_tests
+
     def run_tests(self, tested_model, count):
         connection = connections[self.current_db_alias]
         for (test_name, model, y_label), test_class in self.tests.items():
-            if model is not tested_model or (
-                self.selected_tests is not None
-                and test_name not in self.selected_tests
-            ):
+            if model is not tested_model or self.skip_test(test_name):
                 continue
             benchmark_test = test_class(self, model)
             try:
@@ -247,7 +247,7 @@ class Benchmark:
         df.set_index('Count', inplace=True)
         for database_name in df['Database'].unique():
             for test_name in df['Test name'].unique():
-                if test_name not in self.selected_tests:
+                if self.skip_test(test_name):
                     continue
                 sub_df = df[(df['Database'] == database_name)
                             & (df['Test name'] == test_name)]
