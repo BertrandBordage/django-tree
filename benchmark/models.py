@@ -27,7 +27,7 @@ class TreePlace(TreeModel):
     name = CharField(max_length=50, unique=True, default=get_random_name)
     parent = ForeignKey('self', null=True, blank=True, related_name='children',
                         on_delete=CASCADE)
-    path = PathField(order_by=('name',), db_index=True)
+    path = PathField(order_by=['name'], db_index=True)
 
     class Meta:
         indexes = [

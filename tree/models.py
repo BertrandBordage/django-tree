@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from typing import Optional
 
 from django.db import DEFAULT_DB_ALIAS, transaction
 from django.db.models import Model
@@ -8,7 +9,7 @@ from .query import _get_path_fields, _get_path_field, TreeManager
 
 class TreeModelMixin:
     @classmethod
-    def _get_path_fields(cls, name):
+    def _get_path_fields(cls, name: Optional[str] = None):
         return _get_path_fields(cls, name)
 
     @classmethod

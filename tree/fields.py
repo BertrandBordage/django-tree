@@ -43,7 +43,7 @@ class PathField(ArrayField):
             ]
         ]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, parent_field_name: str = 'parent', **kwargs):
         for kwarg in ('base_field', 'default', 'null', 'unique'):
             if kwarg in kwargs:
                 raise ImproperlyConfigured('Cannot set `PathField.%s`.'
@@ -54,9 +54,14 @@ class PathField(ArrayField):
         kwargs.setdefault('editable', False)
         kwargs['null'] = True
 
-        self.order_by = tuple(kwargs.pop('order_by', ()))
+        self.order_by = list(kwargs.pop('order_by', []))
+        self.parent_field_name = parent_field_name
 
         super(PathField, self).__init__(*args, **kwargs)
+
+    @property
+    def parent_field(self):
+        return self.model._meta.get_field(self.parent_field_name)
 
     def contribute_to_class(self, cls, name, *args, **kwargs):
         if name in self.order_by:
@@ -71,8 +76,10 @@ class PathField(ArrayField):
             del kwargs['editable']
         del kwargs['default']
         del kwargs['null']
-        if self.order_by != ():
+        if self.order_by != []:
             kwargs['order_by'] = self.order_by
+        if self.parent_field_name != 'parent':
+            kwargs['parent_field_name'] = self.parent_field_name
         return name, path, args, kwargs
 
     def from_db_value(self, value, expression, connection):

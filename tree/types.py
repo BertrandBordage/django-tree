@@ -1,7 +1,7 @@
 from django.db.models import QuerySet
 
 
-class Path(object):
+class Path:
     def __init__(self, field, value):
         self.field = field
         self.attname = getattr(self.field, 'attname', None)

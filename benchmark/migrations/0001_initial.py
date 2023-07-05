@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
                 ('id', AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('name', CharField(max_length=50, unique=True, default=get_random_name)),
                 ('parent', ForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
-                ('path', PathField(order_by=('name',), db_index=True)),
+                ('path', PathField(order_by=['name'], db_index=True)),
             ],
             options={
                 'indexes': [

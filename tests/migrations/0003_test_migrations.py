@@ -11,10 +11,10 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField('Something', 'path', PathField(order_by=('name',))),
+        migrations.AddField('Something', 'path', PathField(order_by=['name'])),
         CreateTreeTrigger('Something'),
         RebuildPaths('Something'),
-        migrations.AlterField('Something', 'path', PathField(order_by=('name',))),
+        migrations.AlterField('Something', 'path', PathField(order_by=['name'])),
         DeleteTreeTrigger('Something'),
         migrations.DeleteModel('Something'),
     ]

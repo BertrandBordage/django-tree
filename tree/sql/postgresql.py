@@ -29,11 +29,12 @@ def execute_format(
 
 
 def get_update_paths_function_creation(
-    model: Type[Model], path_field_lookup: str, parent_field_lookup: str,
+    model: Type[Model], path_field_lookup: str,
 ):
     meta = model._meta
     pk = meta.pk
     path_field = meta.get_field(path_field_lookup)
+    parent_field = path_field.parent_field
     order_by = path_field.order_by
     if not (pk.attname in order_by or pk.name in order_by
             or 'pk' in order_by):
@@ -61,7 +62,7 @@ def get_update_paths_function_creation(
 
     table = meta.db_table
     pk = quote_ident(meta.pk.attname)
-    parent = quote_ident(meta.get_field(parent_field_lookup).attname)
+    parent = quote_ident(parent_field.attname)
     path = quote_ident(path_field.attname)
     sql_t2_order_by = ', '.join([
         f't2.{ordered_column}' for ordered_column in sql_order_by

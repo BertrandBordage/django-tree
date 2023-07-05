@@ -25,15 +25,14 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
     reversible = True
     atomic = True
 
-    def __init__(self, model_lookup, path_field='path', parent_field='parent'):
+    def __init__(self, model_lookup, path_field='path'):
         self.model_lookup = model_lookup
         self.path_field_lookup = path_field
-        self.parent_field_lookup = parent_field
 
     def get_pre_params(self, model):
         meta = model._meta
         path_field = meta.get_field(self.path_field_lookup)
-        parent_field = meta.get_field(self.parent_field_lookup)
+        parent_field = path_field.parent_field
         order_by = path_field.order_by
 
         # TODO: Handle related lookups in `order_by`.
@@ -71,7 +70,6 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
             postgresql.get_update_paths_function_creation(
                 model=model,
                 path_field_lookup=self.path_field_lookup,
-                parent_field_lookup=self.parent_field_lookup,
             ).replace('%', '%%')
         )
         for sql_query in postgresql.CREATE_TRIGGER_QUERIES:
