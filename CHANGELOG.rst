@@ -17,7 +17,28 @@ Upgrading
 ---------
 
 - Add a new empty migration in each application that contains ``PathField``s.
-- For each ``PathField`` defined in the application, add a ``CreateTreeTrigger``
-  to the empty migration. For example, ``CreateTreeTrigger('your_app.YourModel')``.
-- After each ``CreateTreeTrigger``, add a ``RebuildPaths``. For example, ``RebuildPaths('your_app.YourModel')``.
-- Run pending migrations (including ``tree.0002_remove_old_functions``). All should be good now! Old SQL functions & triggers should be removed automatically.
+- For each ``PathField`` defined in the application, add:
+  - ``DeleteTreeTrigger``
+  - ``RemoveField`` of the path field
+  - ``AddField`` of the path field
+  - ``CreateTreeTrigger``
+  - ``RebuildPaths``
+
+For example:
+
+.. code-block:: python
+
+    DeleteTreeTrigger('Place'),
+    migrations.RemoveField('Place', 'path'),
+    migrations.AddField(
+        model_name='Place',
+        name='path',
+        field=PathField(db_index=True, order_by=['name'], size=None),
+    ),
+    CreateTreeTrigger('place'),
+    RebuildPaths('place'),
+
+You can also comment the ``PathField`` in the model itself, run ``makemigrations``
+to create a first migration with the ``RemoveField``, add the ``DeleteTreeTrigger`` before,
+then uncomment the field in the model, run ``makemigrations`` to generate a second migration with the ``AddField``
+in it, and finally add the ``CreateTreeTrigger`` and ``RebuildPaths`` at the end.
