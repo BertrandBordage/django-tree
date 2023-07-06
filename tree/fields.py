@@ -4,6 +4,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import DecimalField, Index, Func, F
+from django.db.models.expressions import RawSQL
 from django.utils.translation import ugettext_lazy as _
 
 from .sql import postgresql
@@ -27,7 +28,12 @@ class PathField(ArrayField):
     ):
         return [
             Index(
-                Func(F(path_field_name), 1, function='trim_array'),
+                # TODO: Simplify using `trim_array`
+                #       once support for PostgreSQL < 14 is dropped.
+                RawSQL(
+                    f'{path_field_name}[:array_length({path_field_name}, 1) - 1]',
+                    ()
+                ),
                 name=f'{table_name}_{path_field_name}_parent_index',
             ),
             Index(

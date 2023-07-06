@@ -1,8 +1,9 @@
 from django.db import migrations
 from django.db.models import (
     AutoField, CharField, ForeignKey, PositiveIntegerField, Manager, CASCADE,
-    Index, Func, F,
+    Index, F,
 )
+from django.db.models.expressions import RawSQL
 from mptt.fields import TreeForeignKey
 from tree.fields import PathField
 from tree.operations import CreateTreeTrigger
@@ -43,7 +44,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'indexes': [
-                    Index(Func(F('path'), 1, function='trim_array'), name='treeplace_path_parent_index'),
+                    Index(RawSQL('path[:array_length(path, 1) - 1]', ()), name='treeplace_path_parent_index'),
                     Index(F('path__level'), name='treeplace_path_level_index'),
                     Index(F('path__0_1'), name='treeplace_path_slice_1_index'),
                     Index(F('path__0_2'), name='treeplace_path_slice_2_index'),
