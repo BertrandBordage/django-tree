@@ -16,6 +16,8 @@ is based on a parameter that can be customized field by field.
 .. raw:: html
    :file: stats.html
 
+[An HTML table with grades should be displayed just above, but it might not always work on GitHub.]
+
 Legend
 ******
 

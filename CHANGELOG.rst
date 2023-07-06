@@ -1,3 +1,9 @@
+0.5.2 (2023-07-06)
+==================
+
+Fixes a source of path clashes when the objects have exactly the same values
+for all ``order_by`` columns.
+
 0.5.1 (2023-07-06)
 ==================
 
