@@ -1,4 +1,4 @@
-0.5.0 (2023-07-05)
+0.5.0 (2023-07-06)
 ==================
 
 Big rewrite using arrays of decimals instead of strings to represent the path.
