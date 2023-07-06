@@ -39,16 +39,22 @@ class Migration(migrations.Migration):
             name='Person',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('century', models.SmallIntegerField(null=True, blank=True)),
                 ('first_name', models.CharField(blank=True, max_length=20)),
                 ('last_name', models.CharField(max_length=50)),
                 ('parent', models.ForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
-                ('path', PathField(order_by=['last_name', 'first_name'], size=None)),
+                ('path', PathField(order_by=['century', 'last_name', 'first_name'])),
             ],
             options={
                 'ordering': ['path'],
                 'indexes': [
                     Index(Func(F('path'), 1, function='trim_array'), name='person_path_parent_index'),
-                    Index(F('path__len'), name='person_path_length_index')
+                    Index(F('path__len'), name='person_path_length_index'),
+                    Index(F('path__0_1'), name='person_path_slice_1_index'),
+                    Index(F('path__0_2'), name='person_path_slice_2_index'),
+                    Index(F('path__0_3'), name='person_path_slice_3_index'),
+                    Index(F('path__0_4'), name='person_path_slice_4_index'),
+                    Index(F('path__0_5'), name='person_path_slice_5_index'),
                 ],
             },
             bases=(TreeModelMixin, models.Model),

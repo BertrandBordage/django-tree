@@ -1139,54 +1139,61 @@ class PathTest(CommonTest):
 
 
 class MultipleOrderByFieldsTest(TransactionTestCase):
+    maxDiff = None
+
     def setUp(self):
         self.correct_raw_persons_data = [
-            (path(-2), 'Leopold', 'Mozart'),
-            (path(-2, -1), 'Maria Anna', 'Mozart'),
-            (path(-2, 0), 'Wolfgang Amadeus', 'Mozart'),
-            (path(-1.75), '', 'Strauss'),
-            (path(-1.5), 'Johann (father)', 'Strauss'),
-            (path(-1.5, 0), 'Johann (son)', 'Strauss'),
-            (path(-1), 'Piotr Ilyich', 'Tchaikovski'),
-            (path(0), 'Antonio Lucio', 'Vivaldi'),
+            (path(-3), 18, 'Leopold', 'Mozart'),
+            (path(-3, -1), 18, 'Maria Anna', 'Mozart'),
+            (path(-3, 0), 18, 'Wolfgang Amadeus', 'Mozart'),
+            (path(-1), 18, 'Antonio Lucio', 'Vivaldi'),
+            (path(-0.75), 19, 'Johann (father)', 'Strauss'),
+            (path(-0.75, 0), 19, 'Johann (son)', 'Strauss'),
+            (path(-0.5), 19, 'Piotr Ilyich', 'Tchaikovski'),
+            (path(-0.25), 20, '', 'Strauss'),
+            (path(0), None, '', 'Anonymous'),
         ]
         self.correct_persons_data = [
-            (path(0), 'Leopold', 'Mozart'),
-            (path(0, 0), 'Maria Anna', 'Mozart'),
-            (path(0, 1), 'Wolfgang Amadeus', 'Mozart'),
-            (path(1), '', 'Strauss'),
-            (path(2), 'Johann (father)', 'Strauss'),
-            (path(2, 0), 'Johann (son)', 'Strauss'),
-            (path(3), 'Piotr Ilyich', 'Tchaikovski'),
-            (path(4), 'Antonio Lucio', 'Vivaldi'),
+            (path(0), 18, 'Leopold', 'Mozart'),
+            (path(0, 0), 18, 'Maria Anna', 'Mozart'),
+            (path(0, 1), 18, 'Wolfgang Amadeus', 'Mozart'),
+            (path(1), 18, 'Antonio Lucio', 'Vivaldi'),
+            (path(2), 19, 'Johann (father)', 'Strauss'),
+            (path(2, 0), 19, 'Johann (son)', 'Strauss'),
+            (path(3), 19, 'Piotr Ilyich', 'Tchaikovski'),
+            (path(4), 20, '', 'Strauss'),
+            (path(5), None, '', 'Anonymous'),
         ]
+        self.anonymous = Person.objects.create(
+            last_name='Anonymous',
+        )
         self.vivaldi = Person.objects.create(
-            first_name='Antonio Lucio', last_name='Vivaldi',
+            century=18, first_name='Antonio Lucio', last_name='Vivaldi',
         )
         self.wolfgang_mozart = Person.objects.create(
-            first_name='Wolfgang Amadeus', last_name='Mozart',
+            century=18, first_name='Wolfgang Amadeus', last_name='Mozart',
         )
         self.leopold_mozart = Person.objects.create(
-            first_name='Leopold', last_name='Mozart',
+            century=18, first_name='Leopold', last_name='Mozart',
         )
         self.wolfgang_mozart.parent = self.leopold_mozart
         self.wolfgang_mozart.save()
         self.maria_anna_mozart = Person.objects.create(
             parent=self.leopold_mozart,
-            first_name='Maria Anna', last_name='Mozart',
+            century=18, first_name='Maria Anna', last_name='Mozart',
         )
         self.tchaikovski = Person.objects.create(
-            first_name='Piotr Ilyich', last_name='Tchaikovski',
+            century=19, first_name='Piotr Ilyich', last_name='Tchaikovski',
         )
         self.strauss_father = Person.objects.create(
-            first_name='Johann (father)', last_name='Strauss',
+            century=19, first_name='Johann (father)', last_name='Strauss',
         )
         self.strauss_son = Person.objects.create(
             parent=self.strauss_father,
-            first_name='Johann (son)', last_name='Strauss',
+            century=19, first_name='Johann (son)', last_name='Strauss',
         )
         self.strauss = Person.objects.create(
-            last_name='Strauss',
+            century=20, last_name='Strauss',
         )
 
     def assertPersons(self, values, queryset=None, n_queries=1):
@@ -1195,7 +1202,10 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
                 queryset = Person.objects.all()
             persons = list(queryset)
             self.assertListEqual(
-                [(p.path.value, p.first_name, p.last_name) for p in persons],
+                [
+                    (p.path.value, p.century, p.first_name, p.last_name)
+                    for p in persons
+                ],
                 values,
             )
 
@@ -1208,17 +1218,65 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
                 person.path = [i]
                 person.save()
         self.assertPersons([
-            (path(0), 'Antonio Lucio', 'Vivaldi'),
-            (path(1), 'Piotr Ilyich', 'Tchaikovski'),
-            (path(2), 'Johann (son)', 'Strauss'),
-            (path(3), 'Johann (father)', 'Strauss'),
-            (path(4), '', 'Strauss'),
-            (path(5), 'Wolfgang Amadeus', 'Mozart'),
-            (path(6), 'Maria Anna', 'Mozart'),
-            (path(7), 'Leopold', 'Mozart'),
+            (path(0), 18, 'Antonio Lucio', 'Vivaldi'),
+            (path(1), 19, 'Piotr Ilyich', 'Tchaikovski'),
+            (path(2), 19, 'Johann (son)', 'Strauss'),
+            (path(3), 19, 'Johann (father)', 'Strauss'),
+            (path(4), 20, '', 'Strauss'),
+            (path(5), 18, 'Wolfgang Amadeus', 'Mozart'),
+            (path(6), 18, 'Maria Anna', 'Mozart'),
+            (path(7), 18, 'Leopold', 'Mozart'),
+            (path(8), None, '', 'Anonymous'),
         ])
         Person.rebuild_paths()
         self.assertPersons(self.correct_persons_data)
+
+    def test_clash_on_insert(self):
+        """
+        Checks that instances with exactly the same `order_by` values
+        are assigned different paths on insertion, sorted by primary key.
+        """
+        vivaldi2 = Person.objects.create(
+            century=18, first_name='Antonio Lucio', last_name='Vivaldi',
+        )
+        self.assertGreater(vivaldi2.pk, self.vivaldi.pk)
+        self.assertGreater(vivaldi2.path, self.vivaldi.path)
+        self.assertPersons([
+            (path(-1), 18, 'Antonio Lucio', 'Vivaldi'),
+            (path(-0.875), 18, 'Antonio Lucio', 'Vivaldi'),
+        ], queryset=Person.objects.filter(last_name='Vivaldi'))
+        Person.rebuild_paths()
+        self.assertPersons([
+            (path(1), 18, 'Antonio Lucio', 'Vivaldi'),
+            (path(2), 18, 'Antonio Lucio', 'Vivaldi'),
+        ], queryset=Person.objects.filter(last_name='Vivaldi'))
+
+    def test_clash_on_update(self):
+        """
+        Checks that instances with exactly the same `order_by` values
+        are assigned different paths on update, sorted by primary key.
+        """
+        vivaldi2 = Person.objects.create(
+            century=18, first_name='Some', last_name='Guy',
+        )
+        self.assertGreater(vivaldi2.pk, self.vivaldi.pk)
+        self.assertLess(vivaldi2.path, self.vivaldi.path)
+        self.assertPersons([
+            (path(-4), 18, 'Some', 'Guy'),
+            (path(-1), 18, 'Antonio Lucio', 'Vivaldi'),
+        ], queryset=Person.objects.filter(last_name__in=['Vivaldi', 'Guy']))
+        vivaldi2.first_name = 'Antonio Lucio'
+        vivaldi2.last_name = 'Vivaldi'
+        vivaldi2.save()
+        self.assertPersons([
+            (path(-1), 18, 'Antonio Lucio', 'Vivaldi'),
+            (path(-0.875), 18, 'Antonio Lucio', 'Vivaldi'),
+        ], queryset=Person.objects.filter(last_name='Vivaldi'))
+        Person.rebuild_paths()
+        self.assertPersons([
+            (path(1), 18, 'Antonio Lucio', 'Vivaldi'),
+            (path(2), 18, 'Antonio Lucio', 'Vivaldi'),
+        ], queryset=Person.objects.filter(last_name='Vivaldi'))
 
 
 class QuerySetTest(CommonTest):

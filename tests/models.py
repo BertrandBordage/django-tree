@@ -1,4 +1,4 @@
-from django.db.models import CharField, ForeignKey, CASCADE
+from django.db.models import CharField, ForeignKey, CASCADE, SmallIntegerField
 
 from tree.fields import PathField
 from tree.models import TreeModel
@@ -17,10 +17,11 @@ class Place(TreeModel):
 
 
 class Person(TreeModel):
+    century = SmallIntegerField(null=True, blank=True)
     first_name = CharField(max_length=20, blank=True)
     last_name = CharField(max_length=50)
     parent = ForeignKey('self', null=True, blank=True, on_delete=CASCADE)
-    path = PathField(order_by=['last_name', 'first_name'])
+    path = PathField(order_by=['century', 'last_name', 'first_name'])
 
     class Meta:
         ordering = ['path']
