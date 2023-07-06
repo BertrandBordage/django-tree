@@ -79,9 +79,11 @@ def get_update_paths_function_creation(
             ) UNION ALL (
                 SELECT
                     t2.{pk},
-                    t1.path || row_number()::decimal[] OVER (
-                        PARTITION BY t1.pk ORDER BY {sql_t2_order_by}
-                    ) - 1
+                    t1.path || (
+                        row_number() OVER (
+                            PARTITION BY t1.pk ORDER BY {sql_t2_order_by}
+                        ) - 1
+                    )::decimal
                 FROM generate_paths AS t1
                 INNER JOIN {table} AS t2 ON (
                     t2.{parent} = t1.pk
