@@ -1,3 +1,8 @@
+0.5.3 (2023-07-06)
+==================
+
+Fixes a PostgreSQL implicit type casting that was not done in PostgreSQL 12.
+
 0.5.2 (2023-07-06)
 ==================
 
