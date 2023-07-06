@@ -88,7 +88,7 @@ This should give you a model like this:
         public = BooleanField(default=False)
 
         class Meta:
-            ordering = ('path',)
+            ordering = ['path']
 
 Then you need to create the SQL trigger that will automatically update ``path``.
 To do that, create a migration with a dependency
@@ -151,7 +151,7 @@ Example model:
         public = BooleanField(default=False)
 
         class Meta:
-            ordering = ('path',)
+            ordering = ['path']
 
 And the corresponding migration:
 

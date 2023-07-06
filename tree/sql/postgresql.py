@@ -38,7 +38,7 @@ def get_update_paths_function_creation(
     order_by = path_field.order_by
     if not (pk.attname in order_by or pk.name in order_by
             or 'pk' in order_by):
-        order_by += ('pk',)
+        order_by = [*order_by, 'pk']
 
     # TODO: Handle related lookups in `order_by`.
     where_columns = []
@@ -51,8 +51,7 @@ def get_update_paths_function_creation(
         field = (meta.pk if field_name == 'pk'
                  else meta.get_field(field_name))
         quoted_field_name = quote_ident(field.attname)
-        if field_name != 'pk':
-            where_columns.append(quoted_field_name)
+        where_columns.append(quoted_field_name)
         sql_order_by.append(
             f'{quoted_field_name} {"DESC" if descending else "ASC"}'
         )
