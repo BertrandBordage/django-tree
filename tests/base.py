@@ -1215,18 +1215,20 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
             for i, person in enumerate(
                 Person.objects.order_by('-last_name', '-first_name')
             ):
-                person.path = [i]
+                # We add 10 to make sure
+                # we do not clash with the existing paths.
+                person.path = [10 + i]
                 person.save()
         self.assertPersons([
-            (path(0), 18, 'Antonio Lucio', 'Vivaldi'),
-            (path(1), 19, 'Piotr Ilyich', 'Tchaikovski'),
-            (path(2), 19, 'Johann (son)', 'Strauss'),
-            (path(3), 19, 'Johann (father)', 'Strauss'),
-            (path(4), 20, '', 'Strauss'),
-            (path(5), 18, 'Wolfgang Amadeus', 'Mozart'),
-            (path(6), 18, 'Maria Anna', 'Mozart'),
-            (path(7), 18, 'Leopold', 'Mozart'),
-            (path(8), None, '', 'Anonymous'),
+            (path(10), 18, 'Antonio Lucio', 'Vivaldi'),
+            (path(11), 19, 'Piotr Ilyich', 'Tchaikovski'),
+            (path(12), 19, 'Johann (son)', 'Strauss'),
+            (path(13), 19, 'Johann (father)', 'Strauss'),
+            (path(14), 20, '', 'Strauss'),
+            (path(15), 18, 'Wolfgang Amadeus', 'Mozart'),
+            (path(16), 18, 'Maria Anna', 'Mozart'),
+            (path(17), 18, 'Leopold', 'Mozart'),
+            (path(18), None, '', 'Anonymous'),
         ])
         Person.rebuild_paths()
         self.assertPersons(self.correct_persons_data)
