@@ -1,6 +1,9 @@
 Django-tree
 ===========
 
+⚠ Open to financing MySQL & SQLite compatibility ⚠
+--------------------------------------------------
+
 Fast and easy tree structures.
 
 .. image:: http://img.shields.io/pypi/v/django-tree.svg?style=flat-square
