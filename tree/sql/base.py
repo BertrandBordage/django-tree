@@ -61,13 +61,13 @@ def compare_columns(
     >>> compare_columns('name', 'NEW.name', greater=True)
     '(name IS NULL OR coalesce(name >= NEW.name, FALSE))'
     >>> compare_columns('name', 'NEW.name', greater=True, strict=True)
-    '(name IS NULL OR coalesce(name > NEW.name, FALSE))'
+    '(name IS NULL AND NEW.name IS NOT NULL OR coalesce(name > NEW.name, FALSE))'
     >>> compare_columns('name', 'NEW.name', greater=True, strict=True, nulls_last=False)
-    '(NEW.name IS NULL OR coalesce(name > NEW.name, FALSE))'
+    '(NEW.name IS NULL AND name IS NOT NULL OR coalesce(name > NEW.name, FALSE))'
     >>> compare_columns('name', 'NEW.name', greater=False)
     '(NEW.name IS NULL OR coalesce(name <= NEW.name, FALSE))'
     >>> compare_columns('name', 'NEW.name', greater=False, strict=True)
-    '(NEW.name IS NULL OR coalesce(name < NEW.name, FALSE))'
+    '(NEW.name IS NULL AND name IS NOT NULL OR coalesce(name < NEW.name, FALSE))'
     >>> compare_columns('name', 'NEW.name', greater=False, nulls_last=False)
     '(name IS NULL OR coalesce(name <= NEW.name, FALSE))'
     """
@@ -80,11 +80,17 @@ def compare_columns(
     if operator == '=':
         null_condition = join_and([f'{left} IS NULL', f'{right} IS NULL'])
     else:
-        null_on_new = not nulls_last if greater else nulls_last
+        null_on_right = not nulls_last if greater else nulls_last
         null_condition = (
-            f'{right} IS NULL' if null_on_new
+            f'{right} IS NULL' if null_on_right
             else f'{left} IS NULL'
         )
+        if strict:
+            null_condition = join_and([
+                null_condition,
+                f'{left} IS NOT NULL' if null_on_right
+                else f'{right} IS NOT NULL'
+            ])
     return join_or([null_condition, operation])
 
 
@@ -100,7 +106,7 @@ def get_nearby_sibling_where_clause(
     >>> get_nearby_sibling_where_clause(["col1"], 'NEW', greater=False)
     '(NEW.col1 IS NULL OR coalesce(col1 <= NEW.col1, FALSE))'
     >>> get_nearby_sibling_where_clause(["col1", "col2", "col3"], 'NEW', greater=True)
-    '((col1 IS NULL OR coalesce(col1 > NEW.col1, FALSE)) OR (col1 IS NULL AND NEW.col1 IS NULL OR coalesce(col1 = NEW.col1, FALSE)) AND (col2 IS NULL OR coalesce(col2 > NEW.col2, FALSE)) OR (col1 IS NULL AND NEW.col1 IS NULL OR coalesce(col1 = NEW.col1, FALSE)) AND (col2 IS NULL AND NEW.col2 IS NULL OR coalesce(col2 = NEW.col2, FALSE)) AND (col3 IS NULL OR coalesce(col3 >= NEW.col3, FALSE)))'
+    '((col1 IS NULL AND NEW.col1 IS NOT NULL OR coalesce(col1 > NEW.col1, FALSE)) OR (col1 IS NULL AND NEW.col1 IS NULL OR coalesce(col1 = NEW.col1, FALSE)) AND (col2 IS NULL AND NEW.col2 IS NOT NULL OR coalesce(col2 > NEW.col2, FALSE)) OR (col1 IS NULL AND NEW.col1 IS NULL OR coalesce(col1 = NEW.col1, FALSE)) AND (col2 IS NULL AND NEW.col2 IS NULL OR coalesce(col2 = NEW.col2, FALSE)) AND (col3 IS NULL OR coalesce(col3 >= NEW.col3, FALSE)))'
     """
     return join_or([
         join_and([
