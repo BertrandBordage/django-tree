@@ -41,7 +41,7 @@ class CommonTest(TransactionTestCase):
     def create_place(self, name, parent=None):
         with self.assertNumQueries(1):
             p = Place.objects.create(name=name, parent=parent)
-        with self.assertNumQueries(1 if parent is None else 2):
+        with self.assertNumQueries(1):
             p.clean()
         # We fetch the object again to populate the path.
         return Place.objects.get(pk=p.pk)
@@ -324,7 +324,7 @@ class PathTest(CommonTest):
         ])
 
         little_france.parent = Place.objects.get(name='France')
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(1):
             little_france.clean()
         with self.assertNumQueries(1):
             little_france.save()
@@ -373,7 +373,7 @@ class PathTest(CommonTest):
         ])
 
         bretagne.parent = Place.objects.get(name='France')
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(1):
             bretagne.clean()
         with self.assertNumQueries(1):
             bretagne.save()
@@ -422,7 +422,7 @@ class PathTest(CommonTest):
         ])
 
         grattenoix.parent = Place.objects.get(name='Seine-Maritime')
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(1):
             grattenoix.clean()
         with self.assertNumQueries(1):
             grattenoix.save()
@@ -471,7 +471,7 @@ class PathTest(CommonTest):
         ])
 
         evreux.parent = Place.objects.get(name='Eure')
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(1):
             evreux.clean()
         with self.assertNumQueries(1):
             evreux.save()
@@ -1129,7 +1129,7 @@ class PathTest(CommonTest):
 
         with self.assertRaisesMessage(
             ValidationError,
-            "{'parent_id': ['Value <Place: a> is not a valid choice.']}",
+            "{'parent': [\"Value 'a' is not a valid choice.\"]}",
         ):
             with transaction.atomic():
                 with self.assertNumQueries(1):
@@ -1150,7 +1150,7 @@ class PathTest(CommonTest):
 
         with self.assertRaisesMessage(
             ValidationError,
-            "{'parent_id': ['Value <Place: d> is not a valid choice.']}",
+            "{'parent': [\"Value 'd' is not a valid choice.\"]}",
         ):
             with transaction.atomic():
                 with self.assertNumQueries(1):

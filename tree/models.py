@@ -80,7 +80,7 @@ class TreeModelMixin:
             for path_field in self._get_path_fields():
                 old_path = getattr(self, path_field.attname)
                 parent_field = path_field.parent_field
-                new_parent = getattr(self, parent_field.attname)
+                new_parent = getattr(self, parent_field.name)
                 if not new_parent:
                     continue
 
@@ -97,10 +97,10 @@ class TreeModelMixin:
                     old_path, include_self=True,
                 ):
                     raise ValidationError({
-                        parent_field.attname: ValidationError(
+                        parent_field.name: ValidationError(
                             parent_field.error_messages['invalid_choice'],
                             code='invalid_choice',
-                            params={'value': new_parent},
+                            params={'value': str(new_parent)},
                         )
                     })
 
