@@ -1,3 +1,12 @@
+0.5.6 (2023-07-09)
+==================
+
+- Adds a model validation in addition to the existing database error,
+  when users try to make a cycle (mark a node as its own parent or ancestor)
+- Moves ``PathField.get_roots()`` to ``TreeQuerySetMixin.filter_roots()``.
+- Fixes a ``TypeError`` when using ``TreeQuerySetMixin.get_descendants()``
+  on an empty queryset.
+
 0.5.5 (2023-07-06)
 ==================
 
