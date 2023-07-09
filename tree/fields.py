@@ -83,7 +83,7 @@ class PathField(ArrayField):
         del kwargs['default']
         del kwargs['null']
         del kwargs['size']
-        if self.order_by != []:
+        if self.order_by:
             kwargs['order_by'] = self.order_by
         if self.parent_field_name != 'parent':
             kwargs['parent_field_name'] = self.parent_field_name

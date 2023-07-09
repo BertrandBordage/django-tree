@@ -15,6 +15,9 @@ class Place(TreeModel):
             *PathField.get_indexes('place', 'path'),
         ]
 
+    def __str__(self):
+        return self.name
+
 
 class Person(TreeModel):
     century = SmallIntegerField(null=True, blank=True)

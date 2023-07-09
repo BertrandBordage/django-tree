@@ -97,6 +97,7 @@ def get_update_paths_function_creation(
         )
         SELECT path FROM generate_paths
         WHERE pk = $1.{pk}
+        LIMIT 1
     """, using=['OLD'], into=[f'NEW.{path}'])
 
     get_new_parent_path = execute_format(f"""
@@ -137,7 +138,6 @@ def get_update_paths_function_creation(
         for where_column in [parent, *where_columns]
     ])
 
-    # TODO: Add `LIMIT 1` where appropriate to see if it optimises a bit.
     return f"""
         CREATE OR REPLACE FUNCTION update_{table}_{path}_paths() RETURNS trigger AS $$
         DECLARE
@@ -189,7 +189,6 @@ def get_update_paths_function_creation(
             
             {get_new_parent_path}
             IF TG_OP = 'UPDATE' THEN
-                -- TODO: Add this behaviour to the model validation.
                 IF new_parent_path[:array_length(OLD.{path}, 1)] = OLD.{path} THEN
                     RAISE 'Cannot set itself or a descendant as parent.';
                 END IF;

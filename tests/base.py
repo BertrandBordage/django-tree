@@ -3,8 +3,8 @@
 from __future__ import unicode_literals
 
 import decimal
-from unittest import expectedFailure
 
+from django.core.exceptions import ValidationError
 from django.db import transaction, InternalError, connection
 from django.test import TransactionTestCase
 
@@ -38,9 +38,11 @@ def path(*path_components):
 class CommonTest(TransactionTestCase):
     maxDiff = 1000
 
-    def create_place(self, name, parent=None, n_queries=1):
-        with self.assertNumQueries(n_queries):
+    def create_place(self, name, parent=None):
+        with self.assertNumQueries(1):
             p = Place.objects.create(name=name, parent=parent)
+        with self.assertNumQueries(1 if parent is None else 2):
+            p.clean()
         # We fetch the object again to populate the path.
         return Place.objects.get(pk=p.pk)
 
@@ -82,6 +84,7 @@ class CommonTest(TransactionTestCase):
         yield poitou_charentes
         yield self.create_place('Poitiers', vienne)
         vienne.parent = poitou_charentes
+        vienne.clean()
         vienne.save()
         yield vienne
 
@@ -113,6 +116,7 @@ class PathTest(CommonTest):
             self.assertEqual(place2.path.value, path(0, 0))
         with self.assertNumQueries(1):
             place2.parent = None
+            place2.clean()
             place2.save()
         with self.assertNumQueries(1):
             self.assertEqual(place2.path.value, path(1))
@@ -242,6 +246,7 @@ class PathTest(CommonTest):
         osterreich = Place.objects.get(name='Österreich')
         osterreich.name = 'Autriche'
         with self.assertNumQueries(1):
+            osterreich.clean()
             osterreich.save()
         self.assertPlaces([
             (path(-1), 'Autriche'),
@@ -274,6 +279,7 @@ class PathTest(CommonTest):
         france = Place.objects.get(name='France')
         france.name = 'République française'
         with self.assertNumQueries(1):
+            france.clean()
             france.save()
         self.assertPlaces([
             (path(1), 'Österreich'),
@@ -318,6 +324,8 @@ class PathTest(CommonTest):
         ])
 
         little_france.parent = Place.objects.get(name='France')
+        with self.assertNumQueries(2):
+            little_france.clean()
         with self.assertNumQueries(1):
             little_france.save()
         self.assertPlaces([
@@ -365,6 +373,8 @@ class PathTest(CommonTest):
         ])
 
         bretagne.parent = Place.objects.get(name='France')
+        with self.assertNumQueries(2):
+            bretagne.clean()
         with self.assertNumQueries(1):
             bretagne.save()
         self.assertPlaces([
@@ -412,6 +422,8 @@ class PathTest(CommonTest):
         ])
 
         grattenoix.parent = Place.objects.get(name='Seine-Maritime')
+        with self.assertNumQueries(2):
+            grattenoix.clean()
         with self.assertNumQueries(1):
             grattenoix.save()
         self.assertPlaces([
@@ -459,6 +471,8 @@ class PathTest(CommonTest):
         ])
 
         evreux.parent = Place.objects.get(name='Eure')
+        with self.assertNumQueries(2):
+            evreux.clean()
         with self.assertNumQueries(1):
             evreux.save()
         self.assertPlaces([
@@ -1112,8 +1126,18 @@ class PathTest(CommonTest):
         # Simple cycle
         a = Place.objects.create(name='a')
         a.parent = a
+
         with self.assertRaisesMessage(
-                InternalError, 'Cannot set itself or a descendant as parent.'):
+            ValidationError,
+            "{'parent_id': ['Value <Place: a> is not a valid choice.']}",
+        ):
+            with transaction.atomic():
+                with self.assertNumQueries(1):
+                    a.clean()
+
+        with self.assertRaisesMessage(
+            InternalError, 'Cannot set itself or a descendant as parent.',
+        ):
             with transaction.atomic():
                 with self.assertNumQueries(1):
                     a.save()
@@ -1123,6 +1147,15 @@ class PathTest(CommonTest):
         c = Place.objects.create(name='c', parent=b)
         d = Place.objects.create(name='d', parent=c)
         a.parent = d
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "{'parent_id': ['Value <Place: d> is not a valid choice.']}",
+        ):
+            with transaction.atomic():
+                with self.assertNumQueries(1):
+                    a.clean()
+
         with self.assertRaisesMessage(
                 InternalError, 'Cannot set itself or a descendant as parent.'):
             with transaction.atomic():
@@ -1177,6 +1210,7 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
             century=18, first_name='Leopold', last_name='Mozart',
         )
         self.wolfgang_mozart.parent = self.leopold_mozart
+        self.wolfgang_mozart.clean()
         self.wolfgang_mozart.save()
         self.maria_anna_mozart = Person.objects.create(
             parent=self.leopold_mozart,
@@ -1218,6 +1252,7 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
                 # We add 10 to make sure
                 # we do not clash with the existing paths.
                 person.path = [10 + i]
+                person.clean()
                 person.save()
         self.assertPersons([
             (path(10), 18, 'Antonio Lucio', 'Vivaldi'),
@@ -1269,6 +1304,7 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
         ], queryset=Person.objects.filter(last_name__in=['Vivaldi', 'Guy']))
         vivaldi2.first_name = 'Antonio Lucio'
         vivaldi2.last_name = 'Vivaldi'
+        vivaldi2.clean()
         vivaldi2.save()
         self.assertPersons([
             (path(-1), 18, 'Antonio Lucio', 'Vivaldi'),
