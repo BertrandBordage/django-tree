@@ -38,6 +38,8 @@ class TreeQuerySetMixin:
         # TODO: Avoid doing an extra query.
         ancestor_paths = list(self.values_list(name, flat=True))
         queryset = self.model.objects.all()
+        if not ancestor_paths:
+            return queryset.none()
         if not include_self:
             queryset = queryset.exclude(**{name + '__in': ancestor_paths})
         return queryset.filter(
