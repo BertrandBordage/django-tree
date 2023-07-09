@@ -30,21 +30,25 @@ def _get_path_field(model, name):
 
 # TODO: Implement a faster `QuerySet.delete` and add it to the benchmark.
 class TreeQuerySetMixin:
-    def _get_path_field_name(self, name):
-        return _get_path_field(self.model, name).name
+    def _get_path_field_attname(self, name):
+        return _get_path_field(self.model, name).attname
+
+    def filter_roots(self, path_field=None):
+        attname = self._get_path_field_attname(path_field)
+        return self.filter(**{f'{attname}__level': 1})
 
     def get_descendants(self, include_self=False, path_field=None):
-        name = self._get_path_field_name(path_field)
+        attname = self._get_path_field_attname(path_field)
         # TODO: Avoid doing an extra query.
-        ancestor_paths = list(self.values_list(name, flat=True))
+        ancestor_paths = list(self.values_list(attname, flat=True))
         queryset = self.model.objects.all()
         if not ancestor_paths:
             return queryset.none()
         if not include_self:
-            queryset = queryset.exclude(**{name + '__in': ancestor_paths})
+            queryset = queryset.exclude(**{attname + '__in': ancestor_paths})
         return queryset.filter(
             reduce(operator.or_, [
-                Q(**{name + '__descendant_of': ancestor_path})
+                Q(**{attname + '__descendant_of': ancestor_path})
                 for ancestor_path in ancestor_paths
             ])
         )

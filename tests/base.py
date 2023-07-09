@@ -1058,13 +1058,13 @@ class PathTest(CommonTest):
             for descendant in place.get_descendants():
                 self.assertTrue(descendant.is_descendant_of(place))
 
-    def test_get_roots(self):
+    def test_filter_roots(self):
         self.create_all_test_places()
 
         self.assertPlaces([
             (path(0), 'France'),
             (path(1), 'Österreich'),
-        ], queryset=Place.get_roots())
+        ], queryset=Place.objects.filter_roots())
 
     def test_rebuild(self):
         self.create_all_test_places()

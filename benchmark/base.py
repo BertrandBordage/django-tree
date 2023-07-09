@@ -715,7 +715,7 @@ class TestGetRoots(BenchmarkTest):
 @Benchmark.register_test('Get roots', TreePlace)
 class TestGetRoots(BenchmarkTest):
     def run(self):
-        list(self.model.get_roots())
+        list(self.model.objects.filter_roots())
 
 
 @Benchmark.register_test(

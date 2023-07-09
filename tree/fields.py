@@ -104,12 +104,6 @@ class PathField(ArrayField):
             return value.value
         return value
 
-    # TODO: Move this method to a queryset.
-    def get_roots(self):
-        return self.model._default_manager.filter(**{
-            f'{self.attname}__level': 1,
-        })
-
     def _check_database_backend(self, db_alias):
         if connections[db_alias].vendor != 'postgresql':
             raise NotImplementedError(
