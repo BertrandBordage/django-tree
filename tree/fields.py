@@ -5,7 +5,12 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import DecimalField, F, Index
 from django.db.models.expressions import RawSQL
-from django.utils.translation import gettext_lazy as _
+
+try:
+    from django.utils.translation import ugettext_lazy as _
+except ImportError:
+    # Django 3+
+    from django.utils.translation import gettext_lazy as _
 
 from .sql import postgresql
 from .types import Path
@@ -70,7 +75,7 @@ class PathField(ArrayField):
     def contribute_to_class(self, cls, name, *args, **kwargs):
         if name in self.order_by:
             raise ImproperlyConfigured(
-                "`PathField.order_by` cannot reference itself." % name
+                "`PathField.order_by` cannot reference itself." % name,
             )
         super().contribute_to_class(cls, name, *args, **kwargs)
 
@@ -114,13 +119,17 @@ class PathField(ArrayField):
     def disable_trigger(self, db_alias=DEFAULT_DB_ALIAS):
         self._check_database_backend(db_alias)
         postgresql.disable_trigger(
-            self.model._meta.db_table, self.attname, db_alias=db_alias
+            self.model._meta.db_table,
+            self.attname,
+            db_alias=db_alias,
         )
 
     def enable_trigger(self, db_alias=DEFAULT_DB_ALIAS):
         self._check_database_backend(db_alias)
         postgresql.enable_trigger(
-            self.model._meta.db_table, self.attname, db_alias=db_alias
+            self.model._meta.db_table,
+            self.attname,
+            db_alias=db_alias,
         )
 
     @contextmanager
