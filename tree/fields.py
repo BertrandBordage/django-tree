@@ -53,6 +53,10 @@ class PathField(ArrayField):
             ],
         ]
 
+    # For type checkers.
+    def __new__(cls, *args, **kwargs) -> str:
+        return super().__new__(cls, *args, **kwargs)
+
     def __init__(self, *args, parent_field_name: str = "parent", **kwargs) -> None:
         for kwarg in ("base_field", "default", "null", "unique"):
             if kwarg in kwargs:
