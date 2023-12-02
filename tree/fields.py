@@ -56,8 +56,8 @@ class PathField(ArrayField):
     # Define __new__ to satisfy static type checkers, which otherwise complain that
     # the signatures of __new__ and __init__ are incompatible. Also, the return type
     # annotation hints to type checkers that this path field on a model instance
-    # is a string rather than a `PathField` instance (due to Django's model magic).
-    def __new__(cls, *args, **kwargs) -> str:  # type: ignore
+    # is a `Path`` rather than `PathField` instance (due to Django's model magic).
+    def __new__(cls, *args, **kwargs) -> Path:  # type: ignore
         return super().__new__(cls)  # type: ignore
 
     def __init__(self, *args, parent_field_name: str = "parent", **kwargs) -> None:
