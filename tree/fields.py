@@ -21,7 +21,7 @@ from .types import Path
 
 
 class PathField(ArrayField):
-    description = _("Tree path")
+    description = _('Tree path')
 
     @classmethod
     def get_indexes(
@@ -35,35 +35,35 @@ class PathField(ArrayField):
                 # TODO: Simplify using `trim_array`
                 #       once support for PostgreSQL < 14 is dropped.
                 RawSQL(
-                    f"{path_field_name}[:array_length({path_field_name}, 1) - 1]",
+                    f'{path_field_name}[:array_length({path_field_name}, 1) - 1]',
                     (),
                 ),
-                name=f"{table_name}_{path_field_name}_parent_index",
+                name=f'{table_name}_{path_field_name}_parent_index',
             ),
             Index(
-                F(f"{path_field_name}__level"),
-                name=f"{table_name}_{path_field_name}_level_index",
+                F(f'{path_field_name}__level'),
+                name=f'{table_name}_{path_field_name}_level_index',
             ),
             *[
                 Index(
-                    F(f"{path_field_name}__0_{level}"),
-                    name=f"{table_name}_{path_field_name}_slice_{level}_index",
+                    F(f'{path_field_name}__0_{level}'),
+                    name=f'{table_name}_{path_field_name}_slice_{level}_index',
                 )
                 for level in range(1, max_indexed_level + 1)
             ],
         ]
 
-    def __init__(self, *args, parent_field_name: str = "parent", **kwargs) -> None:
-        for kwarg in ("base_field", "default", "null", "unique"):
+    def __init__(self, *args, parent_field_name: str = 'parent', **kwargs) -> None:
+        for kwarg in ('base_field', 'default', 'null', 'unique'):
             if kwarg in kwargs:
-                raise ImproperlyConfigured("Cannot set `PathField.%s`." % kwarg)
+                raise ImproperlyConfigured('Cannot set `PathField.%s`.' % kwarg)
 
-        kwargs["base_field"] = DecimalField(max_digits=20, decimal_places=10)
-        kwargs["default"] = lambda: Path(self, None)
-        kwargs.setdefault("editable", False)
-        kwargs["null"] = True
+        kwargs['base_field'] = DecimalField(max_digits=20, decimal_places=10)
+        kwargs['default'] = lambda: Path(self, None)
+        kwargs.setdefault('editable', False)
+        kwargs['null'] = True
 
-        self.order_by = list(kwargs.pop("order_by", []))
+        self.order_by = list(kwargs.pop('order_by', []))
         self.parent_field_name = parent_field_name
 
         super().__init__(*args, **kwargs)
@@ -75,22 +75,22 @@ class PathField(ArrayField):
     def contribute_to_class(self, cls, name, *args, **kwargs):
         if name in self.order_by:
             raise ImproperlyConfigured(
-                "`PathField.order_by` cannot reference itself." % name,
+                '`PathField.order_by` cannot reference itself.' % name,
             )
         super().contribute_to_class(cls, name, *args, **kwargs)
 
     def deconstruct(self):
         name, path, args, kwargs = super().deconstruct()
-        del kwargs["base_field"]
-        if not kwargs["editable"]:
-            del kwargs["editable"]
-        del kwargs["default"]
-        del kwargs["null"]
-        del kwargs["size"]
+        del kwargs['base_field']
+        if not kwargs['editable']:
+            del kwargs['editable']
+        del kwargs['default']
+        del kwargs['null']
+        del kwargs['size']
         if self.order_by:
-            kwargs["order_by"] = self.order_by
-        if self.parent_field_name != "parent":
-            kwargs["parent_field_name"] = self.parent_field_name
+            kwargs['order_by'] = self.order_by
+        if self.parent_field_name != 'parent':
+            kwargs['parent_field_name'] = self.parent_field_name
         return name, path, args, kwargs
 
     def from_db_value(self, value, expression, connection):
@@ -109,8 +109,8 @@ class PathField(ArrayField):
         return value
 
     def _check_database_backend(self, db_alias):
-        if connections[db_alias].vendor != "postgresql":
-            raise NotImplementedError("django-tree is only for PostgreSQL for now.")
+        if connections[db_alias].vendor != 'postgresql':
+            raise NotImplementedError('django-tree is only for PostgreSQL for now.')
 
     def rebuild(self, db_alias=DEFAULT_DB_ALIAS):
         self._check_database_backend(db_alias)

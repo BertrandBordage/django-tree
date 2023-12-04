@@ -12,24 +12,24 @@ from django.db.models.manager import Manager
 from .fields import PathField
 
 
-def _get_path_fields(model: "type[Model]", name: Optional[str] = None):
+def _get_path_fields(model: 'type[Model]', name: Optional[str] = None):
     if name is None:
         return [f for f in model._meta.fields if isinstance(f, PathField)]
     return [model._meta.get_field(name)]
 
 
-def _get_path_field(model: "type[Model]", name: Optional[str] = None):
+def _get_path_field(model: 'type[Model]', name: Optional[str] = None):
     path_fields = _get_path_fields(model, name)
     n = len(path_fields)
     if n == 0:
         raise FieldDoesNotExist(
-            "A `PathField` needs to be defined in order to use `TreeModelMixin`.",
+            'A `PathField` needs to be defined in order to use `TreeModelMixin`.',
         )
     if n == 1:
         return path_fields[0]
     raise ValueError(
-        "You need to specify which `PathField` to use for this query "
-        "among these values: %s" % [f.name for f in path_fields],
+        'You need to specify which `PathField` to use for this query '
+        'among these values: %s' % [f.name for f in path_fields],
     )
 
 
@@ -40,7 +40,7 @@ class TreeQuerySet(QuerySet):
 
     def filter_roots(self, path_field: Optional[str] = None):
         attname = self._get_path_field_attname(path_field)
-        return self.filter(**{f"{attname}__level": 1})
+        return self.filter(**{f'{attname}__level': 1})
 
     def get_descendants(
         self,
@@ -54,12 +54,12 @@ class TreeQuerySet(QuerySet):
         if not ancestor_paths:
             return queryset.none()
         if not include_self:
-            queryset = queryset.exclude(**{attname + "__in": ancestor_paths})
+            queryset = queryset.exclude(**{attname + '__in': ancestor_paths})
         return queryset.filter(
             reduce(
                 operator.or_,
                 [
-                    Q(**{attname + "__descendant_of": ancestor_path})
+                    Q(**{attname + '__descendant_of': ancestor_path})
                     for ancestor_path in ancestor_paths
                 ],
             ),

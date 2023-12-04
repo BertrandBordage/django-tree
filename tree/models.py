@@ -101,9 +101,9 @@ class TreeModelMixin:
                     raise ValidationError(
                         {
                             parent_field.name: ValidationError(
-                                parent_field.error_messages["invalid_choice"],
-                                code="invalid_choice",
-                                params={"value": str(new_parent)},
+                                parent_field.error_messages['invalid_choice'],
+                                code='invalid_choice',
+                                params={'value': str(new_parent)},
                             ),
                         },
                     )
