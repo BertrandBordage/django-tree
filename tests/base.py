@@ -1144,8 +1144,8 @@ class PathTest(CommonTest):
 
         self.assertPlaces(
             [
-            (path(0), 'France'),
-            (path(1), 'Österreich'),
+                (path(0), 'France'),
+                (path(1), 'Österreich'),
             ],
             queryset=Place.objects.filter_roots(),
         )
@@ -1159,7 +1159,9 @@ class PathTest(CommonTest):
                 place.path = [i]
                 updated_places.append(place)
             Place.objects.bulk_update(updated_places, ['path'])
-        self.assertPlaces([(path(i), place) for i, place in enumerate(sorted(PLACES))])
+        self.assertPlaces(
+            [(path(i), place) for i, place in enumerate(sorted(PLACES))]
+        )
         with self.assertNumQueries(1):
             Place.rebuild_paths()
         self.assertPlaces(self.correct_places_data)
@@ -1349,7 +1351,10 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
                 queryset = Person.objects.all()
             persons = list(queryset)
             self.assertListEqual(
-                [(p.path.value, p.century, p.first_name, p.last_name) for p in persons],
+                [
+                    (p.path.value, p.century, p.first_name, p.last_name)
+                    for p in persons
+                ],
                 values,
             )
 
@@ -1379,10 +1384,10 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
         self.assertPersons(self.correct_persons_data)
 
     def test_clash_on_insert(self):
-        '''
+        """
         Checks that instances with exactly the same `order_by` values
         are assigned different paths on insertion, sorted by primary key.
-        '''
+        """
         vivaldi2 = Person.objects.create(
             century=18,
             first_name='Antonio Lucio',
@@ -1407,10 +1412,10 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
         )
 
     def test_clash_on_update(self):
-        '''
+        """
         Checks that instances with exactly the same `order_by` values
         are assigned different paths on update, sorted by primary key.
-        '''
+        """
         vivaldi2 = Person.objects.create(
             century=18,
             first_name='Some',
