@@ -1,3 +1,4 @@
+from typing import Optional
 from contextlib import contextmanager
 
 from django.core.exceptions import ValidationError
@@ -9,7 +10,7 @@ from .query import TreeManager, _get_path_field, _get_path_fields
 
 class TreeModelMixin:
     @classmethod
-    def _get_path_fields(cls, name: str | None = None):
+    def _get_path_fields(cls, name: Optional[str] = None):
         return _get_path_fields(cls, name)
 
     @classmethod
@@ -98,15 +99,13 @@ class TreeModelMixin:
                     old_path,
                     include_self=True,
                 ):
-                    raise ValidationError(
-                        {
-                            parent_field.name: ValidationError(
-                                parent_field.error_messages['invalid_choice'],
-                                code='invalid_choice',
-                                params={'value': str(new_parent)},
-                            ),
-                        },
-                    )
+                    raise ValidationError({
+                        parent_field.name: ValidationError(
+                            parent_field.error_messages['invalid_choice'],
+                            code='invalid_choice',
+                            params={'value': str(new_parent)},
+                        )
+                    })
 
     def delete(self, using=None, **kwargs):
         assert self.pk is not None, (

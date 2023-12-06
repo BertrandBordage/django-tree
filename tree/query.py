@@ -23,7 +23,8 @@ def _get_path_field(model: 'type[Model]', name: Optional[str] = None):
     n = len(path_fields)
     if n == 0:
         raise FieldDoesNotExist(
-            'A `PathField` needs to be defined in order to use `TreeModelMixin`.',
+            'A `PathField` needs to be defined '
+            'in order to use `TreeModelMixin`.',
         )
     if n == 1:
         return path_fields[0]
@@ -56,13 +57,10 @@ class TreeQuerySet(QuerySet):
         if not include_self:
             queryset = queryset.exclude(**{attname + '__in': ancestor_paths})
         return queryset.filter(
-            reduce(
-                operator.or_,
-                [
-                    Q(**{attname + '__descendant_of': ancestor_path})
-                    for ancestor_path in ancestor_paths
-                ],
-            ),
+            reduce(operator.or_, [
+                Q(**{attname + '__descendant_of': ancestor_path})
+                for ancestor_path in ancestor_paths
+            ]),
         )
 
 

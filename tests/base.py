@@ -1,7 +1,7 @@
 # coding: utf-8
 
 from __future__ import unicode_literals
-from typing import Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db import transaction, InternalError, connection
@@ -135,7 +135,10 @@ class CommonTest(TransactionTestCase):
             if queryset is None:
                 queryset = Place.objects.all()
             places = list(queryset)
-            self.assertListEqual([(p.path.value, p.name) for p in places], values)
+            self.assertListEqual(
+                [(p.path.value, p.name) for p in places],
+                values,
+            )
 
 
 # fmt: off
@@ -559,20 +562,17 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             data = [(p.get_level(), p.name) for p in Place.objects.all()]
-            self.assertListEqual(
-                data,
-                [
-                    (1, 'France'),
-                    (2, 'Normandie'),
-                    (3, 'Eure'),
-                    (3, 'Manche'),
-                    (3, 'Seine-Maritime'),
-                    (2, 'Poitou-Charentes'),
-                    (3, 'Vienne'),
-                    (4, 'Poitiers'),
-                    (1, 'Österreich'),
-                ],
-            )
+            self.assertListEqual(data, [
+                (1, 'France'),
+                (2, 'Normandie'),
+                (3, 'Eure'),
+                (3, 'Manche'),
+                (3, 'Seine-Maritime'),
+                (2, 'Poitou-Charentes'),
+                (3, 'Vienne'),
+                (4, 'Poitiers'),
+                (1, 'Österreich'),
+            ])
 
     def test_is_root(self):
         self.create_all_test_places()
@@ -585,7 +585,8 @@ class PathTest(CommonTest):
 
         places = [p.name for p in Place.objects.all() if p.is_leaf()]
         self.assertListEqual(
-            places, ['Eure', 'Manche', 'Seine-Maritime', 'Poitiers', 'Österreich']
+            places,
+            ['Eure', 'Manche', 'Seine-Maritime', 'Poitiers', 'Österreich'],
         )
 
     def test_get_children(self):
@@ -597,7 +598,7 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.get_children().values_list('name', flat=True)),
+                get_children_names(france),
                 ['Normandie', 'Poitou-Charentes'],
             )
 
@@ -607,7 +608,7 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.get_children().values_list('name', flat=True)),
+                get_children_names(normandie),
                 ['Eure', 'Manche', 'Seine-Maritime'],
             )
 
@@ -617,7 +618,8 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.get_children().values_list('name', flat=True)), []
+                get_children_names(seine_maritime),
+                [],
             )
 
     def test_get_ancestors(self):
@@ -629,17 +631,14 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    france.get_ancestors(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_ancestor_names(france, include_self=True),
                 ['France'],
             )
 
         with self.assertNumQueries(0):
             self.assertListEqual(
-                list(france.get_ancestors().values_list('name', flat=True)), []
+                get_ancestor_names(france),
+                [],
             )
 
         # Branch
@@ -648,17 +647,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    normandie.get_ancestors(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_ancestor_names(normandie, include_self=True),
                 ['France', 'Normandie'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.get_ancestors().values_list('name', flat=True)),
+                get_ancestor_names(normandie),
                 ['France'],
             )
 
@@ -668,17 +663,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    seine_maritime.get_ancestors(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_ancestor_names(seine_maritime, include_self=True),
                 ['France', 'Normandie', 'Seine-Maritime'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.get_ancestors().values_list('name', flat=True)),
+                get_ancestor_names(seine_maritime),
                 ['France', 'Normandie'],
             )
 
@@ -691,11 +682,7 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    france.get_descendants(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_descendant_names(france, include_self=True),
                 [
                     'France',
                     'Normandie',
@@ -710,7 +697,7 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.get_descendants().values_list('name', flat=True)),
+                get_descendant_names(france),
                 [
                     'Normandie',
                     'Eure',
@@ -728,17 +715,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    normandie.get_descendants(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_descendant_names(normandie, include_self=True),
                 ['Normandie', 'Eure', 'Manche', 'Seine-Maritime'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.get_descendants().values_list('name', flat=True)),
+                get_descendant_names(normandie),
                 ['Eure', 'Manche', 'Seine-Maritime'],
             )
 
@@ -748,17 +731,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    seine_maritime.get_descendants(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_descendant_names(seine_maritime, include_self=True),
                 ['Seine-Maritime'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.get_descendants().values_list('name', flat=True)),
+                get_descendant_names(seine_maritime),
                 [],
             )
 
@@ -771,17 +750,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    france.get_siblings(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_sibling_names(france, include_self=True),
                 ['France', 'Österreich'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.get_siblings().values_list('name', flat=True)),
+                get_sibling_names(france),
                 ['Österreich'],
             )
 
@@ -791,17 +766,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    normandie.get_siblings(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_sibling_names(normandie, include_self=True),
                 ['Normandie', 'Poitou-Charentes'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.get_siblings().values_list('name', flat=True)),
+                get_sibling_names(normandie),
                 ['Poitou-Charentes'],
             )
 
@@ -811,17 +782,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    seine_maritime.get_siblings(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_sibling_names(seine_maritime, include_self=True),
                 ['Eure', 'Manche', 'Seine-Maritime'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.get_siblings().values_list('name', flat=True)),
+                get_sibling_names(seine_maritime),
                 ['Eure', 'Manche'],
             )
 
@@ -835,21 +802,15 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    france.get_siblings(
-                        include_self=True, queryset=queryset
-                    ).values_list('name', flat=True)
+                get_sibling_names(
+                    france, include_self=True, queryset=queryset
                 ),
                 ['France'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    france.get_siblings(queryset=queryset).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_sibling_names(france, queryset=queryset),
                 [],
             )
 
@@ -859,21 +820,15 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    normandie.get_siblings(
-                        include_self=True, queryset=queryset
-                    ).values_list('name', flat=True)
+                get_sibling_names(
+                    normandie, include_self=True, queryset=queryset
                 ),
                 ['Normandie'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    normandie.get_siblings(queryset=queryset).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_sibling_names(normandie, queryset=queryset),
                 [],
             )
 
@@ -883,21 +838,15 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    seine_maritime.get_siblings(
-                        include_self=True, queryset=queryset
-                    ).values_list('name', flat=True)
+                get_sibling_names(
+                    seine_maritime, include_self=True, queryset=queryset
                 ),
                 ['Eure', 'Manche'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    seine_maritime.get_siblings(queryset=queryset).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_sibling_names(seine_maritime, queryset=queryset),
                 ['Eure', 'Manche'],
             )
 
@@ -910,17 +859,14 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    france.get_prev_siblings(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_prev_sibling_names(france, include_self=True),
                 ['France'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.get_prev_siblings().values_list('name', flat=True)), []
+                get_prev_sibling_names(france),
+                [],
             )
 
         # Branch
@@ -929,17 +875,14 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    normandie.get_prev_siblings(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_prev_sibling_names(normandie, include_self=True),
                 ['Normandie'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.get_prev_siblings().values_list('name', flat=True)), []
+                get_prev_sibling_names(normandie),
+                [],
             )
 
         # Leaf
@@ -948,17 +891,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    seine_maritime.get_prev_siblings(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_prev_sibling_names(seine_maritime, include_self=True),
                 ['Seine-Maritime', 'Manche', 'Eure'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.get_prev_siblings().values_list('name', flat=True)),
+                get_prev_sibling_names(seine_maritime),
                 ['Manche', 'Eure'],
             )
 
@@ -971,17 +910,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    france.get_next_siblings(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_next_sibling_names(france, include_self=True),
                 ['France', 'Österreich'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(france.get_next_siblings().values_list('name', flat=True)),
+                get_next_sibling_names(france),
                 ['Österreich'],
             )
 
@@ -991,17 +926,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    normandie.get_next_siblings(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_next_sibling_names(normandie, include_self=True),
                 ['Normandie', 'Poitou-Charentes'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(normandie.get_next_siblings().values_list('name', flat=True)),
+                get_next_sibling_names(normandie),
                 ['Poitou-Charentes'],
             )
 
@@ -1011,17 +942,13 @@ class PathTest(CommonTest):
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(
-                    seine_maritime.get_next_siblings(include_self=True).values_list(
-                        'name', flat=True
-                    )
-                ),
+                get_next_sibling_names(seine_maritime, include_self=True),
                 ['Seine-Maritime'],
             )
 
         with self.assertNumQueries(1):
             self.assertListEqual(
-                list(seine_maritime.get_next_siblings().values_list('name', flat=True)),
+                get_next_sibling_names(seine_maritime),
                 [],
             )
 
@@ -1574,5 +1501,59 @@ class QuerySetTest(CommonTest):
             ],
             places.get_descendants(include_self=True),
         )
+        
+def get_names(qs: "QuerySet[Place]") -> List[str]:
+    return list(qs.values_list('name', flat=True))
+        
+def get_ancestor_names(
+    place: "Place",
+    include_self: bool = False,
+) -> List[str]:
+    return get_names(place.get_ancestors(include_self=include_self))
+        
+def get_descendant_names(
+    place: "Place",
+    include_self: bool = False,
+) -> List[str]:
+    return get_names(place.get_descendants(include_self=include_self))
+
+def get_children_names(place: "Place") -> List[str]:
+    return get_names(place.get_children())
+
+def get_sibling_names(
+    place: "Place",
+    include_self: bool = False,
+    queryset: Optional["QuerySet[Place]"] = None,
+) -> List[str]:
+    return get_names(
+        place.get_siblings(
+            include_self=include_self,
+            queryset=queryset,
+        )
+    )
+    
+def get_prev_sibling_names(
+    place: "Place",
+    include_self: bool = False,
+    queryset: Optional["QuerySet[Place]"] = None,
+) -> List[str]:
+    return get_names(
+        place.get_prev_siblings(
+            include_self=include_self,
+            queryset=queryset,
+        )
+    )
+    
+def get_next_sibling_names(
+    place: "Place",
+    include_self: bool = False,
+    queryset: Optional["QuerySet[Place]"] = None,
+) -> List[str]:
+    return get_names(
+        place.get_next_siblings(
+            include_self=include_self,
+            queryset=queryset,
+        )
+    )
 
 # fmt: on

@@ -108,15 +108,21 @@ class PathField(ArrayField):
             return value.value
         return value
 
-    def _check_database_backend(self, db_alias):
+    def _check_database_backend(self, db_alias: str):
         if connections[db_alias].vendor != 'postgresql':
-            raise NotImplementedError('django-tree is only for PostgreSQL for now.')
+            raise NotImplementedError(
+                'django-tree is only for PostgreSQL for now.'
+            )
 
-    def rebuild(self, db_alias=DEFAULT_DB_ALIAS):
+    def rebuild(self, db_alias: str = DEFAULT_DB_ALIAS):
         self._check_database_backend(db_alias)
-        postgresql.rebuild(self.model._meta.db_table, self.attname, db_alias=db_alias)
+        postgresql.rebuild(
+            self.model._meta.db_table,
+            self.attname,
+            db_alias=db_alias
+        )
 
-    def disable_trigger(self, db_alias=DEFAULT_DB_ALIAS):
+    def disable_trigger(self, db_alias: str = DEFAULT_DB_ALIAS):
         self._check_database_backend(db_alias)
         postgresql.disable_trigger(
             self.model._meta.db_table,
@@ -124,7 +130,7 @@ class PathField(ArrayField):
             db_alias=db_alias,
         )
 
-    def enable_trigger(self, db_alias=DEFAULT_DB_ALIAS):
+    def enable_trigger(self, db_alias: str = DEFAULT_DB_ALIAS):
         self._check_database_backend(db_alias)
         postgresql.enable_trigger(
             self.model._meta.db_table,
@@ -134,7 +140,7 @@ class PathField(ArrayField):
 
     @contextmanager
     @transaction.atomic
-    def disabled_trigger(self, db_alias=DEFAULT_DB_ALIAS):
+    def disabled_trigger(self, db_alias: str = DEFAULT_DB_ALIAS):
         self.disable_trigger(db_alias=db_alias)
         try:
             yield
