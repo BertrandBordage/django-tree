@@ -3,9 +3,14 @@ from contextlib import contextmanager
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
-from django.db.models import DecimalField, Index, Func, F
+from django.db.models import DecimalField, F, Index
 from django.db.models.expressions import RawSQL
-from django.utils.translation import ugettext_lazy as _
+
+try:
+    from django.utils.translation import ugettext_lazy as _
+except ImportError:
+    # Django 3+
+    from django.utils.translation import gettext_lazy as _
 
 from .sql import postgresql
 from .types import Path
