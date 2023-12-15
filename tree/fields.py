@@ -5,7 +5,6 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import DecimalField, F, Index
 from django.db.models.expressions import RawSQL
-from django.utils.translation import ugettext_lazy as _
 
 try:
     from django.utils.translation import ugettext_lazy as _
