@@ -228,7 +228,7 @@ Example to show you most of the possibilities:
     with YourModel.disabled_tree_trigger():
         # What happens inside this context manager is ignored
         # by the SQL trigger.
-        # The trigger is restored after that, even if there an error occurred.
+        # The trigger is restored after that, even if an error occurred.
         pass
 
 There is also a bunch of less useful lookups and transforms
