@@ -40,3 +40,6 @@ benchmark = [
     "pandas>=0.25.3",
     "tqdm>=4.64.1",
 ]
+
+[tool.ruff.format]
+quote-style = "single"
