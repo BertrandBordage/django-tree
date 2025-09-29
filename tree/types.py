@@ -1,4 +1,4 @@
-from types import NoneType
+from importlib.util import find_spec
 from django.db.models import QuerySet
 
 
@@ -211,14 +211,9 @@ class Path:
     def register_psycopg(cls):
         # Tells psycopg how to prepare a Path object for the database,
         # in case it doesn't go through the ORM.
-        try:
-            import psycopg  # Handles psycopg 3.
-        except ImportError:
-            try:
-                import psycopg2  # Handles psycopg 2.
-            except ImportError:
-                pass
-            else:
-                cls.register_psycopg2()
-        else:
-            cls.register_psycopg3()
+        if find_spec('psycopg') is None:
+            if find_spec('psycopg2') is None:
+                return
+            cls.register_psycopg2()
+
+        cls.register_psycopg3()

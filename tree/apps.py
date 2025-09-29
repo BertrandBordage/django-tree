@@ -21,4 +21,4 @@ class TreeAppConfig(AppConfig):
         PathField.register_lookup(Level)
 
         # Loads signals
-        from . import signals
+        from . import signals  # noqa: F401

@@ -994,8 +994,8 @@ class PathTest(CommonTest):
         self.assertFalse(france >= '')
 
         # vs None
-        self.assertFalse(france == None)
-        self.assertTrue(france != None)
+        self.assertFalse(france == None)  # noqa: E711
+        self.assertTrue(france != None)  # noqa: E711
         self.assertTrue(france < None)
         self.assertTrue(france <= None)
         self.assertFalse(france > None)
