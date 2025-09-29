@@ -1,3 +1,7 @@
+# 0.6.1 (2025-09-29)
+
+Fixes the broken version number picked up by uv.
+
 # 0.6.0 (2025-09-29)
 
 - Adds compatibility with Django>=4.0,<6 (thanks to @jacobjove)
