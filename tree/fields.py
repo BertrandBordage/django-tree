@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import json
 
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ImproperlyConfigured
@@ -100,8 +101,11 @@ class PathField(ArrayField):
         return Path(self, value)
 
     def to_python(self, value):
+        # https://docs.djangoproject.com/en/dev/howto/custom-model-fields/#converting-values-to-python-objects
         if isinstance(value, Path):
             return value
+        elif isinstance(value, str):
+            value = json.loads(value)
         return Path(self, value)
 
     def get_prep_value(self, value):
