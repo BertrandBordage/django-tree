@@ -4,8 +4,11 @@ from django.db import DEFAULT_DB_ALIAS, connections
 from django.db.models import Model
 
 from .base import (
-    quote_ident, get_prev_sibling_where_clause, get_next_sibling_where_clause,
-    compare_columns, join_and,
+    quote_ident,
+    get_prev_sibling_where_clause,
+    get_next_sibling_where_clause,
+    compare_columns,
+    join_and,
 )
 
 
@@ -29,15 +32,15 @@ def execute_format(
 
 
 def get_update_paths_function_creation(
-    model: Type[Model], path_field_lookup: str,
+    model: Type[Model],
+    path_field_lookup: str,
 ):
     meta = model._meta
     pk = meta.pk
     path_field = meta.get_field(path_field_lookup)
     parent_field = path_field.parent_field
     order_by = path_field.order_by
-    if not (pk.attname in order_by or pk.name in order_by
-            or 'pk' in order_by):
+    if not (pk.attname in order_by or pk.name in order_by or 'pk' in order_by):
         order_by = [*order_by, 'pk']
 
     # TODO: Handle related lookups in `order_by`.
@@ -48,13 +51,10 @@ def get_update_paths_function_creation(
         descending = field_name[0] == '-'
         if descending:
             field_name = field_name[1:]
-        field = (meta.pk if field_name == 'pk'
-                 else meta.get_field(field_name))
+        field = meta.pk if field_name == 'pk' else meta.get_field(field_name)
         quoted_field_name = quote_ident(field.attname)
         where_columns.append(quoted_field_name)
-        sql_order_by.append(
-            f'{quoted_field_name} {"DESC" if descending else "ASC"}'
-        )
+        sql_order_by.append(f'{quoted_field_name} {"DESC" if descending else "ASC"}')
         sql_reversed_order_by.append(
             f'{quoted_field_name} {"ASC" if descending else "DESC"}'
         )
@@ -63,13 +63,14 @@ def get_update_paths_function_creation(
     pk = quote_ident(meta.pk.attname)
     parent = quote_ident(parent_field.attname)
     path = quote_ident(path_field.attname)
-    sql_t2_order_by = ', '.join([
-        f't2.{ordered_column}' for ordered_column in sql_order_by
-    ])
+    sql_t2_order_by = ', '.join(
+        [f't2.{ordered_column}' for ordered_column in sql_order_by]
+    )
     sql_order_by = ', '.join(sql_order_by)
     sql_reversed_order_by = ', '.join(sql_reversed_order_by)
 
-    rebuild = execute_format(f"""
+    rebuild = execute_format(
+        f"""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
                 SELECT {parent}, NULL::decimal[]
@@ -98,13 +99,21 @@ def get_update_paths_function_creation(
         SELECT path FROM generate_paths
         WHERE pk = $1.{pk}
         LIMIT 1
-    """, using=['OLD'], into=[f'NEW.{path}'])
+    """,
+        using=['OLD'],
+        into=[f'NEW.{path}'],
+    )
 
-    get_new_parent_path = execute_format(f"""
+    get_new_parent_path = execute_format(
+        f"""
         SELECT {path} FROM {table} WHERE {pk} = $1.{parent}
-    """, using=['NEW'], into=['new_parent_path'])
+    """,
+        using=['NEW'],
+        into=['new_parent_path'],
+    )
 
-    get_prev_sibling_decimal = execute_format(f"""
+    get_prev_sibling_decimal = execute_format(
+        f"""
         SELECT {path}[array_length({path}, 1)]
         FROM {table}
         WHERE
@@ -113,9 +122,13 @@ def get_update_paths_function_creation(
             AND {pk} != $1.{pk}
         ORDER BY {sql_reversed_order_by}
         LIMIT 1
-    """, using=['NEW'], into=['prev_sibling_decimal'])
+    """,
+        using=['NEW'],
+        into=['prev_sibling_decimal'],
+    )
 
-    get_next_sibling_decimal = execute_format(f"""
+    get_next_sibling_decimal = execute_format(
+        f"""
         SELECT {path}[array_length({path}, 1)]
         FROM {table}
         WHERE
@@ -124,19 +137,27 @@ def get_update_paths_function_creation(
             AND {pk} != $1.{pk}
         ORDER BY {sql_order_by}
         LIMIT 1
-    """, using=['NEW'], into=['next_sibling_decimal'])
+    """,
+        using=['NEW'],
+        into=['next_sibling_decimal'],
+    )
 
-    update_descendants = execute_format(f"""
+    update_descendants = execute_format(
+        f"""
         UPDATE {table}
         SET {path} = $1.{path}
             || {path}[array_length($2.{path}, 1) + 1:]
         WHERE {path}[:array_length($2.{path}, 1)] = $2.{path} AND {pk} != $2.{pk}
-    """, using=['NEW', 'OLD'])
+    """,
+        using=['NEW', 'OLD'],
+    )
 
-    row_unchanged = join_and([
-        compare_columns(f'OLD.{where_column}', f'NEW.{where_column}')
-        for where_column in [parent, *where_columns]
-    ])
+    row_unchanged = join_and(
+        [
+            compare_columns(f'OLD.{where_column}', f'NEW.{where_column}')
+            for where_column in [parent, *where_columns]
+        ]
+    )
 
     return f"""
         CREATE OR REPLACE FUNCTION update_{table}_{path}_paths() RETURNS trigger AS $$
@@ -257,14 +278,12 @@ def rebuild(table, path_field, db_alias=DEFAULT_DB_ALIAS):
 def disable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
         cursor.execute(
-            f'ALTER TABLE "{table}" '
-            f'DISABLE TRIGGER "update_{path_field}_before";'
+            f'ALTER TABLE "{table}" DISABLE TRIGGER "update_{path_field}_before";'
         )
 
 
 def enable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
     with connections[db_alias].cursor() as cursor:
         cursor.execute(
-            f'ALTER TABLE "{table}" '
-            f'ENABLE TRIGGER "update_{path_field}_before";'
+            f'ALTER TABLE "{table}" ENABLE TRIGGER "update_{path_field}_before";'
         )

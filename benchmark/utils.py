@@ -35,7 +35,7 @@ def prefix_unit(v, unit, min_limit=None):
             break
 
     n = v / exp
-    pat = ('%%.%df' % (precision - get_precision(exp)))
+    pat = '%%.%df' % (precision - get_precision(exp))
     res = '%s' % (pat % n)
 
     # We remove trailing zero and the dot if it's possible.

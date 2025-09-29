@@ -15,6 +15,7 @@ if __name__ == '__main__':
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'benchmark.settings')
     django.setup()
     from benchmark.base import Benchmark
+
     Benchmark(
         run_django_tree_only=args.run_django_tree_only,
         db_optimization_interval=args.db_optimization_interval,

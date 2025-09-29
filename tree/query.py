@@ -19,13 +19,14 @@ def _get_path_field(model, name):
     n = len(path_fields)
     if n == 0:
         raise FieldDoesNotExist(
-            'A `PathField` needs to be defined '
-            'in order to use `TreeModelMixin`.')
+            'A `PathField` needs to be defined in order to use `TreeModelMixin`.'
+        )
     if n == 1:
         return path_fields[0]
     raise ValueError(
         'You need to specify which `PathField` to use for this query '
-        'among these values: %s' % [f.name for f in path_fields])
+        'among these values: %s' % [f.name for f in path_fields]
+    )
 
 
 # TODO: Implement a faster `QuerySet.delete` and add it to the benchmark.
@@ -47,10 +48,13 @@ class TreeQuerySetMixin:
         if not include_self:
             queryset = queryset.exclude(**{attname + '__in': ancestor_paths})
         return queryset.filter(
-            reduce(operator.or_, [
-                Q(**{attname + '__descendant_of': ancestor_path})
-                for ancestor_path in ancestor_paths
-            ])
+            reduce(
+                operator.or_,
+                [
+                    Q(**{attname + '__descendant_of': ancestor_path})
+                    for ancestor_path in ancestor_paths
+                ],
+            )
         )
 
 

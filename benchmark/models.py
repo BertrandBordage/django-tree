@@ -16,8 +16,9 @@ def get_random_name():
 
 class MPTTPlace(MPTTModel):
     name = CharField(max_length=50, unique=True, default=get_random_name)
-    parent = TreeForeignKey('self', null=True, blank=True,
-                            related_name='children', on_delete=CASCADE)
+    parent = TreeForeignKey(
+        'self', null=True, blank=True, related_name='children', on_delete=CASCADE
+    )
 
     class MPTTMeta:
         order_insertion_by = ('name',)
@@ -25,8 +26,9 @@ class MPTTPlace(MPTTModel):
 
 class TreePlace(TreeModel):
     name = CharField(max_length=50, unique=True, default=get_random_name)
-    parent = ForeignKey('self', null=True, blank=True, related_name='children',
-                        on_delete=CASCADE)
+    parent = ForeignKey(
+        'self', null=True, blank=True, related_name='children', on_delete=CASCADE
+    )
     path = PathField(order_by=['name'], db_index=True)
 
     class Meta:
@@ -37,8 +39,9 @@ class TreePlace(TreeModel):
 
 class TreebeardALPlace(AL_Node):
     name = CharField(max_length=50, unique=True, default=get_random_name)
-    parent = ForeignKey('self', null=True, blank=True, related_name='children',
-                        on_delete=CASCADE)
+    parent = ForeignKey(
+        'self', null=True, blank=True, related_name='children', on_delete=CASCADE
+    )
     node_order_by = ('name',)
 
 

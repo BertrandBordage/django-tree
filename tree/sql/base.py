@@ -48,8 +48,11 @@ def join_and(expressions: List[str]):
 
 
 def compare_columns(
-    left: str, right: str, greater: Optional[bool] = None,
-    strict: bool = False, nulls_last: bool = True,
+    left: str,
+    right: str,
+    greater: Optional[bool] = None,
+    strict: bool = False,
+    nulls_last: bool = True,
 ):
     """
     >>> compare_columns('name', 'NEW.name')
@@ -81,16 +84,14 @@ def compare_columns(
         null_condition = join_and([f'{left} IS NULL', f'{right} IS NULL'])
     else:
         null_on_right = not nulls_last if greater else nulls_last
-        null_condition = (
-            f'{right} IS NULL' if null_on_right
-            else f'{left} IS NULL'
-        )
+        null_condition = f'{right} IS NULL' if null_on_right else f'{left} IS NULL'
         if strict:
-            null_condition = join_and([
-                null_condition,
-                f'{left} IS NOT NULL' if null_on_right
-                else f'{right} IS NOT NULL'
-            ])
+            null_condition = join_and(
+                [
+                    null_condition,
+                    f'{left} IS NOT NULL' if null_on_right else f'{right} IS NOT NULL',
+                ]
+            )
     return join_or([null_condition, operation])
 
 
@@ -108,23 +109,28 @@ def get_nearby_sibling_where_clause(
     >>> get_nearby_sibling_where_clause(["col1", "col2", "col3"], 'NEW', greater=True)
     '((col1 IS NULL AND NEW.col1 IS NOT NULL OR coalesce(col1 > NEW.col1, FALSE)) OR (col1 IS NULL AND NEW.col1 IS NULL OR coalesce(col1 = NEW.col1, FALSE)) AND (col2 IS NULL AND NEW.col2 IS NOT NULL OR coalesce(col2 > NEW.col2, FALSE)) OR (col1 IS NULL AND NEW.col1 IS NULL OR coalesce(col1 = NEW.col1, FALSE)) AND (col2 IS NULL AND NEW.col2 IS NULL OR coalesce(col2 = NEW.col2, FALSE)) AND (col3 IS NULL OR coalesce(col3 >= NEW.col3, FALSE)))'
     """
-    return join_or([
-        join_and([
-            compare_columns(
-                column,
-                f'{record_name}.{column}',
-                greater=greater if i == column_index - 1 else None,
-                strict=column_index < len(columns_in_order),
-                nulls_last=nulls_last,
+    return join_or(
+        [
+            join_and(
+                [
+                    compare_columns(
+                        column,
+                        f'{record_name}.{column}',
+                        greater=greater if i == column_index - 1 else None,
+                        strict=column_index < len(columns_in_order),
+                        nulls_last=nulls_last,
+                    )
+                    for i, column in enumerate(columns_in_order[:column_index])
+                ]
             )
-            for i, column in enumerate(columns_in_order[:column_index])
-        ])
-        for column_index in range(1, len(columns_in_order) + 1)
-    ])
+            for column_index in range(1, len(columns_in_order) + 1)
+        ]
+    )
 
 
 def get_prev_sibling_where_clause(
-    columns_in_order: List[str], record_name: str,
+    columns_in_order: List[str],
+    record_name: str,
 ):
     return get_nearby_sibling_where_clause(
         columns_in_order=columns_in_order,
@@ -134,7 +140,8 @@ def get_prev_sibling_where_clause(
 
 
 def get_next_sibling_where_clause(
-    columns_in_order: List[str], record_name: str,
+    columns_in_order: List[str],
+    record_name: str,
 ):
     return get_nearby_sibling_where_clause(
         columns_in_order=columns_in_order,

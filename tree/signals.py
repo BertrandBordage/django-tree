@@ -10,8 +10,7 @@ from tree.fields import PathField
 @receiver(post_save)
 def defer_paths(sender: Type[Model], **kwargs):
     path_fields = [
-        field for field in sender._meta.concrete_fields
-        if isinstance(field, PathField)
+        field for field in sender._meta.concrete_fields if isinstance(field, PathField)
     ]
     if path_fields:
         instance = kwargs['instance']

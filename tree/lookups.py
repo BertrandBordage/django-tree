@@ -38,7 +38,7 @@ class ChildOf(Lookup):
         #       is dropped.
         return (
             '(%s)[:array_length(%s, 1) - 1] = %s' % (lhs, lhs, rhs),
-            lhs_params + lhs_params + rhs_params
+            lhs_params + lhs_params + rhs_params,
         )
 
 

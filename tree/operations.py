@@ -7,15 +7,17 @@ from .sql.base import quote_ident
 class CheckDatabaseMixin:
     def check_database_backend(self, schema_editor):
         if schema_editor.connection.vendor != 'postgresql':
-            raise NotImplementedError(
-                'django-tree is only for PostgreSQL for now.')
+            raise NotImplementedError('django-tree is only for PostgreSQL for now.')
 
 
 class GetModelMixin:
     def get_model(self, app_label, state):
         get_model = state.apps.get_model
-        return (get_model(self.model_lookup) if '.' in self.model_lookup
-                else get_model(app_label, self.model_lookup))
+        return (
+            get_model(self.model_lookup)
+            if '.' in self.model_lookup
+            else get_model(app_label, self.model_lookup)
+        )
 
 
 class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
@@ -57,8 +59,7 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
     def state_forwards(self, app_label, state):
         pass
 
-    def database_forwards(self, app_label, schema_editor,
-                          from_state, to_state):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
         self.check_database_backend(schema_editor)
         model = self.get_model(app_label, to_state)
         # We escape the modulo operator '%' otherwise Django considers it
@@ -70,15 +71,16 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
             ).replace('%', '%%')
         )
         for sql_query in postgresql.CREATE_TRIGGER_QUERIES:
-            schema_editor.execute(sql_query.format(
-                **self.get_pre_params(model=model)))
+            schema_editor.execute(sql_query.format(**self.get_pre_params(model=model)))
 
-    def database_backwards(self, app_label, schema_editor,
-                           from_state, to_state):
+    def database_backwards(self, app_label, schema_editor, from_state, to_state):
         self.check_database_backend(schema_editor)
         for sql_query in postgresql.DROP_TRIGGER_QUERIES:
-            schema_editor.execute(sql_query.format(
-                **self.get_pre_params(self.get_model(app_label, to_state))))
+            schema_editor.execute(
+                sql_query.format(
+                    **self.get_pre_params(self.get_model(app_label, to_state))
+                )
+            )
 
     def describe(self):
         return 'Creates a trigger that automatically updates a `PathField`'
@@ -107,15 +109,16 @@ class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):
     def state_forwards(self, app_label, state):
         pass
 
-    def database_forwards(self, app_label, schema_editor,
-                          from_state, to_state):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
         self.check_database_backend(schema_editor)
         model = self.get_model(app_label, to_state)
-        postgresql.rebuild(model._meta.db_table, self.path_field,
-                           db_alias=schema_editor.connection.alias)
+        postgresql.rebuild(
+            model._meta.db_table,
+            self.path_field,
+            db_alias=schema_editor.connection.alias,
+        )
 
-    def database_backwards(self, app_label, schema_editor,
-                           from_state, to_state):
+    def database_backwards(self, app_label, schema_editor, from_state, to_state):
         self.check_database_backend(schema_editor)
 
     def describe(self):

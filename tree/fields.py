@@ -37,8 +37,7 @@ class PathField(ArrayField):
                 # TODO: Simplify using `trim_array`
                 #       once support for PostgreSQL < 14 is dropped.
                 RawSQL(
-                    f'{path_field_name}[:array_length({path_field_name}, 1) - 1]',
-                    ()
+                    f'{path_field_name}[:array_length({path_field_name}, 1) - 1]', ()
                 ),
                 name=f'{table_name}_{path_field_name}_parent_index',
             ),
@@ -52,14 +51,13 @@ class PathField(ArrayField):
                     name=f'{table_name}_{path_field_name}_slice_{level}_index',
                 )
                 for level in range(1, max_indexed_level + 1)
-            ]
+            ],
         ]
 
     def __init__(self, *args, parent_field_name: str = 'parent', **kwargs):
         for kwarg in ('base_field', 'default', 'null', 'unique'):
             if kwarg in kwargs:
-                raise ImproperlyConfigured('Cannot set `PathField.%s`.'
-                                           % kwarg)
+                raise ImproperlyConfigured('Cannot set `PathField.%s`.' % kwarg)
 
         kwargs['base_field'] = DecimalField(max_digits=20, decimal_places=10)
         kwargs['default'] = lambda: Path(self, None)
@@ -78,7 +76,8 @@ class PathField(ArrayField):
     def contribute_to_class(self, cls, name, *args, **kwargs):
         if name in self.order_by:
             raise ImproperlyConfigured(
-                '`PathField.order_by` cannot reference itself.' % name)
+                '`PathField.order_by` cannot reference itself.' % name
+            )
         super(PathField, self).contribute_to_class(cls, name, *args, **kwargs)
 
     def deconstruct(self):
@@ -115,23 +114,23 @@ class PathField(ArrayField):
 
     def _check_database_backend(self, db_alias):
         if connections[db_alias].vendor != 'postgresql':
-            raise NotImplementedError(
-                'django-tree is only for PostgreSQL for now.')
+            raise NotImplementedError('django-tree is only for PostgreSQL for now.')
 
     def rebuild(self, db_alias=DEFAULT_DB_ALIAS):
         self._check_database_backend(db_alias)
-        postgresql.rebuild(self.model._meta.db_table, self.attname,
-                           db_alias=db_alias)
+        postgresql.rebuild(self.model._meta.db_table, self.attname, db_alias=db_alias)
 
     def disable_trigger(self, db_alias=DEFAULT_DB_ALIAS):
         self._check_database_backend(db_alias)
-        postgresql.disable_trigger(self.model._meta.db_table, self.attname,
-                                   db_alias=db_alias)
+        postgresql.disable_trigger(
+            self.model._meta.db_table, self.attname, db_alias=db_alias
+        )
 
     def enable_trigger(self, db_alias=DEFAULT_DB_ALIAS):
         self._check_database_backend(db_alias)
-        postgresql.enable_trigger(self.model._meta.db_table, self.attname,
-                                  db_alias=db_alias)
+        postgresql.enable_trigger(
+            self.model._meta.db_table, self.attname, db_alias=db_alias
+        )
 
     @contextmanager
     @transaction.atomic

@@ -16,15 +16,29 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Place',
             fields=[
-                ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
+                (
+                    'id',
+                    models.AutoField(
+                        verbose_name='ID',
+                        serialize=False,
+                        auto_created=True,
+                        primary_key=True,
+                    ),
+                ),
                 ('name', models.CharField(max_length=50)),
-                ('parent', models.ForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
+                (
+                    'parent',
+                    models.ForeignKey('self', blank=True, null=True, on_delete=CASCADE),
+                ),
                 ('path', PathField(order_by=['name'])),
             ],
             options={
                 'ordering': ['path', 'name'],
                 'indexes': [
-                    Index(RawSQL('path[:array_length(path, 1) - 1]', ()), name='place_path_parent_index'),
+                    Index(
+                        RawSQL('path[:array_length(path, 1) - 1]', ()),
+                        name='place_path_parent_index',
+                    ),
                     Index(F('path__level'), name='place_path_level_index'),
                     Index(F('path__0_1'), name='place_path_slice_1_index'),
                     Index(F('path__0_2'), name='place_path_slice_2_index'),
@@ -39,17 +53,31 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Person',
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                (
+                    'id',
+                    models.AutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name='ID',
+                    ),
+                ),
                 ('century', models.SmallIntegerField(null=True, blank=True)),
                 ('first_name', models.CharField(blank=True, max_length=20)),
                 ('last_name', models.CharField(max_length=50)),
-                ('parent', models.ForeignKey('self', blank=True, null=True, on_delete=CASCADE)),
+                (
+                    'parent',
+                    models.ForeignKey('self', blank=True, null=True, on_delete=CASCADE),
+                ),
                 ('path', PathField(order_by=['century', 'last_name', 'first_name'])),
             ],
             options={
                 'ordering': ['path'],
                 'indexes': [
-                    Index(RawSQL('path[:array_length(path, 1) - 1]', ()), name='person_path_parent_index'),
+                    Index(
+                        RawSQL('path[:array_length(path, 1) - 1]', ()),
+                        name='person_path_parent_index',
+                    ),
                     Index(F('path__len'), name='person_path_length_index'),
                     Index(F('path__0_1'), name='person_path_slice_1_index'),
                     Index(F('path__0_2'), name='person_path_slice_2_index'),

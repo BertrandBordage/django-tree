@@ -1,7 +1,9 @@
 from django.db import migrations
 from tree.fields import PathField
 from tree.operations import (
-    CreateTreeTrigger, RebuildPaths, DeleteTreeTrigger,
+    CreateTreeTrigger,
+    RebuildPaths,
+    DeleteTreeTrigger,
 )
 
 

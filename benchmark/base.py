@@ -13,7 +13,11 @@ import pandas as pd
 from tqdm import tqdm
 
 from .models import (
-    TreePlace, MPTTPlace, TreebeardMPPlace, TreebeardNSPlace, TreebeardALPlace,
+    TreePlace,
+    MPTTPlace,
+    TreebeardMPPlace,
+    TreebeardNSPlace,
+    TreebeardALPlace,
 )
 from .utils import prefix_unit, SkipTest
 
@@ -35,7 +39,11 @@ class Benchmark:
         TreebeardNSPlace: 'treebeard NS',
     }
     siblings_per_level = (
-        5, 5, 5, 5, 5,
+        5,
+        5,
+        5,
+        5,
+        5,
     )
     tests = {}
     ticks_formatters = {
@@ -75,21 +83,22 @@ class Benchmark:
         self.router.db_alias = db_alias
 
     def add_data(self, model, test_name, count, value, y_label=READ_LATENCY):
-        self.data.append({
-            'Database': connections[self.current_db_alias].vendor,
-            'Test name': test_name,
-            'Count': count,
-            'Implementation': self.models[model],
-            'Value': value,
-            'Y label': y_label,
-        })
+        self.data.append(
+            {
+                'Database': connections[self.current_db_alias].vendor,
+                'Test name': test_name,
+                'Count': count,
+                'Implementation': self.models[model],
+                'Value': value,
+                'Y label': y_label,
+            }
+        )
 
     def populate_database(self, model, level=1, parents=(None,)):
-        n_siblings = self.siblings_per_level[level-1]
+        n_siblings = self.siblings_per_level[level - 1]
         for parent in parents:
             if model in (TreePlace, TreebeardALPlace):
-                bulk = [model(parent=parent)
-                        for _ in range(n_siblings)]
+                bulk = [model(parent=parent) for _ in range(n_siblings)]
                 model.objects.bulk_create(bulk)
                 objects = model.objects.filter(parent=parent)
             elif model in (TreebeardMPPlace, TreebeardNSPlace):
@@ -97,14 +106,17 @@ class Benchmark:
                 # during the creation of children from the previous parent.
                 if parent is not None:
                     parent = model.objects.get(pk=parent.pk)
-                objects = [model.add_root() if parent is None
-                           else parent.add_child() for _ in range(n_siblings)]
+                objects = [
+                    model.add_root() if parent is None else parent.add_child()
+                    for _ in range(n_siblings)
+                ]
             else:
-                objects = [model.objects.create(parent=parent)
-                           for _ in range(n_siblings)]
+                objects = [
+                    model.objects.create(parent=parent) for _ in range(n_siblings)
+                ]
             yield model.objects.count()
             if level < len(self.siblings_per_level):
-                for count in self.populate_database(model, level+1, objects):
+                for count in self.populate_database(model, level + 1, objects):
                     yield count
 
     def create_databases(self):
@@ -157,38 +169,42 @@ class Benchmark:
     def plot(self, df, database_name, test_name, y_label):
         means = df.rolling(max(df.index.max() // 20, 1)).mean()
         ax = means.plot(
-            title=test_name, alpha=0.8,
+            title=test_name,
+            alpha=0.8,
             xlim=(0, means.index.max() * 1.05),
             ylim=(0, means.max().max() * 1.05),
         )
         ax.set(xlabel='Amount of objects in table', ylabel=y_label)
 
         ax.xaxis.set_major_formatter(
-            FuncFormatter(lambda v, pos: prefix_unit(v, '', -3)))
+            FuncFormatter(lambda v, pos: prefix_unit(v, '', -3))
+        )
         if y_label in self.ticks_formatters:
             ax.yaxis.set_major_formatter(self.ticks_formatters[y_label])
 
         legend = ax.legend(
-            loc='upper center', bbox_to_anchor=(0.5, 0.0),
+            loc='upper center',
+            bbox_to_anchor=(0.5, 0.0),
             bbox_transform=plt.gcf().transFigure,
-            fancybox=True, shadow=True, ncol=3)
+            fancybox=True,
+            shadow=True,
+            ncol=3,
+        )
 
-        filename = ('%s - %s.svg' % (database_name,
-                                     test_name)).replace(' ', '_')
+        filename = ('%s - %s.svg' % (database_name, test_name)).replace(' ', '_')
         plt.savefig(
             os.path.join(self.results_path, filename),
-            bbox_extra_artists=(legend,), bbox_inches='tight',
+            bbox_extra_artists=(legend,),
+            bbox_inches='tight',
         )
 
     def force_update_db_stats_and_indexes(self, model: Type[Model]):
         with connections[self.current_db_alias].cursor() as cursor:
             # This makes sure the table statistics are
             # up to date and the disk usage is optimised.
-            cursor.execute(
-                'VACUUM FULL ANALYZE "%s";' % model._meta.db_table)
+            cursor.execute('VACUUM FULL ANALYZE "%s";' % model._meta.db_table)
             # This makes sure the indexes are up to date.
-            cursor.execute(
-                'REINDEX TABLE "%s";' % model._meta.db_table)
+            cursor.execute('REINDEX TABLE "%s";' % model._meta.db_table)
 
     def run(self):
         self.create_databases()
@@ -213,8 +229,13 @@ class Benchmark:
                     except StopIteration:
                         break
                     progress.update(count - progress.n)
-                    self.add_data(model, 'Create all objects', count,
-                                  elapsed_time, y_label=WRITE_LATENCY)
+                    self.add_data(
+                        model,
+                        'Create all objects',
+                        count,
+                        elapsed_time,
+                        y_label=WRITE_LATENCY,
+                    )
                     if count % self.db_optimization_interval == 0:
                         self.force_update_db_stats_and_indexes(model)
                     self.run_tests(model, count)
@@ -236,22 +257,24 @@ class Benchmark:
         group_by = stats_df.groupby(level=[0, 1, 2])
         min_values_series = group_by.min()['Value']
         max_values_series = group_by.max()['Value']
-        stats_df['Value'] = ((stats_df['Value'] - min_values_series)
-                             / (max_values_series - min_values_series))
+        stats_df['Value'] = (stats_df['Value'] - min_values_series) / (
+            max_values_series - min_values_series
+        )
         stats_df['Value'] = stats_df['Value'].fillna(0.0)
         stats_df = stats_df.groupby(['Y label', 'Implementation']).mean()
-        stats_df['Value'] = ((20 * (1 - stats_df['Value']))
-                             .apply(lambda f: '%.1f / 20' % f))
-        stats_df.to_html(os.path.join(self.results_path, 'stats.html'),
-                         header=False)
+        stats_df['Value'] = (20 * (1 - stats_df['Value'])).apply(
+            lambda f: '%.1f / 20' % f
+        )
+        stats_df.to_html(os.path.join(self.results_path, 'stats.html'), header=False)
 
         df.set_index('Count', inplace=True)
         for database_name in df['Database'].unique():
             for test_name in df['Test name'].unique():
                 if self.skip_test(test_name):
                     continue
-                sub_df = df[(df['Database'] == database_name)
-                            & (df['Test name'] == test_name)]
+                sub_df = df[
+                    (df['Database'] == database_name) & (df['Test name'] == test_name)
+                ]
                 y_labels = sub_df['Y label'].unique()
                 assert len(y_labels) == 1
                 sub_df = sub_df.pivot(columns='Implementation', values='Value')
@@ -276,22 +299,24 @@ class BenchmarkWriteTest(BenchmarkTest):
     rollback = True
 
 
-@Benchmark.register_test('Table disk usage (including indexes)',
-                         y_label=DISK_USAGE)
+@Benchmark.register_test('Table disk usage (including indexes)', y_label=DISK_USAGE)
 class TestDiskUsage(BenchmarkTest):
     def run(self):
         with connections[self.benchmark.current_db_alias].cursor() as cursor:
-            cursor.execute("SELECT pg_total_relation_size('%s');"
-                           % self.model._meta.db_table)
+            cursor.execute(
+                "SELECT pg_total_relation_size('%s');" % self.model._meta.db_table
+            )
             return cursor.fetchone()[0]
 
 
 class GetRootMixin:
     def setup(self):
         qs = self.model._default_manager.all()
-        qs = (qs.filter(depth=1)
-              if self.model in (TreebeardMPPlace, TreebeardNSPlace)
-              else qs.filter(parent__isnull=True))
+        qs = (
+            qs.filter(depth=1)
+            if self.model in (TreebeardMPPlace, TreebeardNSPlace)
+            else qs.filter(parent__isnull=True)
+        )
         self.root = qs[qs.count() // 2]
         super().setup()
 
@@ -337,9 +362,11 @@ class GetLeafMixin:
                 descendants = [d.pk for d in descendants]
             qs = qs.exclude(pk=self.branch.pk).exclude(pk__in=descendants)
 
-        qs = (qs.annotate(n=Max('depth')).filter(depth=F('n'), depth__gt=1)
-              if self.model in (TreebeardMPPlace, TreebeardNSPlace)
-              else qs.filter(children__isnull=True, parent__isnull=False))
+        qs = (
+            qs.annotate(n=Max('depth')).filter(depth=F('n'), depth__gt=1)
+            if self.model in (TreebeardMPPlace, TreebeardNSPlace)
+            else qs.filter(children__isnull=True, parent__isnull=False)
+        )
         try:
             self.leaf = qs[qs.count() // 2]
         except IndexError:
@@ -374,23 +401,21 @@ class TestGetChildrenLeaf(GetLeafMixin, BenchmarkTest):
 #
 
 
-@Benchmark.register_test('Get children count [root]',
-                         (MPTTPlace, TreePlace))
+@Benchmark.register_test('Get children count [root]', (MPTTPlace, TreePlace))
 class TestGetChildrenCountRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.root.get_children().count()
 
 
 @Benchmark.register_test(
-    'Get children count [root]',
-    (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    'Get children count [root]', (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace)
+)
 class TestGetChildrenCountRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.root.get_children_count()
 
 
-@Benchmark.register_test('Get children count [branch]',
-                         (MPTTPlace, TreePlace))
+@Benchmark.register_test('Get children count [branch]', (MPTTPlace, TreePlace))
 class TestGetChildrenCountBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.branch.get_children().count()
@@ -398,22 +423,22 @@ class TestGetChildrenCountBranch(GetBranchMixin, BenchmarkTest):
 
 @Benchmark.register_test(
     'Get children count [branch]',
-    (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace),
+)
 class TestGetChildrenCountBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.branch.get_children_count()
 
 
-@Benchmark.register_test('Get children count [leaf]',
-                         (MPTTPlace, TreePlace))
+@Benchmark.register_test('Get children count [leaf]', (MPTTPlace, TreePlace))
 class TestGetChildrenCountLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.leaf.get_children().count()
 
 
 @Benchmark.register_test(
-    'Get children count [leaf]',
-    (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    'Get children count [leaf]', (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace)
+)
 class TestGetChildrenCounteaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.leaf.get_children_count()
@@ -453,7 +478,9 @@ class TestGetAncestorsRoot(GetRootMixin, BenchmarkTest):
         list(self.root.get_ancestors())
 
 
-@Benchmark.register_test('Get ancestors [branch]',)
+@Benchmark.register_test(
+    'Get ancestors [branch]',
+)
 class TestGetAncestorsBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         list(self.branch.get_ancestors())
@@ -488,12 +515,10 @@ class TestGetDescendantsLeaf(GetLeafMixin, BenchmarkTest):
         list(self.leaf.get_descendants())
 
 
-@Benchmark.register_test('Get descendants from queryset',
-                         (MPTTPlace, TreePlace))
+@Benchmark.register_test('Get descendants from queryset', (MPTTPlace, TreePlace))
 class TestGetDescendantsFromQuerySet(BenchmarkTest):
     def setup(self):
-        self.qs = self.model._default_manager.annotate(
-            n=F('pk') % 5).filter(n=0)
+        self.qs = self.model._default_manager.annotate(n=F('pk') % 5).filter(n=0)
         super().setup()
 
     def run(self):
@@ -513,7 +538,8 @@ class TestGetDescendantsCountRoot(GetRootMixin, BenchmarkTest):
 
 @Benchmark.register_test(
     'Get descendants count [root]',
-    (MPTTPlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    (MPTTPlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace),
+)
 class TestGetDescendantsCountRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.root.get_descendant_count()
@@ -527,7 +553,8 @@ class TestGetDescendantsCountBranch(GetBranchMixin, BenchmarkTest):
 
 @Benchmark.register_test(
     'Get descendants count [branch]',
-    (MPTTPlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    (MPTTPlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace),
+)
 class TestGetDescendantsCountBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.branch.get_descendant_count()
@@ -541,7 +568,8 @@ class TestGetDescendantsCountLeaf(GetLeafMixin, BenchmarkTest):
 
 @Benchmark.register_test(
     'Get descendants count [leaf]',
-    (MPTTPlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    (MPTTPlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace),
+)
 class TestGetDescendantsCountLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.leaf.get_descendant_count()
@@ -597,8 +625,8 @@ class TestGetSiblingsRoot(GetRootMixin, BenchmarkTest):
 
 
 @Benchmark.register_test(
-    'Get siblings [root]',
-    (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    'Get siblings [root]', (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace)
+)
 class TestGetSiblingsRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         list(self.root.get_siblings())
@@ -611,8 +639,8 @@ class TestGetSiblingsBranch(GetBranchMixin, BenchmarkTest):
 
 
 @Benchmark.register_test(
-    'Get siblings [branch]',
-    (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    'Get siblings [branch]', (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace)
+)
 class TestGetSiblingsBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         list(self.branch.get_siblings())
@@ -625,8 +653,8 @@ class TestGetSiblingsLeaf(GetLeafMixin, BenchmarkTest):
 
 
 @Benchmark.register_test(
-    'Get siblings [leaf]',
-    (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    'Get siblings [leaf]', (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace)
+)
 class TestGetSiblingsLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         list(self.leaf.get_siblings())
@@ -645,7 +673,8 @@ class TestGetPrevSiblingRoot(GetRootMixin, BenchmarkTest):
 
 @Benchmark.register_test(
     'Get previous sibling [root]',
-    (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace),
+)
 class TestGetPrevSiblingRoot(GetRootMixin, BenchmarkTest):
     def run(self):
         self.root.get_prev_sibling()
@@ -659,7 +688,8 @@ class TestGetPrevSiblingBranch(GetBranchMixin, BenchmarkTest):
 
 @Benchmark.register_test(
     'Get previous sibling [branch]',
-    (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace),
+)
 class TestGetPrevSiblingBranch(GetBranchMixin, BenchmarkTest):
     def run(self):
         self.branch.get_prev_sibling()
@@ -673,7 +703,8 @@ class TestGetPrevSiblingLeaf(GetLeafMixin, BenchmarkTest):
 
 @Benchmark.register_test(
     'Get previous sibling [leaf]',
-    (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    (TreePlace, TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace),
+)
 class TestGetPrevSiblingLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.leaf.get_prev_sibling()
@@ -720,7 +751,8 @@ class TestGetRoots(BenchmarkTest):
 
 
 @Benchmark.register_test(
-    'Get roots', (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace))
+    'Get roots', (TreebeardALPlace, TreebeardMPPlace, TreebeardNSPlace)
+)
 class TestGetRoots(BenchmarkTest):
     def run(self):
         list(self.model.get_root_nodes())
@@ -743,15 +775,15 @@ class TestRebuildPaths(BenchmarkWriteTest):
         self.model.rebuild_paths()
 
 
-@Benchmark.register_test('Rebuild paths', (TreebeardALPlace, TreebeardNSPlace),
-                         y_label=WRITE_LATENCY)
+@Benchmark.register_test(
+    'Rebuild paths', (TreebeardALPlace, TreebeardNSPlace), y_label=WRITE_LATENCY
+)
 class TestRebuildPaths(BenchmarkWriteTest):
     def setup(self):
         raise SkipTest
 
 
-@Benchmark.register_test('Rebuild paths', TreebeardMPPlace,
-                         y_label=WRITE_LATENCY)
+@Benchmark.register_test('Rebuild paths', TreebeardMPPlace, y_label=WRITE_LATENCY)
 class TestRebuildPaths(BenchmarkWriteTest):
     def run(self):
         self.model.fix_tree()
@@ -763,48 +795,48 @@ class TestRebuildPaths(BenchmarkWriteTest):
 
 
 @Benchmark.register_test(
-    'Create [root]',
-    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+    'Create [root]', (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY
+)
 class TestCreateRoot(BenchmarkWriteTest):
     def run(self):
         self.model.objects.create()
 
 
 @Benchmark.register_test(
-    'Create [root]',
-    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+    'Create [root]', (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY
+)
 class TestCreateRoot(BenchmarkWriteTest):
     def run(self):
         self.model.add_root()
 
 
 @Benchmark.register_test(
-    'Create [branch]',
-    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+    'Create [branch]', (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY
+)
 class TestCreateBranch(GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.model.objects.create(parent=self.root)
 
 
 @Benchmark.register_test(
-    'Create [branch]',
-    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+    'Create [branch]', (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY
+)
 class TestCreateBranch(GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.add_child()
 
 
 @Benchmark.register_test(
-    'Create [leaf]',
-    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+    'Create [leaf]', (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY
+)
 class TestCreateLeaf(GetLeafMixin, BenchmarkWriteTest):
     def run(self):
         self.model.objects.create(parent=self.leaf)
 
 
 @Benchmark.register_test(
-    'Create [leaf]',
-    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+    'Create [leaf]', (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY
+)
 class TestCreateLeaf(GetLeafMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.add_child()
@@ -861,7 +893,9 @@ class TestMoveSameLeafPath(GetLeafMixin, BenchmarkWriteTest):
 
 @Benchmark.register_test(
     'Move [root to branch]',
-    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+    (MPTTPlace, TreePlace, TreebeardALPlace),
+    y_label=WRITE_LATENCY,
+)
 class TestMoveRootToBranch(GetBranchMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.parent = self.branch
@@ -869,8 +903,8 @@ class TestMoveRootToBranch(GetBranchMixin, GetRootMixin, BenchmarkWriteTest):
 
 
 @Benchmark.register_test(
-    'Move [root to branch]',
-    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+    'Move [root to branch]', (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY
+)
 class TestMoveRootToBranch(GetBranchMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.move(self.branch, pos='sorted-child')
@@ -878,7 +912,9 @@ class TestMoveRootToBranch(GetBranchMixin, GetRootMixin, BenchmarkWriteTest):
 
 @Benchmark.register_test(
     'Move [root to leaf]',
-    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+    (MPTTPlace, TreePlace, TreebeardALPlace),
+    y_label=WRITE_LATENCY,
+)
 class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.parent = self.leaf
@@ -886,8 +922,8 @@ class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
 
 
 @Benchmark.register_test(
-    'Move [root to leaf]',
-    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+    'Move [root to leaf]', (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY
+)
 class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.root.move(self.leaf, pos='sorted-child')
@@ -895,7 +931,9 @@ class TestMoveRootToLeaf(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
 
 @Benchmark.register_test(
     'Move [branch to root]',
-    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+    (MPTTPlace, TreePlace, TreebeardALPlace),
+    y_label=WRITE_LATENCY,
+)
 class TestMoveBranchToRoot(GetBranchMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.parent = None
@@ -903,8 +941,8 @@ class TestMoveBranchToRoot(GetBranchMixin, BenchmarkWriteTest):
 
 
 @Benchmark.register_test(
-    'Move [branch to root]',
-    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+    'Move [branch to root]', (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY
+)
 class TestMoveBranchToRoot(GetBranchMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.move(self.root, pos='sorted-sibling')
@@ -912,7 +950,9 @@ class TestMoveBranchToRoot(GetBranchMixin, GetRootMixin, BenchmarkWriteTest):
 
 @Benchmark.register_test(
     'Move [branch to leaf]',
-    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+    (MPTTPlace, TreePlace, TreebeardALPlace),
+    y_label=WRITE_LATENCY,
+)
 class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.parent = self.leaf
@@ -920,8 +960,8 @@ class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkWriteTest):
 
 
 @Benchmark.register_test(
-    'Move [branch to leaf]',
-    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+    'Move [branch to leaf]', (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY
+)
 class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkWriteTest):
     def run(self):
         self.branch.move(self.leaf, pos='sorted-child')
@@ -929,7 +969,9 @@ class TestMoveBranchToLeaf(GetLeafMixin, GetBranchMixin, BenchmarkWriteTest):
 
 @Benchmark.register_test(
     'Move [leaf to root]',
-    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+    (MPTTPlace, TreePlace, TreebeardALPlace),
+    y_label=WRITE_LATENCY,
+)
 class TestMoveLeafToRoot(GetLeafMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.parent = None
@@ -937,8 +979,8 @@ class TestMoveLeafToRoot(GetLeafMixin, BenchmarkWriteTest):
 
 
 @Benchmark.register_test(
-    'Move [leaf to root]',
-    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+    'Move [leaf to root]', (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY
+)
 class TestMoveLeafToRoot(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.move(self.root, pos='sorted-sibling')
@@ -946,7 +988,9 @@ class TestMoveLeafToRoot(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
 
 @Benchmark.register_test(
     'Move [leaf to branch]',
-    (MPTTPlace, TreePlace, TreebeardALPlace), y_label=WRITE_LATENCY)
+    (MPTTPlace, TreePlace, TreebeardALPlace),
+    y_label=WRITE_LATENCY,
+)
 class TestMoveLeafToBranch(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.parent = self.root
@@ -954,8 +998,8 @@ class TestMoveLeafToBranch(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
 
 
 @Benchmark.register_test(
-    'Move [leaf to branch]',
-    (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY)
+    'Move [leaf to branch]', (TreebeardMPPlace, TreebeardNSPlace), y_label=WRITE_LATENCY
+)
 class TestMoveLeafToBranch(GetLeafMixin, GetRootMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.move(self.root, pos='sorted-child')
