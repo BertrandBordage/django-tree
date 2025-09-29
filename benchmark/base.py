@@ -1,8 +1,7 @@
 from __future__ import print_function
-from collections import Iterable
 import os
 from time import time
-from typing import Type, List, Optional
+from typing import Type, List, Optional, Iterable
 
 from django.db import connections, router, transaction
 from django.db.models import Max, F, Model

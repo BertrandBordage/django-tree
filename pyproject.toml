@@ -1,0 +1,42 @@
+[project]
+name = "django-tree"
+dynamic = ["version"]
+authors = [
+  {name = "Bertrand Bordage", email = "bordage.bertrand@gmail.com"},
+]
+description = "Fast and easy tree structures."
+readme = "README.rst"
+requires-python = ">= 3.6"
+dependencies = [
+  "Django>=3.2",
+]
+license = "BSD-2-Clause"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: Django",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.6",
+  "Programming Language :: Python :: 3.7",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Internet :: WWW/HTTP",
+]
+
+[project.urls]
+Repository = "https://github.com/BertrandBordage/django-tree"
+
+[dependency-groups]
+dev = [
+    "psycopg[binary]>=3.0.18",
+]
+benchmark = [
+    "django-mptt>=0.14.0",
+    "django-treebeard>=4.6.0",
+    "matplotlib>=3.3.4",
+    "pandas>=0.25.3",
+    "tqdm>=4.64.1",
+]

@@ -5,7 +5,8 @@ from __future__ import unicode_literals
 import decimal
 
 from django.core.exceptions import ValidationError
-from django.db import transaction, InternalError, connection
+from django.db import transaction, connection
+from django.db.utils import ProgrammingError
 from django.test import TransactionTestCase
 
 from .models import Place, Person
@@ -207,7 +208,7 @@ class PathTest(CommonTest):
 
         # Leaf
         manche = Place.objects.get(name='Manche')
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(5):
             manche.delete()
         self.assertPlaces([
             (path(0), 'France'),
@@ -222,7 +223,7 @@ class PathTest(CommonTest):
 
         # Branch
         normandie = Place.objects.get(name='Normandie')
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(5):
             normandie.delete()
         self.assertPlaces([
             (path(0), 'France'),
@@ -234,7 +235,7 @@ class PathTest(CommonTest):
 
         # Root
         france = Place.objects.get(name='France')
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(5):
             france.delete()
         self.assertPlaces([
             (path(1), 'Österreich'),
@@ -1136,7 +1137,7 @@ class PathTest(CommonTest):
                     a.clean()
 
         with self.assertRaisesMessage(
-            InternalError, 'Cannot set itself or a descendant as parent.',
+            ProgrammingError, 'Cannot set itself or a descendant as parent.',
         ):
             with transaction.atomic():
                 with self.assertNumQueries(1):
@@ -1157,7 +1158,7 @@ class PathTest(CommonTest):
                     a.clean()
 
         with self.assertRaisesMessage(
-                InternalError, 'Cannot set itself or a descendant as parent.'):
+                ProgrammingError, 'Cannot set itself or a descendant as parent.'):
             with transaction.atomic():
                 with self.assertNumQueries(1):
                     a.save()

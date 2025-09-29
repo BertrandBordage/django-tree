@@ -1,3 +1,4 @@
+from types import NoneType
 from django.db.models import QuerySet
 
 
@@ -186,17 +187,38 @@ class Path:
             return False
         return self.value[:len(other)] == other
 
+    @staticmethod
+    def register_psycopg2():
+        from psycopg2.extensions import register_adapter, adapt
 
-# Tells psycopg2 how to prepare a Path object for the database,
-# in case it doesn't go through the ORM.
-try:
-    import psycopg2
-except ImportError:
-    pass
-else:
-    from psycopg2.extensions import register_adapter, adapt
+        def adapt_path(path):
+            return adapt(path.value)
 
-    def adapt_path(path):
-        return adapt(path.value)
+        register_adapter(Path, adapt_path)
 
-    register_adapter(Path, adapt_path)
+    @staticmethod
+    def register_psycopg3():
+        import psycopg
+        from psycopg.types.string import StrDumper
+
+        class PathDumper(StrDumper):
+            def quote(self, obj: Path):
+                return psycopg.sql.quote(obj.value).encode()
+
+        psycopg.adapters.register_dumper(Path, PathDumper)
+
+    @classmethod
+    def register_psycopg(cls):
+        # Tells psycopg how to prepare a Path object for the database,
+        # in case it doesn't go through the ORM.
+        try:
+            import psycopg  # Handles psycopg 3.
+        except ImportError:
+            try:
+                import psycopg2  # Handles psycopg 2.
+            except ImportError:
+                pass
+            else:
+                cls.register_psycopg2()
+        else:
+            cls.register_psycopg3()
