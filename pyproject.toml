@@ -5,7 +5,7 @@ authors = [
   {name = "Bertrand Bordage", email = "bordage.bertrand@gmail.com"},
 ]
 description = "Fast and easy tree structures."
-readme = "README.rst"
+readme = "README.md"
 requires-python = ">= 3.6"
 dependencies = [
   "Django>=3.2",
