@@ -1,3 +1,9 @@
+# 0.6.0 (2025-09-29)
+
+- Adds compatibility with Django>=4.0,<6 (thanks to @jacobjove)
+- Adds compatibility with psycopg 3
+- Makes path values deserializable (thanks to @jacobjove)
+
 # 0.5.6 (2023-07-09)
 
 - Adds a model validation in addition to the existing database error,
