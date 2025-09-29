@@ -214,9 +214,7 @@ class Path:
     def register_psycopg(cls):
         # Tells psycopg how to prepare a Path object for the database,
         # in case it doesn't go through the ORM.
-        if find_spec('psycopg') is None:
-            if find_spec('psycopg2') is None:
-                return
-            cls.register_psycopg2()
-
-        cls.register_psycopg3()
+        if find_spec('psycopg') is not None:
+            return cls.register_psycopg3()
+        if find_spec('psycopg2') is not None:
+            return cls.register_psycopg2()
