@@ -1,3 +1,7 @@
+# 0.6.2 (2025-09-29)
+
+Fixes psycopg2 compatibility.
+
 # 0.6.1 (2025-09-29)
 
 Fixes the broken version number picked up by uv.
