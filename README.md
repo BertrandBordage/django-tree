@@ -4,7 +4,7 @@
 
 Fast and easy tree structures.
 
-[![](http://img.shields.io/pypi/v/django-tree.svg?style=flat-square)](https://pypi.python.org/pypi/django-tree) [![](http://img.shields.io/travis/BertrandBordage/django-tree/master.svg?style=flat-square)](https://travis-ci.org/BertrandBordage/django-tree) [![](http://img.shields.io/coveralls/BertrandBordage/django-tree/master.svg?style=flat-square)](https://coveralls.io/r/BertrandBordage/django-tree?branch=master)
+[![](https://img.shields.io/pypi/v/django-tree.svg?style=flat-square)](https://pypi.python.org/pypi/django-tree) [![](https://img.shields.io/github/actions/workflow/status/BertrandBordage/django-tree/ci.yml?branch=master&style=flat-square)](https://github.com/BertrandBordage/django-tree/actions/workflows/ci.yml) [![](https://img.shields.io/codecov/c/github/BertrandBordage/django-tree/master.svg?style=flat-square)](https://codecov.io/gh/BertrandBordage/django-tree)
 
 **In beta, it can’t be used yet in production.**
 
