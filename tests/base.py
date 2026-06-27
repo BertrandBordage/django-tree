@@ -2,6 +2,8 @@
 
 from __future__ import unicode_literals
 
+from unittest import expectedFailure
+
 from django.core.exceptions import ValidationError
 from django.db import transaction, connection
 from django.db.utils import ProgrammingError
@@ -1609,3 +1611,34 @@ class QuerySetTest(CommonTest):
             ],
             places.get_descendants(include_self=True),
         )
+
+
+class Issue17Test(CommonTest):
+    # https://github.com/BertrandBordage/django-tree/issues/17
+    #
+    # Inserting a node always uses the midpoint between the previous and the
+    # next sibling decimals. When many nodes are inserted into the same gap,
+    # the float8 decimals get crammed together until the computed midpoint
+    # rounds to a decimal that already exists, raising an IntegrityError on
+    # the unique constraint of the path column (the error reported in #17 was
+    # `Key (path)=({277.9999999987}) already exists`).
+    #
+    # TODO: Remove the `expectedFailure` decorator once the trigger spaces out
+    #       crammed siblings instead of always inserting at the midpoint.
+    @expectedFailure
+    def test_inserting_many_nodes_in_the_same_gap(self):
+        root = self.create_place('root')
+        # Two siblings delimiting the gap we will keep inserting into.
+        self.create_place('a', root)
+        self.create_place('b', root)
+        # Each new name sorts after the previous one but still before 'b', so
+        # the trigger keeps halving the gap toward 'b''s decimal. With float8
+        # paths the gap is exhausted in well under 70 insertions.
+        n = 69
+        for i in range(1, n + 1):
+            self.create_place('a%04d' % i, root)
+
+        # Every node must keep a distinct path: root + 'a' + 'b' + n children.
+        paths = [tuple(p.path.value) for p in Place.objects.all()]
+        self.assertEqual(len(paths), n + 3)
+        self.assertEqual(len(set(paths)), len(paths))
