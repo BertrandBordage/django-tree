@@ -72,7 +72,7 @@ class Migration(migrations.Migration):
                     'parent',
                     ForeignKey('self', blank=True, null=True, on_delete=CASCADE),
                 ),
-                ('path', PathField(order_by=['name'], db_index=True)),
+                ('path', PathField(order_by=['name'])),
             ],
             options={
                 'indexes': [
@@ -84,8 +84,6 @@ class Migration(migrations.Migration):
                     Index(F('path__0_1'), name='treeplace_path_slice_1_index'),
                     Index(F('path__0_2'), name='treeplace_path_slice_2_index'),
                     Index(F('path__0_3'), name='treeplace_path_slice_3_index'),
-                    Index(F('path__0_4'), name='treeplace_path_slice_4_index'),
-                    Index(F('path__0_5'), name='treeplace_path_slice_5_index'),
                 ],
             },
         ),

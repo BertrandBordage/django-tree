@@ -73,7 +73,7 @@ def get_update_paths_function_creation(
         f"""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
-                SELECT {parent}, NULL::decimal[]
+                SELECT {parent}, NULL::double precision[]
                 FROM {table}
                 WHERE {parent} IS NULL
                 LIMIT 1
@@ -84,7 +84,7 @@ def get_update_paths_function_creation(
                         row_number() OVER (
                             PARTITION BY t1.pk ORDER BY {sql_t2_order_by}
                         ) - 1
-                    )::decimal
+                    )::double precision
                 FROM generate_paths AS t1
                 INNER JOIN {table} AS t2 ON (
                     t2.{parent} = t1.pk
@@ -162,12 +162,12 @@ def get_update_paths_function_creation(
     return f"""
         CREATE OR REPLACE FUNCTION update_{table}_{path}_paths() RETURNS trigger AS $$
         DECLARE
-            prev_sibling_decimal decimal := NULL;
-            next_sibling_decimal decimal := NULL;
-            new_parent_path decimal[];
+            prev_sibling_decimal double precision := NULL;
+            next_sibling_decimal double precision := NULL;
+            new_parent_path double precision[];
         BEGIN
             IF TG_OP = 'UPDATE' THEN
-                IF NEW.{path} = '{{NULL}}'::decimal[] THEN
+                IF NEW.{path} = '{{NULL}}'::double precision[] THEN
                     {rebuild}
                     RETURN NEW;
                 END IF;
@@ -241,7 +241,7 @@ CREATE_TRIGGER_QUERIES = (
     """
     CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
     BEGIN
-        UPDATE {table} SET {path} = '{{NULL}}'::decimal[] FROM (
+        UPDATE {table} SET {path} = '{{NULL}}'::double precision[] FROM (
             SELECT * FROM {table}
             WHERE {parent} IS NULL
             LIMIT 1

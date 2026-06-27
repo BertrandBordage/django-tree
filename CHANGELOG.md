@@ -1,3 +1,19 @@
+# Unreleased
+
+- Stores path elements as `double precision` (float8) instead of `numeric`,
+  shrinking the path column and every path index while making comparisons
+  faster. Bisection only produces dyadic fractions, which float8 stores
+  exactly, with far more reordering headroom than the previous
+  `numeric(20, 10)` configuration.
+- Reduces the default `PathField.get_indexes()` depth (`max_indexed_level`)
+  from 5 to 3 and drops redundant path indexes, significantly lowering disk
+  usage.
+
+  Upgrading: existing projects must recast the column and re-space paths with a
+  migration that runs `AlterField('YourModel', 'path', PathField(...))` followed
+  by `RebuildPaths('YourModel', 'path')`. Review your model's `Meta.indexes`
+  if you relied on `get_indexes()` indexing beyond level 3.
+
 # 0.6.2 (2025-09-29)
 
 Fixes psycopg2 compatibility.

@@ -4,7 +4,7 @@ import json
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
-from django.db.models import DecimalField, F, Index
+from django.db.models import F, FloatField, Index
 from django.db.models.expressions import RawSQL
 
 try:
@@ -30,7 +30,7 @@ class PathField(ArrayField):
         cls,
         table_name: str,
         path_field_name: str,
-        max_indexed_level: int = 5,
+        max_indexed_level: int = 3,
     ):
         return [
             Index(
@@ -59,7 +59,11 @@ class PathField(ArrayField):
             if kwarg in kwargs:
                 raise ImproperlyConfigured('Cannot set `PathField.%s`.' % kwarg)
 
-        kwargs['base_field'] = DecimalField(max_digits=20, decimal_places=10)
+        # `double precision` (float8) keeps each path element to a fixed 8 bytes
+        # with hardware-speed comparisons, unlike the variable-length `numeric`.
+        # Paths only ever hold dyadic fractions (repeated `(prev + next) / 2`),
+        # which float8 stores exactly, with ~52 bits of bisection headroom.
+        kwargs['base_field'] = FloatField()
         kwargs['default'] = lambda: Path(self, None)
         kwargs.setdefault('editable', False)
         kwargs['null'] = True

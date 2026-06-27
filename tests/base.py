@@ -2,8 +2,6 @@
 
 from __future__ import unicode_literals
 
-import decimal
-
 from django.core.exceptions import ValidationError
 from django.db import transaction, connection
 from django.db.utils import ProgrammingError
@@ -33,7 +31,7 @@ from .models import Place, Person
 
 
 def path(*path_components):
-    return [decimal.Decimal(f'{value:.10f}') for value in path_components]
+    return [float(value) for value in path_components]
 
 
 class CommonTest(TransactionTestCase):
