@@ -34,8 +34,8 @@ def _register_tree_path_dumper(connection):
     django-tree registers its psycopg ``Path`` dumper on the *global*
     ``psycopg.adapters`` map (in ``TreeAppConfig.ready()``), but Django's
     psycopg3 connections build their own adapter map and do not inherit that
-    global registration. Without this, saving any tree model (e.g. ``Oeuvre``,
-    ``Lieu``) raises ``cannot adapt type 'Path'`` because the raw ``Path``
+    global registration. Without this, saving any tree model
+    raises ``cannot adapt type 'Path'`` because the raw ``Path``
     reaches psycopg (``ArrayField.get_db_prep_value`` skips non-list values, so
     ``PathField.get_prep_value`` is never called). Mirrors
     ``tree.types.Path.register_psycopg3`` but targets the connection's adapters.
