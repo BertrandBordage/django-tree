@@ -247,7 +247,7 @@ class Benchmark:
         if self.run_django_tree_only:
             df = pd.read_csv(csv_path)
             df = df[df['Implementation'] != self.models[TreePlace]]
-            df = df.append(pd.DataFrame(self.data))
+            df = pd.concat([df, pd.DataFrame(self.data)], ignore_index=True)
         else:
             df = pd.DataFrame(self.data)
         df.to_csv(csv_path, index=False)
