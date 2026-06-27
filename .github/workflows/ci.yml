@@ -5,6 +5,47 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    name: Lint and checks
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tree
+          POSTGRES_DB: tree
+          POSTGRES_PASSWORD: test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+
+      - name: Ruff lint
+        run: uvx ruff check .
+
+      - name: Ruff format
+        run: uvx ruff format --check .
+
+      - name: Django system check
+        run: uv run python -m django check --settings=tests.settings
+
+      - name: Check for missing migrations
+        run: >-
+          uv run python -m django makemigrations
+          --check --dry-run --settings=tests.settings
+
   test:
     name: Python ${{ matrix.python-version }} / Django ${{ matrix.django.name }}
     runs-on: ubuntu-latest

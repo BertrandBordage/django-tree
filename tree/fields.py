@@ -75,9 +75,7 @@ class PathField(ArrayField):
 
     def contribute_to_class(self, cls, name, *args, **kwargs):
         if name in self.order_by:
-            raise ImproperlyConfigured(
-                '`PathField.order_by` cannot reference itself.' % name
-            )
+            raise ImproperlyConfigured('`PathField.order_by` cannot reference itself.')
         super(PathField, self).contribute_to_class(cls, name, *args, **kwargs)
 
     def deconstruct(self):
