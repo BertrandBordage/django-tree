@@ -108,16 +108,16 @@ def get_update_paths_function_creation(
         into=['new_parent_path'],
     )
 
-    # The previous and next sibling decimals are the last path elements of the
+    # The previous and next sibling values are the last path elements of the
     # two siblings immediately surrounding the new position. A path's last element
     # is strictly monotonic with `order_by` among siblings (the same invariant the
     # read side relies on, e.g. `get_prev_sibling` ordering by `path`), so the
-    # previous sibling's decimal is simply the greatest decimal among siblings
+    # previous sibling's value is simply the greatest value among siblings
     # ordered before us, and the next sibling's the smallest among those ordered
     # after. Both therefore come from a single scan of the sibling set using
     # `max(...) FILTER` / `min(...) FILTER`, instead of two separate
     # `ORDER BY ... LIMIT 1` queries.
-    get_sibling_decimals = execute_format(
+    get_sibling_values = execute_format(
         f"""
         SELECT
             max({path}[array_length({path}, 1)])
@@ -130,7 +130,7 @@ def get_update_paths_function_creation(
             AND {pk} != $1.{pk}
     """,
         using=['NEW'],
-        into=['prev_sibling_decimal', 'next_sibling_decimal'],
+        into=['prev_sibling_value', 'next_sibling_value'],
     )
 
     update_descendants = execute_format(
@@ -154,8 +154,8 @@ def get_update_paths_function_creation(
     return f"""
         CREATE OR REPLACE FUNCTION update_{table}_{path}_paths() RETURNS trigger AS $$
         DECLARE
-            prev_sibling_decimal double precision := NULL;
-            next_sibling_decimal double precision := NULL;
+            prev_sibling_value double precision := NULL;
+            next_sibling_value double precision := NULL;
             new_parent_path double precision[];
         BEGIN
             IF TG_OP = 'UPDATE' THEN
@@ -169,23 +169,23 @@ def get_update_paths_function_creation(
                 END IF;
             END IF;
 
-            {get_sibling_decimals}
+            {get_sibling_values}
 
-            IF prev_sibling_decimal IS NULL AND next_sibling_decimal IS NULL THEN
-                prev_sibling_decimal := 0;
-                next_sibling_decimal := 0;
+            IF prev_sibling_value IS NULL AND next_sibling_value IS NULL THEN
+                prev_sibling_value := 0;
+                next_sibling_value := 0;
             ELSE
-                IF prev_sibling_decimal IS NULL THEN
+                IF prev_sibling_value IS NULL THEN
                     -- We use `- 2` so that the middle between prev and next
                     -- will be next - 1, that way the new lower bound
                     -- is the former lower bound - 1.
-                    prev_sibling_decimal := coalesce(next_sibling_decimal, 0) - 2;
+                    prev_sibling_value := coalesce(next_sibling_value, 0) - 2;
                 END IF;
-                IF next_sibling_decimal IS NULL THEN
+                IF next_sibling_value IS NULL THEN
                     -- We use `+ 2` so that the middle between prev and next
                     -- will be prev + 1, that way the new upper bound
                     -- is the former upper bound + 1.
-                    next_sibling_decimal := coalesce(prev_sibling_decimal, 0) + 2;
+                    next_sibling_value := coalesce(prev_sibling_value, 0) + 2;
                 END IF;
             END IF;
             
@@ -194,7 +194,7 @@ def get_update_paths_function_creation(
             IF TG_OP = 'UPDATE'
                 AND {compare_columns(f'NEW.{parent}', f'OLD.{parent}')}
                 AND OLD.{path}[array_length(OLD.{path}, 1)]
-                    BETWEEN prev_sibling_decimal AND next_sibling_decimal
+                    BETWEEN prev_sibling_value AND next_sibling_value
             THEN
                 RETURN NEW;
             END IF;
@@ -207,7 +207,7 @@ def get_update_paths_function_creation(
             END IF;
             
             NEW.{path} = new_parent_path || (
-                prev_sibling_decimal + next_sibling_decimal
+                prev_sibling_value + next_sibling_value
             ) / 2;
 
             IF TG_OP = 'UPDATE' THEN

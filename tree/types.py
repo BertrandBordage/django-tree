@@ -204,7 +204,7 @@ class Path:
         if not other:
             return False
         if not isinstance(other, list):
-            raise TypeError('`other` must be a `Path` instance or a list of decimals.')
+            raise TypeError('`other` must be a `Path` instance or a list of floats.')
         if not include_self and self.value == other:
             return False
         return other[: len(self.value)] == self.value
@@ -217,7 +217,7 @@ class Path:
         if not other:
             return False
         if not isinstance(other, list):
-            raise TypeError('`other` must be a `Path` instance or a list of decimals.')
+            raise TypeError('`other` must be a `Path` instance or a list of floats.')
         if not include_self and self.value == other:
             return False
         return self.value[: len(other)] == other
