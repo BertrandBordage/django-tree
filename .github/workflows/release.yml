@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      # Bare numeric version tags only (no "v" prefix): 0.6.2, 1.0.0, ...
+      - '[0-9]+.[0-9]+.[0-9]+'
+      # Optional pre-release tags: 0.6.2a1, 1.0.0b2, ...
+      - '[0-9]+.[0-9]+.[0-9]+[ab]*[0-9]*'
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+
+      - name: Verify tag matches pyproject version
+        run: |
+          version="$(uv version --short)"
+          echo "Tag: ${GITHUB_REF_NAME} / pyproject version: ${version}"
+          if [ "${GITHUB_REF_NAME}" != "${version}" ]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' does not match pyproject version '${version}'."
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Check distributions
+        run: uvx twine check dist/*
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Required for PyPI Trusted Publishing (OIDC); no stored secrets.
+      id-token: write
+
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Create GitHub Release
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          awk -v ver="${GITHUB_REF_NAME}" '
+            $0 ~ "^# " ver " " { flag = 1; next }
+            flag && /^# / { exit }
+            flag { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No CHANGELOG entry found for ${GITHUB_REF_NAME}." > release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "django-tree ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md
