@@ -56,19 +56,17 @@ class Benchmark:
     def __init__(
         self,
         run_django_tree_only: bool = False,
-        db_optimization_interval: int = 100,
         selected_tests: Optional[List[str]] = None,
-        checkpoint_step: int = 5,
+        checkpoint_step: int = 100,
     ):
         self.run_django_tree_only = run_django_tree_only
-        self.db_optimization_interval = db_optimization_interval
         self.selected_tests = selected_tests
         # Minimum number of new objects between two measurement checkpoints. The
         # whole tree is still built (same final data); this only controls how many
-        # object counts we stop at to run the test suite. The default of 5 matches
-        # the natural granularity (5 rows are created per step), i.e. a checkpoint
-        # at every count as before. A larger value trades data-point density for
-        # speed without changing how any individual measurement is taken.
+        # object counts we stop at to run the test suite. A larger value trades
+        # data-point density for speed without changing how any individual
+        # measurement is taken. The database is vacuumed at every checkpoint, so
+        # each measurement is taken on a freshly optimised table.
         self.checkpoint_step = checkpoint_step
         self.data = []
         self.router = router.routers[0]
@@ -323,8 +321,6 @@ class Benchmark:
                     except StopIteration:
                         break
                     progress.update(count - progress.n)
-                    if count % self.db_optimization_interval == 0:
-                        self.force_update_db_stats_and_indexes(model)
                     # Only stop to measure at checkpoints; the tree is always built
                     # in full. The last count is always a checkpoint so every run
                     # ends on the complete tree.
@@ -334,6 +330,9 @@ class Benchmark:
                     ):
                         continue
                     last_checkpoint = count
+                    # Optimise the table before measuring, so every checkpoint is
+                    # taken on a freshly vacuumed table.
+                    self.force_update_db_stats_and_indexes(model)
                     self.add_data(
                         model,
                         'Create all objects',
