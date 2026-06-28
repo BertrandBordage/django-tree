@@ -10,7 +10,7 @@ from tree.operations import CreateTreeTrigger
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('tests', '0003_test_migrations'),
+        ('tests', '0004_remove_person_person_path_length_index_and_more'),
     ]
 
     operations = [

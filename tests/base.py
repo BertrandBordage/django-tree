@@ -2355,8 +2355,8 @@ class Issue17Test(CommonTest):
     #
     # Inserting a node always uses the midpoint between the previous and the
     # next sibling decimals. When many nodes are inserted into the same gap,
-    # the float8 decimals get crammed together until the computed midpoint
-    # rounds to a decimal that already exists, raising an IntegrityError on
+    # the fixed-precision decimals get crammed together until the computed
+    # midpoint rounds to a decimal that already exists, raising an IntegrityError on
     # the unique constraint of the path column (the error reported in #17 was
     # `Key (path)=({277.9999999987}) already exists`).
     #
@@ -2369,8 +2369,9 @@ class Issue17Test(CommonTest):
         self.create_place('a', root)
         self.create_place('b', root)
         # Each new name sorts after the previous one but still before 'b', so
-        # the trigger keeps halving the gap toward 'b''s decimal. With float8
-        # paths the gap is exhausted in well under 70 insertions.
+        # the trigger keeps halving the gap toward 'b''s decimal. With the
+        # fixed-precision (10 decimal places) paths the gap is exhausted in
+        # well under 70 insertions.
         n = 69
         for i in range(1, n + 1):
             self.create_place('a%04d' % i, root)
