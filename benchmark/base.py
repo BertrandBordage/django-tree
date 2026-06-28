@@ -29,6 +29,50 @@ WRITE_LATENCY = 'Write latency (s)'
 BYTES_FORMATTER = FuncFormatter(lambda v, pos: prefix_unit(v, 'B', -3))
 SECONDS_FORMATTER = FuncFormatter(lambda v, pos: prefix_unit(v, 's'))
 
+# Default tree shape: 5 levels of 5 siblings each, i.e. 5 + 5² + 5³ + 5⁴ + 5⁵ =
+# 3905 nodes. Its length also fixes the tree depth used for every `--max-objects`.
+DEFAULT_SIBLINGS_PER_LEVEL = (5, 5, 5, 5, 5)
+
+
+def derive_siblings_per_level(max_objects, depth=len(DEFAULT_SIBLINGS_PER_LEVEL)):
+    """Derive a `depth`-level branching tuple holding at most `max_objects` nodes.
+
+    The shape is the most *uniform* tree that fits: the largest branching factor
+    `b` whose fully-uniform `(b, …, b)` tree stays within `max_objects`, with the
+    leaf level then widened (≥ `b` children each) to spend the leftover budget.
+    `max_objects` is therefore an upper bound on the data (hence "maximum
+    amount"), and the depth — and so the depth-sensitive tests — stays constant
+    while only the breadth scales.
+
+    No special case is needed for the default: `derive_siblings_per_level(3905)`
+    reproduces `(5, 5, 5, 5, 5)` exactly, because 3905 is precisely 5 + 5² + … + 5⁵.
+    """
+
+    def uniform_total(b):
+        n, total = 1, 0
+        for _ in range(depth):
+            n *= b
+            total += n
+        return total
+
+    if uniform_total(1) > max_objects:
+        # Too small even for a one-child-per-node chain; use the minimum tree.
+        return (1,) * depth
+    b = 1
+    while uniform_total(b + 1) <= max_objects:
+        b += 1
+    internal = 0  # Nodes above the leaf level.
+    leaf_parents = 1  # Nodes on the deepest non-leaf level (the leaf parents).
+    for _ in range(depth - 1):
+        leaf_parents *= b
+        internal += leaf_parents
+    leaves_per_parent = (max_objects - internal) // leaf_parents
+    return (b,) * (depth - 1) + (leaves_per_parent,)
+
+
+# Lock the identical-default guarantee: the default run must stay byte-identical.
+assert derive_siblings_per_level(3905) == DEFAULT_SIBLINGS_PER_LEVEL
+
 
 class Benchmark:
     models = {
@@ -38,13 +82,6 @@ class Benchmark:
         TreebeardMPPlace: 'treebeard MP',
         TreebeardNSPlace: 'treebeard NS',
     }
-    siblings_per_level = (
-        5,
-        5,
-        5,
-        5,
-        5,
-    )
     tests = {}
     ticks_formatters = {
         DISK_USAGE: BYTES_FORMATTER,
@@ -58,9 +95,13 @@ class Benchmark:
         run_django_tree_only: bool = False,
         selected_tests: Optional[List[str]] = None,
         checkpoint_step: int = 100,
+        max_objects: int = 3905,
     ):
         self.run_django_tree_only = run_django_tree_only
         self.selected_tests = selected_tests
+        # The whole tree is built; `max_objects` is an upper bound on its size.
+        # The default (3905) reproduces the historical (5, 5, 5, 5, 5) tree.
+        self.siblings_per_level = derive_siblings_per_level(max_objects)
         # Minimum number of new objects between two measurement checkpoints. The
         # whole tree is still built (same final data); this only controls how many
         # object counts we stop at to run the test suite. A larger value trades
