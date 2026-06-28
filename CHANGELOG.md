@@ -35,6 +35,10 @@
     `max(...) FILTER`/`min(...) FILTER` scan instead of two `ORDER BY ... LIMIT 1`
     queries, roughly halving creation time (e.g. creating a leaf is ~3× faster on
     the benchmark tree) and speeding up same-position moves.
+  - The `post_save` path-deferral receiver resolves which fields are `PathField`s
+    once per model class (cached) instead of scanning `concrete_fields` and
+    running `isinstance` on every save — the handler runs ~2.6× faster and the
+    cost is removed from every non-tree model's save too.
 
 # 0.6.2 (2025-09-29)
 
