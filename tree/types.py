@@ -1,5 +1,6 @@
 from importlib.util import find_spec
 from django.db.models import QuerySet
+from django.utils.functional import cached_property
 
 
 class Path:
@@ -7,10 +8,16 @@ class Path:
         self.field = field
         self.attname = getattr(self.field, 'attname', None)
         self.field_bound = self.attname is not None
-        self.qs = (
-            self.field.model._default_manager.all() if self.field_bound else QuerySet()
-        )
         self.value = value
+
+    @cached_property
+    def qs(self):
+        # Built lazily: `from_db_value` wraps every fetched row in a `Path`, so
+        # eagerly cloning a queryset here would cost one clone per loaded row,
+        # even when the path is only read (never used to navigate the tree).
+        if self.field_bound:
+            return self.field.model._default_manager.all()
+        return QuerySet()
 
     def __repr__(self):
         if self.field_bound:
@@ -97,16 +104,12 @@ class Path:
     def get_descendants(self, include_self=False):
         if not self.value:
             return self.qs.none()
-        # `descendant_of` is a range comparison on the whole path, so it uses the
-        # btree index backing the path instead of a dedicated slice index.
-        qs = self.qs.filter(
-            **{
-                f'{self.attname}__descendant_of': self.value,
-            }
-        )
-        if include_self:
-            return qs
-        return qs.filter(**{f'{self.attname}__level__gt': len(self.value)})
+        # Both lookups are range comparisons on the whole path, so they use the
+        # btree index backing the path instead of a dedicated slice index. The
+        # strict variant excludes self via `> P` alone, avoiding a second
+        # `array_length(...)` predicate.
+        lookup = 'descendant_of' if include_self else 'strict_descendant_of'
+        return self.qs.filter(**{f'{self.attname}__{lookup}': self.value})
 
     def get_siblings(self, include_self=False, queryset=None):
         if not self.value:
@@ -143,14 +146,35 @@ class Path:
     def get_prev_sibling(self, queryset=None):
         if not self.value:
             return
-
-        return self.get_prev_siblings(queryset=queryset).first()
+        # Single query: `sibling_of` enforces same parent and depth, while
+        # `__lt` against our own path both keeps only earlier siblings and
+        # excludes self (a path is never `<` itself).
+        qs = self.qs if queryset is None else queryset
+        return (
+            qs.filter(
+                **{
+                    self.attname + '__sibling_of': self.value,
+                    self.attname + '__lt': self.value,
+                }
+            )
+            .order_by('-' + self.attname)
+            .first()
+        )
 
     def get_next_sibling(self, queryset=None):
         if not self.value:
             return None
-
-        return self.get_next_siblings(queryset=queryset).first()
+        qs = self.qs if queryset is None else queryset
+        return (
+            qs.filter(
+                **{
+                    self.attname + '__sibling_of': self.value,
+                    self.attname + '__gt': self.value,
+                }
+            )
+            .order_by(self.attname)
+            .first()
+        )
 
     def get_level(self):
         if self.value:

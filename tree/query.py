@@ -1,8 +1,5 @@
-import operator
-from functools import reduce
-
 from django.core.exceptions import FieldDoesNotExist
-from django.db.models import QuerySet, Q
+from django.db.models import Exists, OuterRef, QuerySet
 from django.db.models.manager import Manager
 
 from .fields import PathField
@@ -40,22 +37,15 @@ class TreeQuerySetMixin:
 
     def get_descendants(self, include_self=False, path_field=None):
         attname = self._get_path_field_attname(path_field)
-        # TODO: Avoid doing an extra query.
-        ancestor_paths = list(self.values_list(attname, flat=True))
-        queryset = self.model.objects.all()
-        if not ancestor_paths:
-            return queryset.none()
+        # A row is a descendant of this queryset when one of its members is an
+        # ancestor (or itself). We express that as a single correlated `EXISTS`
+        # against the members, instead of fetching every member path and OR-ing
+        # one range clause per member (which also needed an extra query).
+        members = self.filter(**{f'{attname}__ancestor_of': OuterRef(attname)})
+        result = self.model._default_manager.filter(Exists(members))
         if not include_self:
-            queryset = queryset.exclude(**{attname + '__in': ancestor_paths})
-        return queryset.filter(
-            reduce(
-                operator.or_,
-                [
-                    Q(**{attname + '__descendant_of': ancestor_path})
-                    for ancestor_path in ancestor_paths
-                ],
-            )
-        )
+            result = result.exclude(pk__in=self.values('pk'))
+        return result
 
 
 class TreeQuerySet(TreeQuerySetMixin, QuerySet):

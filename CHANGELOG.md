@@ -19,6 +19,16 @@
   migration that runs `AlterField('YourModel', 'path', PathField(...))` followed
   by `RebuildPaths('YourModel', 'path')`, and update `Meta.indexes` to the new
   `PathField.get_indexes()` output.
+- Speeds up reads:
+  - The queryset `Path.qs` is now built lazily, so loading rows no longer clones
+    a throwaway queryset for every fetched `Path`.
+  - `Path.get_descendants()` excludes the node itself with a single strict range
+    comparison (new `strict_descendant_of` lookup) instead of an extra
+    `array_length(...)` predicate.
+  - `Path.get_prev_sibling()`/`get_next_sibling()` issue a single query each
+    instead of chaining several queryset clones.
+  - `TreeQuerySetMixin.get_descendants()` runs as one correlated `EXISTS` query
+    instead of an extra query plus one OR'd range clause per matching row.
 
 # 0.6.2 (2025-09-29)
 

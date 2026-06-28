@@ -38,6 +38,22 @@ class DescendantOf(Lookup):
         )
 
 
+class StrictDescendantOf(Lookup):
+    lookup_name = 'strict_descendant_of'
+
+    def as_sql(self, compiler, connection):
+        lhs, lhs_params = self.process_lhs(compiler, connection)
+        rhs, rhs_params = self.process_rhs(compiler, connection)
+        # Same range as `descendant_of`, but the strict lower bound `> P` excludes
+        # P itself. Since the path is `UNIQUE`, P matches exactly one row (the node
+        # itself), so this returns its strict descendants without the extra
+        # `array_length(...) > N` predicate.
+        return (
+            '%s > %s AND %s < %s || %s' % (lhs, rhs, lhs, rhs, INFINITY),
+            lhs_params + rhs_params + lhs_params + rhs_params,
+        )
+
+
 class ChildOf(Lookup):
     lookup_name = 'child_of'
 
