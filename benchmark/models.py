@@ -29,7 +29,7 @@ class TreePlace(TreeModel):
     parent = ForeignKey(
         'self', null=True, blank=True, related_name='children', on_delete=CASCADE
     )
-    path = PathField(order_by=['name'], db_index=True)
+    path = PathField(order_by=['name'])
 
     class Meta:
         indexes = [

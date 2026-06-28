@@ -9,7 +9,6 @@ from django.db.models import (
     Index,
     F,
 )
-from django.db.models.expressions import RawSQL
 from mptt.fields import TreeForeignKey
 from tree.fields import PathField
 from tree.operations import CreateTreeTrigger
@@ -72,20 +71,13 @@ class Migration(migrations.Migration):
                     'parent',
                     ForeignKey('self', blank=True, null=True, on_delete=CASCADE),
                 ),
-                ('path', PathField(order_by=['name'], db_index=True)),
+                ('path', PathField(order_by=['name'])),
             ],
             options={
                 'indexes': [
                     Index(
-                        RawSQL('path[:array_length(path, 1) - 1]', ()),
-                        name='treeplace_path_parent_index',
+                        F('path__level'), F('path'), name='treeplace_path_level_index'
                     ),
-                    Index(F('path__level'), name='treeplace_path_level_index'),
-                    Index(F('path__0_1'), name='treeplace_path_slice_1_index'),
-                    Index(F('path__0_2'), name='treeplace_path_slice_2_index'),
-                    Index(F('path__0_3'), name='treeplace_path_slice_3_index'),
-                    Index(F('path__0_4'), name='treeplace_path_slice_4_index'),
-                    Index(F('path__0_5'), name='treeplace_path_slice_5_index'),
                 ],
             },
         ),

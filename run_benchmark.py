@@ -9,7 +9,22 @@ import django
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--run-django-tree-only', action='store_true')
-    parser.add_argument('--db-optimization-interval', type=int, default=100)
+    parser.add_argument(
+        '--checkpoint-step',
+        type=int,
+        default=100,
+        help='Minimum number of new objects between two measurement checkpoints. '
+        'The whole tree is still built; a larger value records fewer data points '
+        'and runs faster. Defaults to 100.',
+    )
+    parser.add_argument(
+        '--max-objects',
+        type=int,
+        default=3905,
+        help='Upper bound on the number of objects to build per tree. The shape '
+        'is derived as a fixed-depth (5-level) tree whose breadth scales to fit; '
+        'the default (3905) reproduces the historical (5, 5, 5, 5, 5) tree.',
+    )
     parser.add_argument('selected_tests', nargs='*', type=str)
     args = parser.parse_args()
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'benchmark.settings')
@@ -18,6 +33,7 @@ if __name__ == '__main__':
 
     Benchmark(
         run_django_tree_only=args.run_django_tree_only,
-        db_optimization_interval=args.db_optimization_interval,
         selected_tests=args.selected_tests,
+        checkpoint_step=args.checkpoint_step,
+        max_objects=args.max_objects,
     ).run()

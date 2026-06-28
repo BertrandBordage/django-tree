@@ -1,3 +1,53 @@
+# Unreleased
+
+- Stores path elements as `double precision` (float8) instead of `numeric`,
+  shrinking the path column and every path index while making comparisons
+  faster. Bisection only produces dyadic fractions, which float8 stores
+  exactly, with far more reordering headroom than the previous
+  `numeric(20, 10)` configuration.
+- Serves the `descendant_of`, `child_of` and `sibling_of` lookups (and
+  `get_descendants`) as range comparisons on the whole path — e.g.
+  `path >= P AND path < P || {Infinity}` — so they use the btree index already
+  backing the path (the `UNIQUE` constraint) instead of per-level slice indexes.
+  `Infinity` is available because the path is now floating-point.
+- `PathField.get_indexes()` now creates a single composite `(level, path)` index;
+  the parent-slice and per-level `path__0_N` slice indexes are gone (the range
+  comparisons above replace them) and the redundant full-path `db_index` is
+  dropped. Keeping `level` as the leading column still serves level-only filters
+  (e.g. roots, `__level=1`), while appending `path` makes the depth + range
+  predicate of `child_of`/`sibling_of` index-seekable.
+
+  Upgrading: existing projects must recast the column and re-space paths with a
+  migration that runs `AlterField('YourModel', 'path', PathField(...))` followed
+  by `RebuildPaths('YourModel', 'path')`, and update `Meta.indexes` to the new
+  `PathField.get_indexes()` output.
+- Speeds up reads:
+  - `Path.__init__` only stores the two essential attributes; `attname`,
+    `field_bound` and `qs` are now derived lazily, so loading rows no longer does
+    redundant per-row work (e.g. cloning a throwaway queryset for every `Path`).
+  - `Path.get_descendants()` excludes the node itself with a single strict range
+    comparison (new `strict_descendant_of` lookup) instead of an extra
+    `array_length(...)` predicate.
+  - `Path.get_prev_sibling()`/`get_next_sibling()` issue a single query each
+    instead of chaining several queryset clones.
+  - `TreeQuerySetMixin.get_descendants()` runs as one correlated `EXISTS` query
+    instead of an extra query plus one OR'd range clause per matching row.
+  - The composite `(level, path)` index lets `child_of`/`sibling_of` (and the
+    `get_children`/`get_siblings`/children-count queries built on them) scan just
+    the matching rows via an index seek, instead of range-scanning the whole
+    subtree and filtering by depth — a win that grows with subtree size (e.g.
+    ~4.7× faster `get_children` on a 56k-node tree). The trade-off is a larger
+    level index (it now stores the path), so disk usage rises accordingly.
+- Speeds up writes:
+  - The path-maintenance trigger finds both surrounding siblings in a single
+    `max(...) FILTER`/`min(...) FILTER` scan instead of two `ORDER BY ... LIMIT 1`
+    queries, roughly halving creation time (e.g. creating a leaf is ~3× faster on
+    the benchmark tree) and speeding up same-position moves.
+  - The `post_save` path-deferral receiver resolves which fields are `PathField`s
+    once per model class (cached) instead of scanning `concrete_fields` and
+    running `isinstance` on every save — the handler runs ~2.6× faster and the
+    cost is removed from every non-tree model's save too.
+
 # 0.6.2 (2025-09-29)
 
 Fixes psycopg2 compatibility.

@@ -47,7 +47,6 @@ def get_update_paths_function_creation(
     where_columns = []
     descending_flags = []
     sql_order_by = []
-    sql_reversed_order_by = []
     for field_name in order_by:
         descending = field_name[0] == '-'
         if descending:
@@ -57,26 +56,24 @@ def get_update_paths_function_creation(
         where_columns.append(quoted_field_name)
         descending_flags.append(descending)
         sql_order_by.append(f'{quoted_field_name} {"DESC" if descending else "ASC"}')
-        sql_reversed_order_by.append(
-            f'{quoted_field_name} {"ASC" if descending else "DESC"}'
-        )
 
     function = quote_ident(f'update_{meta.db_table}_{path_field.attname}_paths')
     table = quote_ident(meta.db_table)
     pk = quote_ident(meta.pk.attname)
     parent = quote_ident(parent_field.attname)
     path = quote_ident(path_field.attname)
+    # Only the rebuild's recursive CTE and the renumbering still need an explicit
+    # ORDER BY; the sibling lookups order implicitly via min/max.
     sql_t2_order_by = ', '.join(
         [f't2.{ordered_column}' for ordered_column in sql_order_by]
     )
     sql_order_by = ', '.join(sql_order_by)
-    sql_reversed_order_by = ', '.join(sql_reversed_order_by)
 
     rebuild = execute_format(
         f"""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
-                SELECT {parent}, NULL::decimal[]
+                SELECT {parent}, NULL::double precision[]
                 FROM {table}
                 WHERE {parent} IS NULL
                 LIMIT 1
@@ -87,7 +84,7 @@ def get_update_paths_function_creation(
                         row_number() OVER (
                             PARTITION BY t1.pk ORDER BY {sql_t2_order_by}
                         ) - 1
-                    )::decimal
+                    )::double precision
                 FROM generate_paths AS t1
                 INNER JOIN {table} AS t2 ON (
                     t2.{parent} = t1.pk
@@ -115,34 +112,36 @@ def get_update_paths_function_creation(
         into=['new_parent_path'],
     )
 
-    get_prev_sibling_decimal = execute_format(
-        f"""
-        SELECT {path}[array_length({path}, 1)]
-        FROM {table}
-        WHERE
-            {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}
-            AND {compare_columns(parent, f'$1.{parent}')}
-            AND {pk} != $1.{pk}
-        ORDER BY {sql_reversed_order_by}
-        LIMIT 1
-    """,
-        using=['NEW'],
-        into=['prev_sibling_decimal'],
+    # A single scan over the sibling set yields everything the trigger needs to
+    # place the new node. A path's last element is strictly monotonic with
+    # `order_by` among siblings (the same invariant the read side relies on,
+    # e.g. `get_prev_sibling` ordering by `path`), so:
+    #   - the previous sibling's value is the greatest value among siblings
+    #     ordered before us (`max(...) FILTER`), and the next sibling's the
+    #     smallest among those ordered after (`min(...) FILTER`), replacing two
+    #     `ORDER BY ... LIMIT 1` queries;
+    #   - the new node's rank (how many siblings sort before it) is just
+    #     `count(*) FILTER` over the same predicate, and becomes its slot if the
+    #     gap turns out to be exhausted and the siblings have to be renumbered.
+    prev_sibling_where = get_prev_sibling_where_clause(
+        where_columns, '$1', descending_flags
     )
-
-    get_next_sibling_decimal = execute_format(
+    next_sibling_where = get_next_sibling_where_clause(
+        where_columns, '$1', descending_flags
+    )
+    get_sibling_values = execute_format(
         f"""
-        SELECT {path}[array_length({path}, 1)]
+        SELECT
+            max({path}[array_length({path}, 1)]) FILTER (WHERE {prev_sibling_where}),
+            min({path}[array_length({path}, 1)]) FILTER (WHERE {next_sibling_where}),
+            count(*) FILTER (WHERE {prev_sibling_where})
         FROM {table}
         WHERE
-            {get_next_sibling_where_clause(where_columns, '$1', descending_flags)}
-            AND {compare_columns(parent, f'$1.{parent}')}
+            {compare_columns(parent, f'$1.{parent}')}
             AND {pk} != $1.{pk}
-        ORDER BY {sql_order_by}
-        LIMIT 1
     """,
         using=['NEW'],
-        into=['next_sibling_decimal'],
+        into=['prev_sibling_value', 'next_sibling_value', 'new_sibling_rank'],
     )
 
     update_descendants = execute_format(
@@ -155,23 +154,8 @@ def get_update_paths_function_creation(
         using=['NEW', 'OLD'],
     )
 
-    # Rank of the new node amongst its siblings (number of siblings sorting
-    # before it), used as its slot when the siblings are renumbered.
-    get_new_sibling_rank = execute_format(
-        f"""
-        SELECT count(*)
-        FROM {table}
-        WHERE
-            {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}
-            AND {compare_columns(parent, f'$1.{parent}')}
-            AND {pk} != $1.{pk}
-    """,
-        using=['NEW'],
-        into=['new_sibling_rank'],
-    )
-
     # Renumber every child of the new node's parent to a consecutive integer
-    # decimal (skipping the slot the new node will take), cascading the change
+    # value (skipping the slot the new node will take), cascading the change
     # to each sibling's whole subtree. This spaces crammed siblings back out
     # when a gap has been exhausted.
     renumber_siblings = execute_format(
@@ -181,14 +165,14 @@ def get_update_paths_function_creation(
                 {path} AS old_path,
                 (row_number() OVER (ORDER BY {sql_order_by}) - 1)
                     + CASE WHEN {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}
-                        THEN 0 ELSE 1 END AS new_decimal
+                        THEN 0 ELSE 1 END AS new_value
             FROM {table}
             WHERE {compare_columns(parent, f'$1.{parent}')}
                 AND {pk} != $1.{pk}
                 AND array_length({path}, 1) = coalesce(array_length($2, 1), 0) + 1
         )
         UPDATE {table} AS t
-        SET {path} = $2 || sr.new_decimal::decimal
+        SET {path} = $2 || sr.new_value::double precision
             || t.{path}[coalesce(array_length($2, 1), 0) + 2:]
         FROM sibling_renumber AS sr
         WHERE t.{path}[:coalesce(array_length($2, 1), 0) + 1] = sr.old_path
@@ -206,14 +190,14 @@ def get_update_paths_function_creation(
     return f"""
         CREATE OR REPLACE FUNCTION {function}() RETURNS trigger AS $$
         DECLARE
-            prev_sibling_decimal decimal := NULL;
-            next_sibling_decimal decimal := NULL;
-            new_sibling_decimal decimal := NULL;
+            prev_sibling_value double precision := NULL;
+            next_sibling_value double precision := NULL;
+            new_sibling_value double precision := NULL;
             new_sibling_rank integer := NULL;
-            new_parent_path decimal[];
+            new_parent_path double precision[];
         BEGIN
             IF TG_OP = 'UPDATE' THEN
-                IF NEW.{path} = '{{NULL}}'::decimal[] THEN
+                IF NEW.{path} = '{{NULL}}'::double precision[] THEN
                     {rebuild}
                     RETURN NEW;
                 END IF;
@@ -223,59 +207,58 @@ def get_update_paths_function_creation(
                 END IF;
             END IF;
 
-            {get_prev_sibling_decimal}
-            {get_next_sibling_decimal}
+            {get_sibling_values}
 
-            IF prev_sibling_decimal IS NULL AND next_sibling_decimal IS NULL THEN
-                prev_sibling_decimal := 0;
-                next_sibling_decimal := 0;
+            IF prev_sibling_value IS NULL AND next_sibling_value IS NULL THEN
+                prev_sibling_value := 0;
+                next_sibling_value := 0;
             ELSE
-                IF prev_sibling_decimal IS NULL THEN
+                IF prev_sibling_value IS NULL THEN
                     -- We use `- 2` so that the middle between prev and next
                     -- will be next - 1, that way the new lower bound
                     -- is the former lower bound - 1.
-                    prev_sibling_decimal := coalesce(next_sibling_decimal, 0) - 2;
+                    prev_sibling_value := coalesce(next_sibling_value, 0) - 2;
                 END IF;
-                IF next_sibling_decimal IS NULL THEN
+                IF next_sibling_value IS NULL THEN
                     -- We use `+ 2` so that the middle between prev and next
                     -- will be prev + 1, that way the new upper bound
                     -- is the former upper bound + 1.
-                    next_sibling_decimal := coalesce(prev_sibling_decimal, 0) + 2;
+                    next_sibling_value := coalesce(prev_sibling_value, 0) + 2;
                 END IF;
             END IF;
-            
+
             -- Preserve the current path when it is still relevant,
             -- even though it might not be at the middle between prev and next.
             IF TG_OP = 'UPDATE'
                 AND {compare_columns(f'NEW.{parent}', f'OLD.{parent}')}
                 AND OLD.{path}[array_length(OLD.{path}, 1)]
-                    BETWEEN prev_sibling_decimal AND next_sibling_decimal
+                    BETWEEN prev_sibling_value AND next_sibling_value
             THEN
                 RETURN NEW;
             END IF;
-            
+
             {get_new_parent_path}
             IF TG_OP = 'UPDATE' THEN
                 IF new_parent_path[:array_length(OLD.{path}, 1)] = OLD.{path} THEN
                     RAISE 'Cannot set itself or a descendant as parent.';
                 END IF;
             END IF;
-            
-            new_sibling_decimal := (
-                prev_sibling_decimal + next_sibling_decimal
+
+            new_sibling_value := (
+                prev_sibling_value + next_sibling_value
             ) / 2;
-            -- When the midpoint rounded to the stored precision can no longer
-            -- fit between the two neighbours, the gap is exhausted: renumber
-            -- this parent's children to consecutive integers so siblings are
-            -- spaced out again, and give the new node its own slot.
-            IF round(new_sibling_decimal, 10) <= prev_sibling_decimal
-                OR round(new_sibling_decimal, 10) >= next_sibling_decimal THEN
-                {get_new_sibling_rank}
+            -- When the midpoint can no longer fall strictly between the two
+            -- neighbours, float8 has run out of bisection headroom and the gap
+            -- is exhausted: renumber this parent's children to consecutive
+            -- integers so siblings are spaced out again, and give the new node
+            -- its own slot.
+            IF new_sibling_value <= prev_sibling_value
+                OR new_sibling_value >= next_sibling_value THEN
                 {renumber_siblings}
-                new_sibling_decimal := new_sibling_rank;
+                new_sibling_value := new_sibling_rank;
             END IF;
 
-            NEW.{path} = new_parent_path || new_sibling_decimal;
+            NEW.{path} = new_parent_path || new_sibling_value;
 
             IF TG_OP = 'UPDATE' THEN
                 {update_descendants}
@@ -299,7 +282,7 @@ CREATE_TRIGGER_QUERIES = (
     """
     CREATE OR REPLACE FUNCTION {rebuild_function}() RETURNS void AS $$
     BEGIN
-        UPDATE {table} SET {path} = '{{NULL}}'::decimal[] FROM (
+        UPDATE {table} SET {path} = '{{NULL}}'::double precision[] FROM (
             SELECT * FROM {table}
             WHERE {parent} IS NULL
             LIMIT 1

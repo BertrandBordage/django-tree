@@ -2,7 +2,6 @@
 
 from __future__ import unicode_literals
 
-import decimal
 import uuid
 
 from django.apps import apps
@@ -49,7 +48,7 @@ from .models import (
 
 
 def path(*path_components):
-    return [decimal.Decimal(f'{value:.10f}') for value in path_components]
+    return [float(value) for value in path_components]
 
 
 class CommonTest(TransactionTestCase):
@@ -2350,9 +2349,9 @@ class Issue17Test(CommonTest):
     # https://github.com/BertrandBordage/django-tree/issues/17
     #
     # Inserting a node normally uses the midpoint between the previous and the
-    # next sibling decimals. When many nodes are inserted into the same gap, the
-    # fixed-precision decimals would eventually get crammed together until the
-    # computed midpoint rounds to a decimal that already exists, raising an
+    # next sibling values. When many nodes are inserted into the same gap, the
+    # float8 path values would eventually get crammed together until the
+    # computed midpoint rounds to a value that already exists, raising an
     # IntegrityError on the unique constraint of the path column (the error
     # reported in #17 was `Key (path)=({277.9999999987}) already exists`).
     #
@@ -2365,9 +2364,8 @@ class Issue17Test(CommonTest):
         self.create_place('a', root)
         self.create_place('b', root)
         # Each new name sorts after the previous one but still before 'b', so
-        # the trigger keeps halving the gap toward 'b''s decimal. With the
-        # fixed-precision (10 decimal places) paths the gap is exhausted in
-        # well under 70 insertions.
+        # the trigger keeps halving the gap toward 'b''s value. With float8
+        # paths the gap is exhausted in well under 70 insertions.
         n = 69
         for i in range(1, n + 1):
             self.create_place('a%04d' % i, root)
@@ -2557,7 +2555,7 @@ class NonIntegerPrimaryKeyTest(TransactionTestCase):
         UUIDPlace.objects.create(name='Same', parent=root)
         UUIDPlace.objects.create(name='Same', parent=root)
         # The two same-named siblings get distinct paths and stay direct
-        # children of root. Their exact decimals on insert depend on the random
+        # children of root. Their exact values on insert depend on the random
         # UUID tie-break, so only the distinctness/depth is asserted here.
         children_paths = [
             tuple(p.path.value) for p in UUIDPlace.objects.exclude(pk=root.pk)
@@ -2594,7 +2592,7 @@ class OnDeleteBehaviourTest(TransactionTestCase):
         child.refresh_from_db()
         self.assertIsNone(child.parent_id)
         # The `SET_NULL` update fires the path trigger, so the now-orphan child
-        # is re-pathed as a root immediately (its exact decimal depends on the
+        # is re-pathed as a root immediately (its exact value depends on the
         # sibling ordering at delete time, hence only the depth is asserted).
         self.assertEqual(len(child.path.value), 1)
         SetNullPlace.rebuild_paths()

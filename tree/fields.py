@@ -4,8 +4,7 @@ import json
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
-from django.db.models import DecimalField, F, Index
-from django.db.models.expressions import RawSQL
+from django.db.models import F, FloatField, Index
 
 try:
     from django.utils.translation import ugettext_lazy as _
@@ -26,32 +25,22 @@ class PathField(ArrayField):
     description = _('Tree path')
 
     @classmethod
-    def get_indexes(
-        cls,
-        table_name: str,
-        path_field_name: str,
-        max_indexed_level: int = 5,
-    ):
+    def get_indexes(cls, table_name: str, path_field_name: str):
+        # Ancestor/descendant lookups are whole-path range comparisons, served by
+        # the btree index backing the path itself (the `UNIQUE` constraint added by
+        # `CreateTreeTrigger`). The `child_of`/`sibling_of` lookups add a depth
+        # equality (`array_length(path, 1) = N`) on top of a path range; a
+        # composite `(level, path)` index makes that depth + range seekable, so
+        # those lookups become index scans over just the matching rows instead of
+        # scanning the whole subtree and filtering by depth. Keeping `level` as the
+        # leading column means level-only filters (e.g. roots, `__level=1`) still
+        # use this same index.
         return [
             Index(
-                # TODO: Simplify using `trim_array`
-                #       once support for PostgreSQL < 14 is dropped.
-                RawSQL(
-                    f'{path_field_name}[:array_length({path_field_name}, 1) - 1]', ()
-                ),
-                name=f'{table_name}_{path_field_name}_parent_index',
-            ),
-            Index(
                 F(f'{path_field_name}__level'),
+                F(path_field_name),
                 name=f'{table_name}_{path_field_name}_level_index',
             ),
-            *[
-                Index(
-                    F(f'{path_field_name}__0_{level}'),
-                    name=f'{table_name}_{path_field_name}_slice_{level}_index',
-                )
-                for level in range(1, max_indexed_level + 1)
-            ],
         ]
 
     def __init__(self, *args, parent_field_name: str = 'parent', **kwargs):
@@ -59,7 +48,11 @@ class PathField(ArrayField):
             if kwarg in kwargs:
                 raise ImproperlyConfigured('Cannot set `PathField.%s`.' % kwarg)
 
-        kwargs['base_field'] = DecimalField(max_digits=20, decimal_places=10)
+        # `double precision` (float8) keeps each path element to a fixed 8 bytes
+        # with hardware-speed comparisons, unlike the variable-length `numeric`.
+        # Paths only ever hold dyadic fractions (repeated `(prev + next) / 2`),
+        # which float8 stores exactly, with ~52 bits of bisection headroom.
+        kwargs['base_field'] = FloatField()
         kwargs['default'] = lambda: Path(self, None)
         kwargs.setdefault('editable', False)
         kwargs['null'] = True
