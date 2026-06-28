@@ -1,6 +1,5 @@
 from django.db import models, migrations
 from django.db.models import CASCADE, Index, F
-from django.db.models.expressions import RawSQL
 
 from tree.fields import PathField
 from tree.models import TreeModelMixin
@@ -35,14 +34,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['path', 'name'],
                 'indexes': [
-                    Index(
-                        RawSQL('path[:array_length(path, 1) - 1]', ()),
-                        name='place_path_parent_index',
-                    ),
                     Index(F('path__level'), name='place_path_level_index'),
-                    Index(F('path__0_1'), name='place_path_slice_1_index'),
-                    Index(F('path__0_2'), name='place_path_slice_2_index'),
-                    Index(F('path__0_3'), name='place_path_slice_3_index'),
                 ],
             },
             bases=(TreeModelMixin, models.Model),
@@ -72,14 +64,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['path'],
                 'indexes': [
-                    Index(
-                        RawSQL('path[:array_length(path, 1) - 1]', ()),
-                        name='person_path_parent_index',
-                    ),
                     Index(F('path__len'), name='person_path_length_index'),
-                    Index(F('path__0_1'), name='person_path_slice_1_index'),
-                    Index(F('path__0_2'), name='person_path_slice_2_index'),
-                    Index(F('path__0_3'), name='person_path_slice_3_index'),
                 ],
             },
             bases=(TreeModelMixin, models.Model),

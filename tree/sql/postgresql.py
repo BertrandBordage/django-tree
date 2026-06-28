@@ -147,7 +147,8 @@ def get_update_paths_function_creation(
         UPDATE {table}
         SET {path} = $1.{path}
             || {path}[array_length($2.{path}, 1) + 1:]
-        WHERE {path}[:array_length($2.{path}, 1)] = $2.{path} AND {pk} != $2.{pk}
+        WHERE {path} > $2.{path}
+            AND {path} < $2.{path} || ARRAY['Infinity']::double precision[]
     """,
         using=['NEW', 'OLD'],
     )

@@ -5,7 +5,6 @@ from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import F, FloatField, Index
-from django.db.models.expressions import RawSQL
 
 try:
     from django.utils.translation import ugettext_lazy as _
@@ -26,32 +25,16 @@ class PathField(ArrayField):
     description = _('Tree path')
 
     @classmethod
-    def get_indexes(
-        cls,
-        table_name: str,
-        path_field_name: str,
-        max_indexed_level: int = 3,
-    ):
+    def get_indexes(cls, table_name: str, path_field_name: str):
+        # Ancestor/descendant/child/sibling lookups are range comparisons on the
+        # whole path, served by the btree index backing the path itself (the
+        # `UNIQUE` constraint added by `CreateTreeTrigger`). The only extra index
+        # worth keeping is on the depth, for level-based filtering (e.g. roots).
         return [
-            Index(
-                # TODO: Simplify using `trim_array`
-                #       once support for PostgreSQL < 14 is dropped.
-                RawSQL(
-                    f'{path_field_name}[:array_length({path_field_name}, 1) - 1]', ()
-                ),
-                name=f'{table_name}_{path_field_name}_parent_index',
-            ),
             Index(
                 F(f'{path_field_name}__level'),
                 name=f'{table_name}_{path_field_name}_level_index',
             ),
-            *[
-                Index(
-                    F(f'{path_field_name}__0_{level}'),
-                    name=f'{table_name}_{path_field_name}_slice_{level}_index',
-                )
-                for level in range(1, max_indexed_level + 1)
-            ],
         ]
 
     def __init__(self, *args, parent_field_name: str = 'parent', **kwargs):

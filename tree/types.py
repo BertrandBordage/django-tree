@@ -97,11 +97,11 @@ class Path:
     def get_descendants(self, include_self=False):
         if not self.value:
             return self.qs.none()
-        # Using the lookup `descendant_of` here is slower,
-        # so we explicitly specify the path slicing comparison.
+        # `descendant_of` is a range comparison on the whole path, so it uses the
+        # btree index backing the path instead of a dedicated slice index.
         qs = self.qs.filter(
             **{
-                f'{self.attname}__0_{len(self.value)}': self.value,
+                f'{self.attname}__descendant_of': self.value,
             }
         )
         if include_self:
