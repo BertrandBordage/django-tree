@@ -5,15 +5,23 @@ from django.utils.functional import cached_property
 
 class Path:
     def __init__(self, field, value):
+        # Kept minimal: `from_db_value` builds a `Path` for every fetched row, so
+        # anything derivable from the field (`attname`, `field_bound`, `qs`) is
+        # computed lazily below instead of on this per-row hot path.
         self.field = field
-        self.attname = getattr(self.field, 'attname', None)
-        self.field_bound = self.attname is not None
         self.value = value
 
     @cached_property
+    def attname(self):
+        return getattr(self.field, 'attname', None)
+
+    @cached_property
+    def field_bound(self):
+        return self.attname is not None
+
+    @cached_property
     def qs(self):
-        # Built lazily: `from_db_value` wraps every fetched row in a `Path`, so
-        # eagerly cloning a queryset here would cost one clone per loaded row,
+        # Cloning a queryset here would otherwise cost one clone per loaded row,
         # even when the path is only read (never used to navigate the tree).
         if self.field_bound:
             return self.field.model._default_manager.all()

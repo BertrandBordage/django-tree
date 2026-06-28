@@ -20,8 +20,9 @@
   by `RebuildPaths('YourModel', 'path')`, and update `Meta.indexes` to the new
   `PathField.get_indexes()` output.
 - Speeds up reads:
-  - The queryset `Path.qs` is now built lazily, so loading rows no longer clones
-    a throwaway queryset for every fetched `Path`.
+  - `Path.__init__` only stores the two essential attributes; `attname`,
+    `field_bound` and `qs` are now derived lazily, so loading rows no longer does
+    redundant per-row work (e.g. cloning a throwaway queryset for every `Path`).
   - `Path.get_descendants()` excludes the node itself with a single strict range
     comparison (new `strict_descendant_of` lookup) instead of an extra
     `array_length(...)` predicate.
