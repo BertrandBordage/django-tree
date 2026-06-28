@@ -280,11 +280,10 @@ class Benchmark:
 
     def force_update_db_stats_and_indexes(self, model: Type[Model]):
         with connections[self.current_db_alias].cursor() as cursor:
-            # This makes sure the table statistics are
-            # up to date and the disk usage is optimised.
+            # This makes sure the table statistics and disk usage are optimised.
+            # VACUUM FULL rewrites the table into a fresh file and rebuilds every
+            # index as part of that rewrite, so a separate REINDEX is redundant.
             cursor.execute('VACUUM FULL ANALYZE "%s";' % model._meta.db_table)
-            # This makes sure the indexes are up to date.
-            cursor.execute('REINDEX TABLE "%s";' % model._meta.db_table)
 
     def run(self):
         self.create_databases()
