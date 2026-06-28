@@ -3,6 +3,8 @@
 from __future__ import unicode_literals
 
 import decimal
+import uuid
+from unittest import expectedFailure
 
 from django.apps import apps
 from django.core.exceptions import ValidationError
@@ -2449,8 +2451,6 @@ class NonIntegerPrimaryKeyTest(TransactionTestCase):
     maxDiff = None
 
     def test_tree_on_uuid_pk(self):
-        import uuid
-
         root = UUIDPlace.objects.create(name='Root')
         self.assertIsInstance(root.pk, uuid.UUID)
         UUIDPlace.objects.create(name='Aaa', parent=root)
@@ -2483,12 +2483,18 @@ class OnDeleteBehaviourTest(TransactionTestCase):
     def test_set_null_keeps_children(self):
         root = SetNullPlace.objects.create(name='Root')
         child = SetNullPlace.objects.create(name='Child', parent=root)
+        self.assertEqual(child.path.value, path(0, 0))
         # Delete only the parent row (not the whole subtree): the FK is
         # `SET_NULL`, so the child survives with a null parent.
         SetNullPlace.objects.filter(pk=root.pk).delete()
         child.refresh_from_db()
         self.assertIsNone(child.parent_id)
-        self.assertTrue(SetNullPlace.objects.filter(pk=child.pk).exists())
+        # The FK-only change does not fire the path trigger, so the now-orphan
+        # child keeps its stale nested path until the tree is rebuilt.
+        self.assertEqual(child.path.value, path(0, 0))
+        SetNullPlace.rebuild_paths()
+        child.refresh_from_db()
+        self.assertEqual(child.path.value, path(0))
 
     def test_protect_blocks_parent_deletion(self):
         root = ProtectPlace.objects.create(name='Root')
