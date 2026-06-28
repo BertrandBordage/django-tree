@@ -155,6 +155,47 @@ def get_update_paths_function_creation(
         using=['NEW', 'OLD'],
     )
 
+    # Rank of the new node amongst its siblings (number of siblings sorting
+    # before it), used as its slot when the siblings are renumbered.
+    get_new_sibling_rank = execute_format(
+        f"""
+        SELECT count(*)
+        FROM {table}
+        WHERE
+            {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}
+            AND {compare_columns(parent, f'$1.{parent}')}
+            AND {pk} != $1.{pk}
+    """,
+        using=['NEW'],
+        into=['new_sibling_rank'],
+    )
+
+    # Renumber every child of the new node's parent to a consecutive integer
+    # decimal (skipping the slot the new node will take), cascading the change
+    # to each sibling's whole subtree. This spaces crammed siblings back out
+    # when a gap has been exhausted.
+    renumber_siblings = execute_format(
+        f"""
+        WITH sibling_renumber AS (
+            SELECT
+                {path} AS old_path,
+                (row_number() OVER (ORDER BY {sql_order_by}) - 1)
+                    + CASE WHEN {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}
+                        THEN 0 ELSE 1 END AS new_decimal
+            FROM {table}
+            WHERE {compare_columns(parent, f'$1.{parent}')}
+                AND {pk} != $1.{pk}
+                AND array_length({path}, 1) = coalesce(array_length($2, 1), 0) + 1
+        )
+        UPDATE {table} AS t
+        SET {path} = $2 || sr.new_decimal::decimal
+            || t.{path}[coalesce(array_length($2, 1), 0) + 2:]
+        FROM sibling_renumber AS sr
+        WHERE t.{path}[:coalesce(array_length($2, 1), 0) + 1] = sr.old_path
+    """,
+        using=['NEW', 'new_parent_path'],
+    )
+
     row_unchanged = join_and(
         [
             compare_columns(f'OLD.{where_column}', f'NEW.{where_column}')
@@ -167,6 +208,8 @@ def get_update_paths_function_creation(
         DECLARE
             prev_sibling_decimal decimal := NULL;
             next_sibling_decimal decimal := NULL;
+            new_sibling_decimal decimal := NULL;
+            new_sibling_rank integer := NULL;
             new_parent_path decimal[];
         BEGIN
             IF TG_OP = 'UPDATE' THEN
@@ -218,9 +261,21 @@ def get_update_paths_function_creation(
                 END IF;
             END IF;
             
-            NEW.{path} = new_parent_path || (
+            new_sibling_decimal := (
                 prev_sibling_decimal + next_sibling_decimal
             ) / 2;
+            -- When the midpoint rounded to the stored precision can no longer
+            -- fit between the two neighbours, the gap is exhausted: renumber
+            -- this parent's children to consecutive integers so siblings are
+            -- spaced out again, and give the new node its own slot.
+            IF round(new_sibling_decimal, 10) <= prev_sibling_decimal
+                OR round(new_sibling_decimal, 10) >= next_sibling_decimal THEN
+                {get_new_sibling_rank}
+                {renumber_siblings}
+                new_sibling_decimal := new_sibling_rank;
+            END IF;
+
+            NEW.{path} = new_parent_path || new_sibling_decimal;
 
             IF TG_OP = 'UPDATE' THEN
                 {update_descendants}

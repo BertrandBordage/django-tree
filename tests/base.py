@@ -4,7 +4,6 @@ from __future__ import unicode_literals
 
 import decimal
 import uuid
-from unittest import expectedFailure
 
 from django.apps import apps
 from django.core.exceptions import ValidationError
@@ -2350,16 +2349,16 @@ class QuerySetTest(CommonTest):
 class Issue17Test(CommonTest):
     # https://github.com/BertrandBordage/django-tree/issues/17
     #
-    # Inserting a node always uses the midpoint between the previous and the
-    # next sibling decimals. When many nodes are inserted into the same gap,
-    # the fixed-precision decimals get crammed together until the computed
-    # midpoint rounds to a decimal that already exists, raising an IntegrityError on
-    # the unique constraint of the path column (the error reported in #17 was
-    # `Key (path)=({277.9999999987}) already exists`).
+    # Inserting a node normally uses the midpoint between the previous and the
+    # next sibling decimals. When many nodes are inserted into the same gap, the
+    # fixed-precision decimals would eventually get crammed together until the
+    # computed midpoint rounds to a decimal that already exists, raising an
+    # IntegrityError on the unique constraint of the path column (the error
+    # reported in #17 was `Key (path)=({277.9999999987}) already exists`).
     #
-    # TODO: Remove the `expectedFailure` decorator once the trigger spaces out
-    #       crammed siblings instead of always inserting at the midpoint.
-    @expectedFailure
+    # The trigger now detects an exhausted gap and renumbers the siblings to
+    # consecutive integers, spacing them back out, so the insertions keep
+    # distinct paths however many land in the same gap.
     def test_inserting_many_nodes_in_the_same_gap(self):
         root = self.create_place('root')
         # Two siblings delimiting the gap we will keep inserting into.
