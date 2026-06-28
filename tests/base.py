@@ -2377,6 +2377,64 @@ class Issue17Test(CommonTest):
         self.assertEqual(len(paths), n + 3)
         self.assertEqual(len(set(paths)), len(paths))
 
+    def test_renumbering_a_crammed_gap_updates_descendants(self):
+        # Same crammed-gap scenario, but the bounding siblings carry their own
+        # subtrees. Exhausting the gap forces the trigger to renumber root's
+        # children; every descendant's path must be rewritten so it stays under
+        # its ancestor (otherwise the renumbered sibling and its subtree split
+        # apart).
+        root = self.create_place('root')
+        # 'a' is the lower bound and has a two-level subtree.
+        a = self.create_place('a', root)
+        a1 = self.create_place('a1', a)
+        self.create_place('a1a', a1)
+        # 'z' is the upper bound and has one child.
+        z = self.create_place('z', root)
+        self.create_place('z1', z)
+        # Cram many nodes into the (a, z) gap, each sorting just before 'z', so
+        # the gap is halved until it is exhausted and the trigger renumbers.
+        n = 60
+        for i in range(1, n + 1):
+            self.create_place('b%04d' % i, root)
+
+        places = list(Place.objects.all())
+        by_pk = {p.pk: p for p in places}
+
+        # Every path is distinct.
+        paths = [tuple(p.path.value) for p in places]
+        self.assertEqual(len(set(paths)), len(paths))
+
+        # Every node sits directly under its FK parent in the path space: its
+        # path is the parent's path plus exactly one extra component. A
+        # descendant left behind by the renumbering would fail this.
+        for p in places:
+            if p.parent_id is None:
+                self.assertEqual(len(p.path.value), 1)
+            else:
+                parent_path = by_pk[p.parent_id].path.value
+                self.assertEqual(p.path.value[: len(parent_path)], parent_path)
+                self.assertEqual(len(p.path.value), len(parent_path) + 1)
+
+        # The bounding subtrees survived the renumbering intact and ordered.
+        a = Place.objects.get(name='a')
+        self.assertEqual(
+            [p.name for p in a.get_descendants(include_self=True).order_by('path')],
+            ['a', 'a1', 'a1a'],
+        )
+        z = Place.objects.get(name='z')
+        self.assertEqual(
+            [p.name for p in z.get_descendants(include_self=True).order_by('path')],
+            ['z', 'z1'],
+        )
+
+        # Root's children stay in ascending name order after the renumbers.
+        child_names = list(
+            root.get_children().order_by('path').values_list('name', flat=True)
+        )
+        self.assertEqual(child_names, sorted(child_names))
+        self.assertEqual(child_names[0], 'a')
+        self.assertEqual(child_names[-1], 'z')
+
 
 class DescendingOrderByTest(TransactionTestCase):
     """`PathField(order_by=['-name'])` — descending sibling ordering."""
