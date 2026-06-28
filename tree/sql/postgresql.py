@@ -112,29 +112,36 @@ def get_update_paths_function_creation(
         into=['new_parent_path'],
     )
 
-    # The previous and next sibling values are the last path elements of the
-    # two siblings immediately surrounding the new position. A path's last element
-    # is strictly monotonic with `order_by` among siblings (the same invariant the
-    # read side relies on, e.g. `get_prev_sibling` ordering by `path`), so the
-    # previous sibling's value is simply the greatest value among siblings
-    # ordered before us, and the next sibling's the smallest among those ordered
-    # after. Both therefore come from a single scan of the sibling set using
-    # `max(...) FILTER` / `min(...) FILTER`, instead of two separate
-    # `ORDER BY ... LIMIT 1` queries.
+    # A single scan over the sibling set yields everything the trigger needs to
+    # place the new node. A path's last element is strictly monotonic with
+    # `order_by` among siblings (the same invariant the read side relies on,
+    # e.g. `get_prev_sibling` ordering by `path`), so:
+    #   - the previous sibling's value is the greatest value among siblings
+    #     ordered before us (`max(...) FILTER`), and the next sibling's the
+    #     smallest among those ordered after (`min(...) FILTER`), replacing two
+    #     `ORDER BY ... LIMIT 1` queries;
+    #   - the new node's rank (how many siblings sort before it) is just
+    #     `count(*) FILTER` over the same predicate, and becomes its slot if the
+    #     gap turns out to be exhausted and the siblings have to be renumbered.
+    prev_sibling_where = get_prev_sibling_where_clause(
+        where_columns, '$1', descending_flags
+    )
+    next_sibling_where = get_next_sibling_where_clause(
+        where_columns, '$1', descending_flags
+    )
     get_sibling_values = execute_format(
         f"""
         SELECT
-            max({path}[array_length({path}, 1)])
-                FILTER (WHERE {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}),
-            min({path}[array_length({path}, 1)])
-                FILTER (WHERE {get_next_sibling_where_clause(where_columns, '$1', descending_flags)})
+            max({path}[array_length({path}, 1)]) FILTER (WHERE {prev_sibling_where}),
+            min({path}[array_length({path}, 1)]) FILTER (WHERE {next_sibling_where}),
+            count(*) FILTER (WHERE {prev_sibling_where})
         FROM {table}
         WHERE
             {compare_columns(parent, f'$1.{parent}')}
             AND {pk} != $1.{pk}
     """,
         using=['NEW'],
-        into=['prev_sibling_value', 'next_sibling_value'],
+        into=['prev_sibling_value', 'next_sibling_value', 'new_sibling_rank'],
     )
 
     update_descendants = execute_format(
@@ -145,21 +152,6 @@ def get_update_paths_function_creation(
         WHERE {path}[:array_length($2.{path}, 1)] = $2.{path} AND {pk} != $2.{pk}
     """,
         using=['NEW', 'OLD'],
-    )
-
-    # Rank of the new node amongst its siblings (number of siblings sorting
-    # before it), used as its slot when the siblings are renumbered.
-    get_new_sibling_rank = execute_format(
-        f"""
-        SELECT count(*)
-        FROM {table}
-        WHERE
-            {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}
-            AND {compare_columns(parent, f'$1.{parent}')}
-            AND {pk} != $1.{pk}
-    """,
-        using=['NEW'],
-        into=['new_sibling_rank'],
     )
 
     # Renumber every child of the new node's parent to a consecutive integer
@@ -262,7 +254,6 @@ def get_update_paths_function_creation(
             -- its own slot.
             IF new_sibling_value <= prev_sibling_value
                 OR new_sibling_value >= next_sibling_value THEN
-                {get_new_sibling_rank}
                 {renumber_siblings}
                 new_sibling_value := new_sibling_rank;
             END IF;
