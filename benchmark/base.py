@@ -255,7 +255,13 @@ class Benchmark:
         return model._default_manager.get(pk=obj.pk) if fresh else obj
 
     def plot(self, df, database_name, test_name, y_label):
-        means = df.rolling(max(df.index.max() // 20, 1)).mean()
+        # Smooth over a fixed fraction of the recorded data points, sizing the
+        # rolling window by the number of points rather than the object-count
+        # range. This keeps the window below the row count whatever the
+        # --checkpoint-step is (otherwise the rolling mean is entirely NaN and
+        # the plot's y-limits blow up), while staying identical to the previous
+        # df.index.max() // 20 at the default step (781 points -> window 195).
+        means = df.rolling(max(len(df) // 4, 1)).mean()
         ax = means.plot(
             title=test_name,
             alpha=0.8,
