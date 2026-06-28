@@ -58,10 +58,18 @@ class Benchmark:
         run_django_tree_only: bool = False,
         db_optimization_interval: int = 100,
         selected_tests: Optional[List[str]] = None,
+        checkpoint_step: int = 5,
     ):
         self.run_django_tree_only = run_django_tree_only
         self.db_optimization_interval = db_optimization_interval
         self.selected_tests = selected_tests
+        # Minimum number of new objects between two measurement checkpoints. The
+        # whole tree is still built (same final data); this only controls how many
+        # object counts we stop at to run the test suite. The default of 5 matches
+        # the natural granularity (5 rows are created per step), i.e. a checkpoint
+        # at every count as before. A larger value trades data-point density for
+        # speed without changing how any individual measurement is taken.
+        self.checkpoint_step = checkpoint_step
         self.data = []
         self.router = router.routers[0]
 
@@ -300,6 +308,7 @@ class Benchmark:
                 it = self.populate_database(model)
                 progress = tqdm(it, total=self.rows_count)
                 elapsed_time = 0.0
+                last_checkpoint = 0
                 while True:
                     try:
                         start = time() - elapsed_time
@@ -308,6 +317,17 @@ class Benchmark:
                     except StopIteration:
                         break
                     progress.update(count - progress.n)
+                    if count % self.db_optimization_interval == 0:
+                        self.force_update_db_stats_and_indexes(model)
+                    # Only stop to measure at checkpoints; the tree is always built
+                    # in full. The last count is always a checkpoint so every run
+                    # ends on the complete tree.
+                    if (
+                        count - last_checkpoint < self.checkpoint_step
+                        and count != self.rows_count
+                    ):
+                        continue
+                    last_checkpoint = count
                     self.add_data(
                         model,
                         'Create all objects',
@@ -315,8 +335,6 @@ class Benchmark:
                         elapsed_time,
                         y_label=WRITE_LATENCY,
                     )
-                    if count % self.db_optimization_interval == 0:
-                        self.force_update_db_stats_and_indexes(model)
                     self.run_tests(model, count)
                 # We delete the objects to avoid impacting
                 # the following tests and to clear some disk space.
