@@ -30,6 +30,11 @@
     instead of chaining several queryset clones.
   - `TreeQuerySetMixin.get_descendants()` runs as one correlated `EXISTS` query
     instead of an extra query plus one OR'd range clause per matching row.
+- Speeds up writes:
+  - The path-maintenance trigger finds both surrounding siblings in a single
+    `max(...) FILTER`/`min(...) FILTER` scan instead of two `ORDER BY ... LIMIT 1`
+    queries, roughly halving creation time (e.g. creating a leaf is ~3× faster on
+    the benchmark tree) and speeding up same-position moves.
 
 # 0.6.2 (2025-09-29)
 

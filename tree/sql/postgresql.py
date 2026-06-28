@@ -46,7 +46,6 @@ def get_update_paths_function_creation(
     # TODO: Handle related lookups in `order_by`.
     where_columns = []
     sql_order_by = []
-    sql_reversed_order_by = []
     for field_name in order_by:
         descending = field_name[0] == '-'
         if descending:
@@ -55,19 +54,16 @@ def get_update_paths_function_creation(
         quoted_field_name = quote_ident(field.attname)
         where_columns.append(quoted_field_name)
         sql_order_by.append(f'{quoted_field_name} {"DESC" if descending else "ASC"}')
-        sql_reversed_order_by.append(
-            f'{quoted_field_name} {"ASC" if descending else "DESC"}'
-        )
 
     table = meta.db_table
     pk = quote_ident(meta.pk.attname)
     parent = quote_ident(parent_field.attname)
     path = quote_ident(path_field.attname)
+    # Only the rebuild's recursive CTE still needs an explicit ORDER BY (over the
+    # `t2`-aliased table); the sibling lookups now order implicitly via min/max.
     sql_t2_order_by = ', '.join(
         [f't2.{ordered_column}' for ordered_column in sql_order_by]
     )
-    sql_order_by = ', '.join(sql_order_by)
-    sql_reversed_order_by = ', '.join(sql_reversed_order_by)
 
     rebuild = execute_format(
         f"""
@@ -112,34 +108,29 @@ def get_update_paths_function_creation(
         into=['new_parent_path'],
     )
 
-    get_prev_sibling_decimal = execute_format(
+    # The previous and next sibling decimals are the last path elements of the
+    # two siblings immediately surrounding the new position. A path's last element
+    # is strictly monotonic with `order_by` among siblings (the same invariant the
+    # read side relies on, e.g. `get_prev_sibling` ordering by `path`), so the
+    # previous sibling's decimal is simply the greatest decimal among siblings
+    # ordered before us, and the next sibling's the smallest among those ordered
+    # after. Both therefore come from a single scan of the sibling set using
+    # `max(...) FILTER` / `min(...) FILTER`, instead of two separate
+    # `ORDER BY ... LIMIT 1` queries.
+    get_sibling_decimals = execute_format(
         f"""
-        SELECT {path}[array_length({path}, 1)]
+        SELECT
+            max({path}[array_length({path}, 1)])
+                FILTER (WHERE {get_prev_sibling_where_clause(where_columns, '$1')}),
+            min({path}[array_length({path}, 1)])
+                FILTER (WHERE {get_next_sibling_where_clause(where_columns, '$1')})
         FROM {table}
         WHERE
-            {get_prev_sibling_where_clause(where_columns, '$1')}
-            AND {compare_columns(parent, f'$1.{parent}')}
+            {compare_columns(parent, f'$1.{parent}')}
             AND {pk} != $1.{pk}
-        ORDER BY {sql_reversed_order_by}
-        LIMIT 1
     """,
         using=['NEW'],
-        into=['prev_sibling_decimal'],
-    )
-
-    get_next_sibling_decimal = execute_format(
-        f"""
-        SELECT {path}[array_length({path}, 1)]
-        FROM {table}
-        WHERE
-            {get_next_sibling_where_clause(where_columns, '$1')}
-            AND {compare_columns(parent, f'$1.{parent}')}
-            AND {pk} != $1.{pk}
-        ORDER BY {sql_order_by}
-        LIMIT 1
-    """,
-        using=['NEW'],
-        into=['next_sibling_decimal'],
+        into=['prev_sibling_decimal', 'next_sibling_decimal'],
     )
 
     update_descendants = execute_format(
@@ -178,8 +169,7 @@ def get_update_paths_function_creation(
                 END IF;
             END IF;
 
-            {get_prev_sibling_decimal}
-            {get_next_sibling_decimal}
+            {get_sibling_decimals}
 
             IF prev_sibling_decimal IS NULL AND next_sibling_decimal IS NULL THEN
                 prev_sibling_decimal := 0;
