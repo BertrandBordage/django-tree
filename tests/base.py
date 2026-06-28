@@ -2,34 +2,49 @@
 
 from __future__ import unicode_literals
 
-from unittest import expectedFailure
+import uuid
 
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction, connection
-from django.db.utils import ProgrammingError
+from django.db.migrations.state import ProjectState
+from django.db.models import ProtectedError
+from django.db.utils import IntegrityError, ProgrammingError
 from django.test import TransactionTestCase
 
-from .models import Place, Person
+from tree.operations import CreateTreeTrigger
+
+from .models import (
+    Place,
+    Person,
+    DescendingPlace,
+    MultiPathPlace,
+    UUIDPlace,
+    SetNullPlace,
+    ProtectPlace,
+    WeirdTableNamePlace,
+)
 
 
-# TODO: Test same order_by values.
-# TODO: Test order_by with descending orders.
-# TODO: Test what happens when we move a node after itself
-#       while staying in the same siblinghood
-#       (it should not create a hole at the former position).
-# TODO: Test ORM update/delete.
-# TODO: Test raw SQL insertion/update/delete.
-# TODO: Test if rebuild works with NULL path values.
-# TODO: Test using Path objects as sql parameters.
-# TODO: Test multiple path fields on the same model.
-# TODO: Test `disable_trigger`, `enable_trigger`, & `disabled_trigger`.
+# The following behaviours are now covered:
+#   - same `order_by` values .............. MultipleOrderByFieldsTest
+#   - descending `order_by` ............... DescendingOrderByTest
+#   - moving a node after itself .......... PathTest.test_resave_node_in_place_*
+#   - ORM update/delete ................... PathTest.test_orm_*
+#   - raw SQL insert/update/delete ........ PathTest.test_raw_sql_*
+#   - rebuild with NULL paths ............. PathTest.test_rebuild_with_*null_paths
+#   - Path objects as SQL parameters ...... PathTest.test_path_as_sql_parameter
+#   - multiple path fields ................ MultiplePathFieldsTest
+#   - disable/enable/disabled trigger ..... PathTest.test_disable*_trigger*
+#   - breaking a transaction .............. PathTest.test_transaction_rollback_*
+#   - non-integer primary keys ............ NonIntegerPrimaryKeyTest
+#   - `on_delete` other than CASCADE ...... OnDeleteBehaviourTest
+#   - unusual table names ................. UnusualTableNameTest
+#
 # TODO: Test if `disabled_trigger` does not affect
 #       a concurrent node creation/update.
-# TODO: Test if breaking a transaction reverts the changes done by the trigger
-#       when updating nodes during that transaction.
-# TODO: Test non-integer primary keys.
-# TODO: Test other `on_delete` behaviour than `CASCADE`.
-# TODO: Test unusual table names.
+#       (Needs multiple connections/threads and is timing-sensitive; not
+#       implemented yet.)
 
 
 def path(*path_components):
@@ -558,18 +573,735 @@ class PathTest(CommonTest):
             ]
         )
 
-    # TODO: Add move_branch_to_prev_root.
-    # TODO: Add move_branch_to_next_root.
-    # TODO: Add move_branch_to_prev_branch.
-    # TODO: Add move_branch_to_next_branch.
-    # TODO: Add move_branch_to_prev_leaf.
-    # TODO: Add move_branch_to_next_leaf.
-    # TODO: Add move_leaf_to_prev_root.
-    # TODO: Add move_leaf_to_next_root.
-    # TODO: Add move_leaf_to_prev_branch.
-    # TODO: Add move_leaf_to_next_branch.
-    # TODO: Add move_leaf_to_prev_leaf.
-    # TODO: Add move_leaf_to_next_leaf.
+    def test_move_branch_to_prev_root(self):
+        self.create_all_test_places()
+
+        # Poitou-Charentes is a branch (it carries the Vienne > Poitiers
+        # subtree). Renaming it to sort before every root and detaching it
+        # turns it into the new first root, dragging its subtree along.
+        branch = Place.objects.get(name='Poitou-Charentes')
+        branch.name = 'Aquitaine'
+        branch.parent = None
+        with self.assertNumQueries(1):
+            branch.clean()
+            branch.save()
+        self.assertPlaces(
+            [
+                (path(-1), 'Aquitaine'),
+                (path(-1, 0), 'Vienne'),
+                (path(-1, 0, 0), 'Poitiers'),
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'Aquitaine'),
+                (path(0, 0), 'Vienne'),
+                (path(0, 0, 0), 'Poitiers'),
+                (path(1), 'France'),
+                (path(1, 0), 'Normandie'),
+                (path(1, 0, 0), 'Eure'),
+                (path(1, 0, 1), 'Manche'),
+                (path(1, 0, 2), 'Seine-Maritime'),
+                (path(2), 'Österreich'),
+            ]
+        )
+
+    def test_move_branch_to_next_root(self):
+        self.create_all_test_places()
+
+        branch = Place.objects.get(name='Poitou-Charentes')
+        branch.name = 'Zélande'
+        branch.parent = None
+        with self.assertNumQueries(1):
+            branch.clean()
+            branch.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(1), 'Österreich'),
+                (path(2), 'Zélande'),
+                (path(2, 0), 'Vienne'),
+                (path(2, 0, 0), 'Poitiers'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Eure'),
+                (path(0, 0, 1), 'Manche'),
+                (path(0, 0, 2), 'Seine-Maritime'),
+                (path(1), 'Österreich'),
+                (path(2), 'Zélande'),
+                (path(2, 0), 'Vienne'),
+                (path(2, 0, 0), 'Poitiers'),
+            ]
+        )
+
+    def test_move_branch_to_prev_branch(self):
+        self.create_all_test_places()
+
+        # Move the Poitou-Charentes branch so it lands right before the
+        # Normandie branch among France's children.
+        branch = Place.objects.get(name='Poitou-Charentes')
+        branch.name = 'Bretagne'
+        branch.parent = Place.objects.get(name='France')
+        with self.assertNumQueries(1):
+            branch.clean()
+            branch.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, -1), 'Bretagne'),
+                (path(0, -1, 0), 'Vienne'),
+                (path(0, -1, 0, 0), 'Poitiers'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Bretagne'),
+                (path(0, 0, 0), 'Vienne'),
+                (path(0, 0, 0, 0), 'Poitiers'),
+                (path(0, 1), 'Normandie'),
+                (path(0, 1, 0), 'Eure'),
+                (path(0, 1, 1), 'Manche'),
+                (path(0, 1, 2), 'Seine-Maritime'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_move_branch_to_next_branch(self):
+        self.create_all_test_places()
+
+        # Move the Normandie branch so it lands right after the
+        # Poitou-Charentes branch among France's children.
+        branch = Place.objects.get(name='Normandie')
+        branch.name = 'Quercy'
+        branch.parent = Place.objects.get(name='France')
+        with self.assertNumQueries(1):
+            branch.clean()
+            branch.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(0, 2), 'Quercy'),
+                (path(0, 2, -1), 'Eure'),
+                (path(0, 2, -0.5), 'Manche'),
+                (path(0, 2, 0), 'Seine-Maritime'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Poitou-Charentes'),
+                (path(0, 0, 0), 'Vienne'),
+                (path(0, 0, 0, 0), 'Poitiers'),
+                (path(0, 1), 'Quercy'),
+                (path(0, 1, 0), 'Eure'),
+                (path(0, 1, 1), 'Manche'),
+                (path(0, 1, 2), 'Seine-Maritime'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_move_branch_to_prev_leaf(self):
+        self.create_all_test_places()
+
+        # Move the Poitou-Charentes branch under Normandie, before the
+        # Eure leaf.
+        branch = Place.objects.get(name='Poitou-Charentes')
+        branch.name = 'Aaa'
+        branch.parent = Place.objects.get(name='Normandie')
+        with self.assertNumQueries(1):
+            branch.clean()
+            branch.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -2), 'Aaa'),
+                (path(0, 0, -2, 0), 'Vienne'),
+                (path(0, 0, -2, 0, 0), 'Poitiers'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Aaa'),
+                (path(0, 0, 0, 0), 'Vienne'),
+                (path(0, 0, 0, 0, 0), 'Poitiers'),
+                (path(0, 0, 1), 'Eure'),
+                (path(0, 0, 2), 'Manche'),
+                (path(0, 0, 3), 'Seine-Maritime'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_move_branch_to_next_leaf(self):
+        self.create_all_test_places()
+
+        # Move the Poitou-Charentes branch under Normandie, after the
+        # Seine-Maritime leaf.
+        branch = Place.objects.get(name='Poitou-Charentes')
+        branch.name = 'Zzz'
+        branch.parent = Place.objects.get(name='Normandie')
+        with self.assertNumQueries(1):
+            branch.clean()
+            branch.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(0, 0, 1), 'Zzz'),
+                (path(0, 0, 1, 0), 'Vienne'),
+                (path(0, 0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Eure'),
+                (path(0, 0, 1), 'Manche'),
+                (path(0, 0, 2), 'Seine-Maritime'),
+                (path(0, 0, 3), 'Zzz'),
+                (path(0, 0, 3, 0), 'Vienne'),
+                (path(0, 0, 3, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_move_leaf_to_prev_root(self):
+        self.create_all_test_places()
+
+        # Seine-Maritime is a leaf. Renaming it to sort first and detaching
+        # it turns it into the new first root.
+        leaf = Place.objects.get(name='Seine-Maritime')
+        leaf.name = 'Aaa'
+        leaf.parent = None
+        with self.assertNumQueries(1):
+            leaf.clean()
+            leaf.save()
+        self.assertPlaces(
+            [
+                (path(-1), 'Aaa'),
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'Aaa'),
+                (path(1), 'France'),
+                (path(1, 0), 'Normandie'),
+                (path(1, 0, 0), 'Eure'),
+                (path(1, 0, 1), 'Manche'),
+                (path(1, 1), 'Poitou-Charentes'),
+                (path(1, 1, 0), 'Vienne'),
+                (path(1, 1, 0, 0), 'Poitiers'),
+                (path(2), 'Österreich'),
+            ]
+        )
+
+    def test_move_leaf_to_next_root(self):
+        self.create_all_test_places()
+
+        leaf = Place.objects.get(name='Seine-Maritime')
+        leaf.name = 'Zzz'
+        leaf.parent = None
+        with self.assertNumQueries(1):
+            leaf.clean()
+            leaf.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+                (path(2), 'Zzz'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Eure'),
+                (path(0, 0, 1), 'Manche'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+                (path(2), 'Zzz'),
+            ]
+        )
+
+    def test_move_leaf_to_prev_branch(self):
+        self.create_all_test_places()
+
+        # Move the Poitiers leaf so it lands before the Normandie branch
+        # among France's children.
+        leaf = Place.objects.get(name='Poitiers')
+        leaf.name = 'Aaa'
+        leaf.parent = Place.objects.get(name='France')
+        with self.assertNumQueries(1):
+            leaf.clean()
+            leaf.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, -1), 'Aaa'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Aaa'),
+                (path(0, 1), 'Normandie'),
+                (path(0, 1, 0), 'Eure'),
+                (path(0, 1, 1), 'Manche'),
+                (path(0, 1, 2), 'Seine-Maritime'),
+                (path(0, 2), 'Poitou-Charentes'),
+                (path(0, 2, 0), 'Vienne'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_move_leaf_to_next_branch(self):
+        self.create_all_test_places()
+
+        # Move the Poitiers leaf so it lands after the Poitou-Charentes
+        # branch among France's children.
+        leaf = Place.objects.get(name='Poitiers')
+        leaf.name = 'Quercy'
+        leaf.parent = Place.objects.get(name='France')
+        with self.assertNumQueries(1):
+            leaf.clean()
+            leaf.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 2), 'Quercy'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Eure'),
+                (path(0, 0, 1), 'Manche'),
+                (path(0, 0, 2), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 2), 'Quercy'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_move_leaf_to_prev_leaf(self):
+        self.create_all_test_places()
+
+        # Move the Poitiers leaf under Normandie, before the Eure leaf.
+        leaf = Place.objects.get(name='Poitiers')
+        leaf.name = 'Aaa'
+        leaf.parent = Place.objects.get(name='Normandie')
+        with self.assertNumQueries(1):
+            leaf.clean()
+            leaf.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -2), 'Aaa'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Aaa'),
+                (path(0, 0, 1), 'Eure'),
+                (path(0, 0, 2), 'Manche'),
+                (path(0, 0, 3), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_move_leaf_to_next_leaf(self):
+        self.create_all_test_places()
+
+        # Move the Poitiers leaf under Normandie, after the
+        # Seine-Maritime leaf.
+        leaf = Place.objects.get(name='Poitiers')
+        leaf.name = 'Zzz'
+        leaf.parent = Place.objects.get(name='Normandie')
+        with self.assertNumQueries(1):
+            leaf.clean()
+            leaf.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(0, 0, 1), 'Zzz'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Eure'),
+                (path(0, 0, 1), 'Manche'),
+                (path(0, 0, 2), 'Seine-Maritime'),
+                (path(0, 0, 3), 'Zzz'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_resave_node_in_place_keeps_paths(self):
+        # Re-saving a node without moving it must not shift it or leave a
+        # hole at its former position.
+        self.create_all_test_places()
+        manche = Place.objects.get(name='Manche')
+        with self.assertNumQueries(1):
+            manche.save()
+        self.assertPlaces(self.correct_raw_places_data)
+
+        # Same when the parent is explicitly (re)set to the current one.
+        manche.parent = Place.objects.get(name='Normandie')
+        manche.clean()
+        manche.save()
+        self.assertPlaces(self.correct_raw_places_data)
+
+        # Changing a watched `order_by` value while the node stays in the same
+        # slot (Manche remains alphabetically between Eure and Seine-Maritime)
+        # must keep its current path rather than re-deriving a new one, so no
+        # hole opens at its former position.
+        manche.name = 'Manche-bis'
+        manche.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche-bis'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_orm_update_on_order_by_field(self):
+        # `name` is part of the `PathField.order_by`, so the trigger watches
+        # it: a bulk `update(name=...)` repositions the row immediately.
+        self.create_all_test_places()
+        Place.objects.filter(name='Eure').update(name='Zzz-Eure')
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(0, 0, 1), 'Zzz-Eure'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_orm_update_parent_keeps_tree_consistent(self):
+        # The README promises the path is kept up to date automatically.
+        # The trigger watches the parent FK column, so a bulk
+        # `update(parent=...)` recomputes the path right away.
+        self.create_all_test_places()
+        normandie = Place.objects.get(name='Normandie')
+        Place.objects.filter(name='Poitiers').update(parent=normandie)
+        children = list(normandie.get_children().values_list('name', flat=True))
+        self.assertIn(
+            'Poitiers',
+            children,
+            'Poitiers should be a child of Normandie after the bulk '
+            're-parent, but its path was not recomputed: %r'
+            % (Place.objects.get(name='Poitiers').path.value,),
+        )
+
+    def test_orm_delete_via_queryset(self):
+        self.create_all_test_places()
+        # `QuerySet.delete()` removes the matched rows; the `parent` FK
+        # cascades onto the descendants.
+        deleted, _ = Place.objects.filter(name='Normandie').delete()
+        self.assertEqual(deleted, 4)  # Normandie + Eure + Manche + Seine-Maritime
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_raw_sql_insert(self):
+        # A raw `INSERT` fires the trigger, which computes the new path.
+        self.create_all_test_places()
+        normandie = Place.objects.get(name='Normandie')
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'INSERT INTO %s (name, parent_id) VALUES (%%s, %%s);'
+                % Place._meta.db_table,
+                ['Calvados', normandie.pk],
+            )
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -2), 'Calvados'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_raw_sql_update_parent_keeps_tree_consistent(self):
+        # Same as the ORM bulk update: a raw `UPDATE` of the FK column alone
+        # fires the path trigger, which recomputes the path.
+        self.create_all_test_places()
+        normandie = Place.objects.get(name='Normandie')
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'UPDATE %s SET parent_id = %%s WHERE name = %%s;'
+                % Place._meta.db_table,
+                [normandie.pk, 'Poitiers'],
+            )
+        children = list(normandie.get_children().values_list('name', flat=True))
+        self.assertIn(
+            'Poitiers',
+            children,
+            'Poitiers should be a child of Normandie after the raw '
+            're-parent, but its path was not recomputed: %r'
+            % (Place.objects.get(name='Poitiers').path.value,),
+        )
+
+    def test_raw_sql_delete(self):
+        self.create_all_test_places()
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'DELETE FROM %s WHERE name = %%s;' % Place._meta.db_table,
+                ['Manche'],
+            )
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_rebuild_with_null_paths(self):
+        self.create_all_test_places()
+        # Wipe every path, then rebuild from scratch.
+        with Place.disabled_tree_trigger():
+            Place.objects.update(path=None)
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(self.correct_places_data)
+
+    def test_rebuild_with_some_null_paths(self):
+        self.create_all_test_places()
+        with Place.disabled_tree_trigger():
+            Place.objects.filter(name__in=['Manche', 'Vienne']).update(path=None)
+        with self.assertNumQueries(1):
+            Place.rebuild_paths()
+        self.assertPlaces(self.correct_places_data)
+
+    def test_path_as_sql_parameter(self):
+        # A `Path` can be passed as a query parameter and round-trips back to
+        # the row it identifies (extends `test_path_in_cursor`).
+        self.create_all_test_places()
+        france = Place.objects.get(name='France')
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT name FROM %s WHERE path = %%s;' % Place._meta.db_table,
+                [france.path],
+            )
+            self.assertEqual(cursor.fetchall(), [('France',)])
+
+    def test_disable_and_enable_trigger(self):
+        # While disabled, the trigger does not compute the path on insert.
+        Place.disable_tree_trigger()
+        try:
+            disabled = Place.objects.create(name='disabled')
+        finally:
+            Place.enable_tree_trigger()
+        self.assertIsNone(Place.objects.get(pk=disabled.pk).path.value)
+
+        # Once re-enabled, paths are computed again.
+        enabled = Place.objects.create(name='enabled')
+        self.assertIsNotNone(Place.objects.get(pk=enabled.pk).path.value)
+
+    def test_disabled_trigger_context_manager(self):
+        self.create_all_test_places()
+        # Inside the context manager, even a change to a watched column is
+        # ignored by the trigger, so the path goes stale; rebuild restores it.
+        with Place.disabled_tree_trigger():
+            seine = Place.objects.get(name='Seine-Maritime')
+            seine.name = 'Aaa-Seine'
+            seine.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche'),
+                (path(0, 0, 0), 'Aaa-Seine'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        Place.rebuild_paths()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Aaa-Seine'),
+                (path(0, 0, 1), 'Eure'),
+                (path(0, 0, 2), 'Manche'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_transaction_rollback_reverts_trigger_changes(self):
+        self.create_all_test_places()
+        before = [(p.path.value, p.name) for p in Place.objects.all()]
+
+        class Rollback(Exception):
+            pass
+
+        with self.assertRaises(Rollback):
+            with transaction.atomic():
+                vienne = Place.objects.get(name='Vienne')
+                vienne.parent = Place.objects.get(name='Normandie')
+                vienne.clean()
+                vienne.save()
+                # The trigger moved Vienne inside the transaction...
+                self.assertTrue(
+                    Place.objects.get(name='Vienne').is_descendant_of(
+                        Place.objects.get(name='Normandie')
+                    )
+                )
+                raise Rollback()
+
+        # ...but rolling back reverts everything the trigger did.
+        after = [(p.path.value, p.name) for p in Place.objects.all()]
+        self.assertListEqual(after, before)
 
     def test_get_level(self):
         self.create_all_test_places()
@@ -1616,23 +2348,23 @@ class QuerySetTest(CommonTest):
 class Issue17Test(CommonTest):
     # https://github.com/BertrandBordage/django-tree/issues/17
     #
-    # Inserting a node always uses the midpoint between the previous and the
-    # next sibling decimals. When many nodes are inserted into the same gap,
-    # the float8 decimals get crammed together until the computed midpoint
-    # rounds to a decimal that already exists, raising an IntegrityError on
-    # the unique constraint of the path column (the error reported in #17 was
-    # `Key (path)=({277.9999999987}) already exists`).
+    # Inserting a node normally uses the midpoint between the previous and the
+    # next sibling values. When many nodes are inserted into the same gap, the
+    # float8 path values would eventually get crammed together until the
+    # computed midpoint rounds to a value that already exists, raising an
+    # IntegrityError on the unique constraint of the path column (the error
+    # reported in #17 was `Key (path)=({277.9999999987}) already exists`).
     #
-    # TODO: Remove the `expectedFailure` decorator once the trigger spaces out
-    #       crammed siblings instead of always inserting at the midpoint.
-    @expectedFailure
+    # The trigger now detects an exhausted gap and renumbers the siblings to
+    # consecutive integers, spacing them back out, so the insertions keep
+    # distinct paths however many land in the same gap.
     def test_inserting_many_nodes_in_the_same_gap(self):
         root = self.create_place('root')
         # Two siblings delimiting the gap we will keep inserting into.
         self.create_place('a', root)
         self.create_place('b', root)
         # Each new name sorts after the previous one but still before 'b', so
-        # the trigger keeps halving the gap toward 'b''s decimal. With float8
+        # the trigger keeps halving the gap toward 'b''s value. With float8
         # paths the gap is exhausted in well under 70 insertions.
         n = 69
         for i in range(1, n + 1):
@@ -1642,3 +2374,272 @@ class Issue17Test(CommonTest):
         paths = [tuple(p.path.value) for p in Place.objects.all()]
         self.assertEqual(len(paths), n + 3)
         self.assertEqual(len(set(paths)), len(paths))
+
+    def test_renumbering_a_crammed_gap_updates_descendants(self):
+        # Same crammed-gap scenario, but the bounding siblings carry their own
+        # subtrees. Exhausting the gap forces the trigger to renumber root's
+        # children; every descendant's path must be rewritten so it stays under
+        # its ancestor (otherwise the renumbered sibling and its subtree split
+        # apart).
+        root = self.create_place('root')
+        # 'a' is the lower bound and has a two-level subtree.
+        a = self.create_place('a', root)
+        a1 = self.create_place('a1', a)
+        self.create_place('a1a', a1)
+        # 'z' is the upper bound and has one child.
+        z = self.create_place('z', root)
+        self.create_place('z1', z)
+        # Cram many nodes into the (a, z) gap, each sorting just before 'z', so
+        # the gap is halved until it is exhausted and the trigger renumbers.
+        n = 60
+        for i in range(1, n + 1):
+            self.create_place('b%04d' % i, root)
+
+        places = list(Place.objects.all())
+        by_pk = {p.pk: p for p in places}
+
+        # Every path is distinct.
+        paths = [tuple(p.path.value) for p in places]
+        self.assertEqual(len(set(paths)), len(paths))
+
+        # Every node sits directly under its FK parent in the path space: its
+        # path is the parent's path plus exactly one extra component. A
+        # descendant left behind by the renumbering would fail this.
+        for p in places:
+            if p.parent_id is None:
+                self.assertEqual(len(p.path.value), 1)
+            else:
+                parent_path = by_pk[p.parent_id].path.value
+                self.assertEqual(p.path.value[: len(parent_path)], parent_path)
+                self.assertEqual(len(p.path.value), len(parent_path) + 1)
+
+        # The bounding subtrees survived the renumbering intact and ordered.
+        a = Place.objects.get(name='a')
+        self.assertEqual(
+            [p.name for p in a.get_descendants(include_self=True).order_by('path')],
+            ['a', 'a1', 'a1a'],
+        )
+        z = Place.objects.get(name='z')
+        self.assertEqual(
+            [p.name for p in z.get_descendants(include_self=True).order_by('path')],
+            ['z', 'z1'],
+        )
+
+        # Root's children stay in ascending name order after the renumbers.
+        child_names = list(
+            root.get_children().order_by('path').values_list('name', flat=True)
+        )
+        self.assertEqual(child_names, sorted(child_names))
+        self.assertEqual(child_names[0], 'a')
+        self.assertEqual(child_names[-1], 'z')
+
+
+class DescendingOrderByTest(TransactionTestCase):
+    """`PathField(order_by=['-name'])` — descending sibling ordering."""
+
+    maxDiff = None
+
+    def _children_names_by_path(self, root):
+        return list(root.get_children().order_by('path').values_list('name', flat=True))
+
+    def test_rebuild_orders_siblings_descending(self):
+        # Build the tree with the trigger disabled (paths left NULL), then
+        # rebuild: the rebuild honours the descending `order_by`.
+        with DescendingPlace.disabled_tree_trigger():
+            root = DescendingPlace.objects.create(name='Root')
+            for name in ['Alpha', 'Beta', 'Gamma']:
+                DescendingPlace.objects.create(name=name, parent=root)
+        DescendingPlace.rebuild_paths()
+        root = DescendingPlace.objects.get(name='Root')
+        self.assertEqual(root.path.value, path(0))
+        self.assertListEqual(
+            self._children_names_by_path(root), ['Gamma', 'Beta', 'Alpha']
+        )
+
+    def test_insert_orders_siblings_descending(self):
+        # Inserting siblings one by one keeps them in descending order: the
+        # per-insert placement honours the descending direction, so inserting
+        # in ascending name order does not collide on the unique path
+        # constraint.
+        root = DescendingPlace.objects.create(name='Root')
+        try:
+            for name in ['Alpha', 'Beta', 'Gamma']:
+                DescendingPlace.objects.create(name=name, parent=root)
+        except IntegrityError as e:
+            self.fail(
+                'Inserting siblings into a descending tree should not '
+                'collide, but raised: %s' % e
+            )
+        self.assertListEqual(
+            self._children_names_by_path(root), ['Gamma', 'Beta', 'Alpha']
+        )
+
+
+class MultiplePathFieldsTest(TransactionTestCase):
+    """A model carrying two independent `PathField`s."""
+
+    maxDiff = None
+
+    def setUp(self):
+        # `name`-tree:  root -> a -> b
+        # `code`-tree:  root -> {a, b}   (b is a direct child of root here)
+        self.root = MultiPathPlace.objects.create(name='root', code='root')
+        self.a = MultiPathPlace.objects.create(
+            name='A', code='B', name_parent=self.root, code_parent=self.root
+        )
+        self.b = MultiPathPlace.objects.create(
+            name='B', code='A', name_parent=self.a, code_parent=self.root
+        )
+
+    def test_each_path_field_tracks_its_own_hierarchy(self):
+        b = MultiPathPlace.objects.get(name='B')
+        name_ancestors = list(
+            b.get_ancestors(path_field='name_path').values_list('name', flat=True)
+        )
+        code_ancestors = list(
+            b.get_ancestors(path_field='code_path').values_list('name', flat=True)
+        )
+        # In the `name` tree, B is nested under A (and root).
+        self.assertEqual(name_ancestors, ['root', 'A'])
+        # In the `code` tree, B hangs directly off root, not under A.
+        self.assertEqual(code_ancestors, ['root'])
+
+    def test_path_field_must_be_specified_when_ambiguous(self):
+        with self.assertRaises(ValueError):
+            self.root.get_children()
+        # Explicitly naming the field resolves the ambiguity.
+        self.assertEqual(
+            list(
+                self.root.get_children(path_field='name_path').values_list(
+                    'name', flat=True
+                )
+            ),
+            ['A'],
+        )
+
+
+class NonIntegerPrimaryKeyTest(TransactionTestCase):
+    """Tree maintained on a model with a UUID primary key."""
+
+    maxDiff = None
+
+    def test_tree_on_uuid_pk(self):
+        root = UUIDPlace.objects.create(name='Root')
+        self.assertIsInstance(root.pk, uuid.UUID)
+        UUIDPlace.objects.create(name='Aaa', parent=root)
+        UUIDPlace.objects.create(name='Bbb', parent=root)
+        self.assertListEqual(
+            [(p.path.value, p.name) for p in UUIDPlace.objects.order_by('path')],
+            [
+                (path(0), 'Root'),
+                (path(0, 0), 'Aaa'),
+                (path(0, 1), 'Bbb'),
+            ],
+        )
+        # Rebuild is stable on a non-integer pk.
+        UUIDPlace.rebuild_paths()
+        self.assertListEqual(
+            [(p.path.value, p.name) for p in UUIDPlace.objects.order_by('path')],
+            [
+                (path(0), 'Root'),
+                (path(0, 0), 'Aaa'),
+                (path(0, 1), 'Bbb'),
+            ],
+        )
+
+    def test_uuid_pk_breaks_order_by_ties(self):
+        # The trigger appends `pk` to `order_by` to break ties between siblings
+        # sharing the same ordering values. With a UUID pk, that tie-break must
+        # still yield distinct, non-colliding paths.
+        root = UUIDPlace.objects.create(name='Root')
+        UUIDPlace.objects.create(name='Same', parent=root)
+        UUIDPlace.objects.create(name='Same', parent=root)
+        # The two same-named siblings get distinct paths and stay direct
+        # children of root. Their exact values on insert depend on the random
+        # UUID tie-break, so only the distinctness/depth is asserted here.
+        children_paths = [
+            tuple(p.path.value) for p in UUIDPlace.objects.exclude(pk=root.pk)
+        ]
+        self.assertEqual(len(set(children_paths)), 2)
+        for child_path in children_paths:
+            self.assertEqual(len(child_path), 2)
+            self.assertEqual(child_path[0], 0.0)
+        # A rebuild normalises the tie-break to consecutive integer slots,
+        # whichever UUID happens to sort first.
+        UUIDPlace.rebuild_paths()
+        self.assertListEqual(
+            [(p.path.value, p.name) for p in UUIDPlace.objects.order_by('path')],
+            [
+                (path(0), 'Root'),
+                (path(0, 0), 'Same'),
+                (path(0, 1), 'Same'),
+            ],
+        )
+
+
+class OnDeleteBehaviourTest(TransactionTestCase):
+    """`on_delete` behaviours other than the `CASCADE` covered elsewhere."""
+
+    maxDiff = None
+
+    def test_set_null_keeps_children(self):
+        root = SetNullPlace.objects.create(name='Root')
+        child = SetNullPlace.objects.create(name='Child', parent=root)
+        self.assertEqual(child.path.value, path(0, 0))
+        # Delete only the parent row (not the whole subtree): the FK is
+        # `SET_NULL`, so the child survives with a null parent.
+        SetNullPlace.objects.filter(pk=root.pk).delete()
+        child.refresh_from_db()
+        self.assertIsNone(child.parent_id)
+        # The `SET_NULL` update fires the path trigger, so the now-orphan child
+        # is re-pathed as a root immediately (its exact value depends on the
+        # sibling ordering at delete time, hence only the depth is asserted).
+        self.assertEqual(len(child.path.value), 1)
+        SetNullPlace.rebuild_paths()
+        child.refresh_from_db()
+        self.assertEqual(child.path.value, path(0))
+
+    def test_protect_blocks_parent_deletion(self):
+        root = ProtectPlace.objects.create(name='Root')
+        child = ProtectPlace.objects.create(name='Child', parent=root)
+        self.assertEqual(child.path.value, path(0, 0))
+        # The FK is `PROTECT`, so deleting a referenced parent is refused.
+        with self.assertRaises(ProtectedError):
+            ProtectPlace.objects.filter(pk=root.pk).delete()
+        # The whole tree is left untouched by the refused deletion.
+        self.assertEqual(ProtectPlace.objects.get(pk=root.pk).path.value, path(0))
+        self.assertEqual(ProtectPlace.objects.get(pk=child.pk).path.value, path(0, 0))
+
+
+class UnusualTableNameTest(TransactionTestCase):
+    """A model stored in a table whose name requires SQL quoting.
+
+    Its `CreateTreeTrigger` is installed here at runtime rather than in a
+    migration, so the create/drop path is exercised end-to-end in isolation.
+    The generated SQL quotes the composite function/constraint names and the
+    table reference, so a table name needing quoting works like any other.
+    """
+
+    maxDiff = None
+
+    def _drop_trigger(self, op, state):
+        with connection.schema_editor(atomic=True) as editor:
+            op.database_backwards('tests', editor, state, state)
+
+    def test_trigger_supports_quoted_table_name(self):
+        op = CreateTreeTrigger('tests.WeirdTableNamePlace')
+        state = ProjectState.from_apps(apps)
+        with connection.schema_editor(atomic=True) as editor:
+            op.database_forwards('tests', editor, state, state)
+        # Only reached if the trigger was created successfully.
+        self.addCleanup(self._drop_trigger, op, state)
+
+        root = WeirdTableNamePlace.objects.create(name='Root')
+        WeirdTableNamePlace.objects.create(name='Child', parent=root)
+        self.assertEqual(
+            WeirdTableNamePlace.objects.get(name='Root').path.value, path(0)
+        )
+        self.assertEqual(
+            WeirdTableNamePlace.objects.get(name='Child').path.value,
+            path(0, 0),
+        )

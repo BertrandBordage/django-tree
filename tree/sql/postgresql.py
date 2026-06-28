@@ -45,6 +45,7 @@ def get_update_paths_function_creation(
 
     # TODO: Handle related lookups in `order_by`.
     where_columns = []
+    descending_flags = []
     sql_order_by = []
     for field_name in order_by:
         descending = field_name[0] == '-'
@@ -53,17 +54,20 @@ def get_update_paths_function_creation(
         field = meta.pk if field_name == 'pk' else meta.get_field(field_name)
         quoted_field_name = quote_ident(field.attname)
         where_columns.append(quoted_field_name)
+        descending_flags.append(descending)
         sql_order_by.append(f'{quoted_field_name} {"DESC" if descending else "ASC"}')
 
-    table = meta.db_table
+    function = quote_ident(f'update_{meta.db_table}_{path_field.attname}_paths')
+    table = quote_ident(meta.db_table)
     pk = quote_ident(meta.pk.attname)
     parent = quote_ident(parent_field.attname)
     path = quote_ident(path_field.attname)
-    # Only the rebuild's recursive CTE still needs an explicit ORDER BY (over the
-    # `t2`-aliased table); the sibling lookups now order implicitly via min/max.
+    # Only the rebuild's recursive CTE and the renumbering still need an explicit
+    # ORDER BY; the sibling lookups order implicitly via min/max.
     sql_t2_order_by = ', '.join(
         [f't2.{ordered_column}' for ordered_column in sql_order_by]
     )
+    sql_order_by = ', '.join(sql_order_by)
 
     rebuild = execute_format(
         f"""
@@ -121,9 +125,9 @@ def get_update_paths_function_creation(
         f"""
         SELECT
             max({path}[array_length({path}, 1)])
-                FILTER (WHERE {get_prev_sibling_where_clause(where_columns, '$1')}),
+                FILTER (WHERE {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}),
             min({path}[array_length({path}, 1)])
-                FILTER (WHERE {get_next_sibling_where_clause(where_columns, '$1')})
+                FILTER (WHERE {get_next_sibling_where_clause(where_columns, '$1', descending_flags)})
         FROM {table}
         WHERE
             {compare_columns(parent, f'$1.{parent}')}
@@ -138,10 +142,50 @@ def get_update_paths_function_creation(
         UPDATE {table}
         SET {path} = $1.{path}
             || {path}[array_length($2.{path}, 1) + 1:]
-        WHERE {path} > $2.{path}
-            AND {path} < $2.{path} || ARRAY['Infinity']::double precision[]
+        WHERE {path}[:array_length($2.{path}, 1)] = $2.{path} AND {pk} != $2.{pk}
     """,
         using=['NEW', 'OLD'],
+    )
+
+    # Rank of the new node amongst its siblings (number of siblings sorting
+    # before it), used as its slot when the siblings are renumbered.
+    get_new_sibling_rank = execute_format(
+        f"""
+        SELECT count(*)
+        FROM {table}
+        WHERE
+            {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}
+            AND {compare_columns(parent, f'$1.{parent}')}
+            AND {pk} != $1.{pk}
+    """,
+        using=['NEW'],
+        into=['new_sibling_rank'],
+    )
+
+    # Renumber every child of the new node's parent to a consecutive integer
+    # value (skipping the slot the new node will take), cascading the change
+    # to each sibling's whole subtree. This spaces crammed siblings back out
+    # when a gap has been exhausted.
+    renumber_siblings = execute_format(
+        f"""
+        WITH sibling_renumber AS (
+            SELECT
+                {path} AS old_path,
+                (row_number() OVER (ORDER BY {sql_order_by}) - 1)
+                    + CASE WHEN {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}
+                        THEN 0 ELSE 1 END AS new_value
+            FROM {table}
+            WHERE {compare_columns(parent, f'$1.{parent}')}
+                AND {pk} != $1.{pk}
+                AND array_length({path}, 1) = coalesce(array_length($2, 1), 0) + 1
+        )
+        UPDATE {table} AS t
+        SET {path} = $2 || sr.new_value::double precision
+            || t.{path}[coalesce(array_length($2, 1), 0) + 2:]
+        FROM sibling_renumber AS sr
+        WHERE t.{path}[:coalesce(array_length($2, 1), 0) + 1] = sr.old_path
+    """,
+        using=['NEW', 'new_parent_path'],
     )
 
     row_unchanged = join_and(
@@ -152,10 +196,12 @@ def get_update_paths_function_creation(
     )
 
     return f"""
-        CREATE OR REPLACE FUNCTION update_{table}_{path}_paths() RETURNS trigger AS $$
+        CREATE OR REPLACE FUNCTION {function}() RETURNS trigger AS $$
         DECLARE
             prev_sibling_value double precision := NULL;
             next_sibling_value double precision := NULL;
+            new_sibling_value double precision := NULL;
+            new_sibling_rank integer := NULL;
             new_parent_path double precision[];
         BEGIN
             IF TG_OP = 'UPDATE' THEN
@@ -188,7 +234,7 @@ def get_update_paths_function_creation(
                     next_sibling_value := coalesce(prev_sibling_value, 0) + 2;
                 END IF;
             END IF;
-            
+
             -- Preserve the current path when it is still relevant,
             -- even though it might not be at the middle between prev and next.
             IF TG_OP = 'UPDATE'
@@ -198,17 +244,30 @@ def get_update_paths_function_creation(
             THEN
                 RETURN NEW;
             END IF;
-            
+
             {get_new_parent_path}
             IF TG_OP = 'UPDATE' THEN
                 IF new_parent_path[:array_length(OLD.{path}, 1)] = OLD.{path} THEN
                     RAISE 'Cannot set itself or a descendant as parent.';
                 END IF;
             END IF;
-            
-            NEW.{path} = new_parent_path || (
+
+            new_sibling_value := (
                 prev_sibling_value + next_sibling_value
             ) / 2;
+            -- When the midpoint can no longer fall strictly between the two
+            -- neighbours, float8 has run out of bisection headroom and the gap
+            -- is exhausted: renumber this parent's children to consecutive
+            -- integers so siblings are spaced out again, and give the new node
+            -- its own slot.
+            IF new_sibling_value <= prev_sibling_value
+                OR new_sibling_value >= next_sibling_value THEN
+                {get_new_sibling_rank}
+                {renumber_siblings}
+                new_sibling_value := new_sibling_rank;
+            END IF;
+
+            NEW.{path} = new_parent_path || new_sibling_value;
 
             IF TG_OP = 'UPDATE' THEN
                 {update_descendants}
@@ -224,13 +283,13 @@ CREATE_TRIGGER_QUERIES = (
     """
     CREATE TRIGGER "update_{path}_before"
     BEFORE INSERT OR UPDATE OF {update_columns}
-    ON "{table}"
+    ON {table}
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
-    EXECUTE FUNCTION update_{table}_{path}_paths();
+    EXECUTE FUNCTION {function}();
     """,
     """
-    CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
+    CREATE OR REPLACE FUNCTION {rebuild_function}() RETURNS void AS $$
     BEGIN
         UPDATE {table} SET {path} = '{{NULL}}'::double precision[] FROM (
             SELECT * FROM {table}
@@ -245,8 +304,8 @@ CREATE_TRIGGER_QUERIES = (
     # TODO: Find a way to create this unique constraint
     #       somewhere else.
     """
-    ALTER TABLE "{table}"
-    ADD CONSTRAINT "{table}_{path}_unique" UNIQUE ("{path}")
+    ALTER TABLE {table}
+    ADD CONSTRAINT {constraint} UNIQUE ({path})
     -- FIXME: Remove this `INITIALLY DEFERRED` whenever possible.
     INITIALLY DEFERRED;
     """,
@@ -255,15 +314,16 @@ CREATE_TRIGGER_QUERIES = (
 DROP_TRIGGER_QUERIES = (
     # TODO: Find a way to delete this unique constraint
     #       somewhere else.
-    'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{table}_{path}_unique";'
-    'DROP TRIGGER IF EXISTS "update_{path}_before" ON "{table}";',
-    'DROP FUNCTION IF EXISTS update_{table}_{path}_paths();',
+    'ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint};'
+    'DROP TRIGGER IF EXISTS "update_{path}_before" ON {table};',
+    'DROP FUNCTION IF EXISTS {function}();',
 )
 
 
 def rebuild(table, path_field, db_alias=DEFAULT_DB_ALIAS):
+    rebuild_function = quote_ident(f'rebuild_{table}_{path_field}')
     with connections[db_alias].cursor() as cursor:
-        cursor.execute(f'SELECT rebuild_{table}_{path_field}();')
+        cursor.execute(f'SELECT {rebuild_function}();')
 
 
 def disable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):

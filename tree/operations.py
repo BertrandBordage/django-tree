@@ -36,7 +36,10 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
 
         # TODO: Handle related lookups in `order_by`.
         path = quote_ident(path_field.attname)
-        update_columns = [path]
+        parent = quote_ident(parent_field.attname)
+        # The parent column must be watched too, otherwise re-parenting through
+        # a bulk `update(parent=...)` or raw SQL would not fire the trigger.
+        update_columns = [path, parent]
         for field_name in order_by:
             descending = field_name[0] == '-'
             if descending:
@@ -51,9 +54,14 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
         return dict(
             table=quote_ident(meta.db_table),
             pk=quote_ident(meta.pk.attname),
-            parent=quote_ident(parent_field.attname),
+            parent=parent,
             path=path,
             update_columns=', '.join(update_columns),
+            function=quote_ident(f'update_{meta.db_table}_{path_field.attname}_paths'),
+            rebuild_function=quote_ident(
+                f'rebuild_{meta.db_table}_{path_field.attname}'
+            ),
+            constraint=quote_ident(f'{meta.db_table}_{path_field.attname}_unique'),
         )
 
     def state_forwards(self, app_label, state):

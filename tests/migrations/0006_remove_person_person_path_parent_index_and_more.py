@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('tests', '0004_remove_person_person_path_length_index_and_more'),
+        ('tests', '0005_tree_test_models'),
     ]
 
     operations = [
