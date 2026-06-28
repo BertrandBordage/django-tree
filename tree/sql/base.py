@@ -100,15 +100,20 @@ def get_nearby_sibling_where_clause(
     record_name: str,
     greater: bool = True,
     nulls_last: bool = True,
+    descending: Optional[List[bool]] = None,
 ):
     """
     >>> get_nearby_sibling_where_clause(["col1"], 'NEW')
     '(col1 IS NULL OR coalesce(col1 >= NEW.col1, FALSE))'
     >>> get_nearby_sibling_where_clause(["col1"], 'NEW', greater=False)
     '(NEW.col1 IS NULL OR coalesce(col1 <= NEW.col1, FALSE))'
+    >>> get_nearby_sibling_where_clause(["col1"], 'NEW', descending=[True])
+    '(NEW.col1 IS NULL OR coalesce(col1 <= NEW.col1, FALSE))'
     >>> get_nearby_sibling_where_clause(["col1", "col2", "col3"], 'NEW', greater=True)
     '((col1 IS NULL AND NEW.col1 IS NOT NULL OR coalesce(col1 > NEW.col1, FALSE)) OR (col1 IS NULL AND NEW.col1 IS NULL OR coalesce(col1 = NEW.col1, FALSE)) AND (col2 IS NULL AND NEW.col2 IS NOT NULL OR coalesce(col2 > NEW.col2, FALSE)) OR (col1 IS NULL AND NEW.col1 IS NULL OR coalesce(col1 = NEW.col1, FALSE)) AND (col2 IS NULL AND NEW.col2 IS NULL OR coalesce(col2 = NEW.col2, FALSE)) AND (col3 IS NULL OR coalesce(col3 >= NEW.col3, FALSE)))'
     """
+    if descending is None:
+        descending = [False] * len(columns_in_order)
     return join_or(
         [
             join_and(
@@ -116,7 +121,9 @@ def get_nearby_sibling_where_clause(
                     compare_columns(
                         column,
                         f'{record_name}.{column}',
-                        greater=greater if i == column_index - 1 else None,
+                        greater=(greater != descending[i])
+                        if i == column_index - 1
+                        else None,
                         strict=column_index < len(columns_in_order),
                         nulls_last=nulls_last,
                     )
@@ -131,20 +138,24 @@ def get_nearby_sibling_where_clause(
 def get_prev_sibling_where_clause(
     columns_in_order: List[str],
     record_name: str,
+    descending: Optional[List[bool]] = None,
 ):
     return get_nearby_sibling_where_clause(
         columns_in_order=columns_in_order,
         record_name=record_name,
         greater=False,
+        descending=descending,
     )
 
 
 def get_next_sibling_where_clause(
     columns_in_order: List[str],
     record_name: str,
+    descending: Optional[List[bool]] = None,
 ):
     return get_nearby_sibling_where_clause(
         columns_in_order=columns_in_order,
         record_name=record_name,
         greater=True,
+        descending=descending,
     )
