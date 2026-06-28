@@ -34,7 +34,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['path', 'name'],
                 'indexes': [
-                    Index(F('path__level'), name='place_path_level_index'),
+                    Index(F('path__level'), F('path'), name='place_path_level_index'),
                 ],
             },
             bases=(TreeModelMixin, models.Model),
@@ -64,7 +64,7 @@ class Migration(migrations.Migration):
             options={
                 'ordering': ['path'],
                 'indexes': [
-                    Index(F('path__len'), name='person_path_length_index'),
+                    Index(F('path__level'), F('path'), name='person_path_level_index'),
                 ],
             },
             bases=(TreeModelMixin, models.Model),

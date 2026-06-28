@@ -75,7 +75,9 @@ class Migration(migrations.Migration):
             ],
             options={
                 'indexes': [
-                    Index(F('path__level'), name='treeplace_path_level_index'),
+                    Index(
+                        F('path__level'), F('path'), name='treeplace_path_level_index'
+                    ),
                 ],
             },
         ),

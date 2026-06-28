@@ -26,13 +26,19 @@ class PathField(ArrayField):
 
     @classmethod
     def get_indexes(cls, table_name: str, path_field_name: str):
-        # Ancestor/descendant/child/sibling lookups are range comparisons on the
-        # whole path, served by the btree index backing the path itself (the
-        # `UNIQUE` constraint added by `CreateTreeTrigger`). The only extra index
-        # worth keeping is on the depth, for level-based filtering (e.g. roots).
+        # Ancestor/descendant lookups are whole-path range comparisons, served by
+        # the btree index backing the path itself (the `UNIQUE` constraint added by
+        # `CreateTreeTrigger`). The `child_of`/`sibling_of` lookups add a depth
+        # equality (`array_length(path, 1) = N`) on top of a path range; a
+        # composite `(level, path)` index makes that depth + range seekable, so
+        # those lookups become index scans over just the matching rows instead of
+        # scanning the whole subtree and filtering by depth. Keeping `level` as the
+        # leading column means level-only filters (e.g. roots, `__level=1`) still
+        # use this same index.
         return [
             Index(
                 F(f'{path_field_name}__level'),
+                F(path_field_name),
                 name=f'{table_name}_{path_field_name}_level_index',
             ),
         ]
@@ -63,7 +69,7 @@ class PathField(ArrayField):
     def contribute_to_class(self, cls, name, *args, **kwargs):
         if name in self.order_by:
             raise ImproperlyConfigured(
-                '`PathField.order_by` cannot reference itself.' % name
+                '`PathField.order_by` cannot reference the field itself (%r).' % name
             )
         super(PathField, self).contribute_to_class(cls, name, *args, **kwargs)
 

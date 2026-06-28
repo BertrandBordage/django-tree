@@ -10,10 +10,12 @@
   `path >= P AND path < P || {Infinity}` — so they use the btree index already
   backing the path (the `UNIQUE` constraint) instead of per-level slice indexes.
   `Infinity` is available because the path is now floating-point.
-- `PathField.get_indexes()` now creates only the level index; the parent-slice
-  and per-level `path__0_N` slice indexes are gone (the range comparisons above
-  replace them) and the redundant full-path `db_index` is dropped. Together with
-  float8 this roughly halves the on-disk size of a tree.
+- `PathField.get_indexes()` now creates a single composite `(level, path)` index;
+  the parent-slice and per-level `path__0_N` slice indexes are gone (the range
+  comparisons above replace them) and the redundant full-path `db_index` is
+  dropped. Keeping `level` as the leading column still serves level-only filters
+  (e.g. roots, `__level=1`), while appending `path` makes the depth + range
+  predicate of `child_of`/`sibling_of` index-seekable.
 
   Upgrading: existing projects must recast the column and re-space paths with a
   migration that runs `AlterField('YourModel', 'path', PathField(...))` followed
@@ -30,6 +32,12 @@
     instead of chaining several queryset clones.
   - `TreeQuerySetMixin.get_descendants()` runs as one correlated `EXISTS` query
     instead of an extra query plus one OR'd range clause per matching row.
+  - The composite `(level, path)` index lets `child_of`/`sibling_of` (and the
+    `get_children`/`get_siblings`/children-count queries built on them) scan just
+    the matching rows via an index seek, instead of range-scanning the whole
+    subtree and filtering by depth — a win that grows with subtree size (e.g.
+    ~4.7× faster `get_children` on a 56k-node tree). The trade-off is a larger
+    level index (it now stores the path), so disk usage rises accordingly.
 - Speeds up writes:
   - The path-maintenance trigger finds both surrounding siblings in a single
     `max(...) FILTER`/`min(...) FILTER` scan instead of two `ORDER BY ... LIMIT 1`
