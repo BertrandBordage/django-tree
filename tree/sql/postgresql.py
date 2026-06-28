@@ -45,6 +45,7 @@ def get_update_paths_function_creation(
 
     # TODO: Handle related lookups in `order_by`.
     where_columns = []
+    descending_flags = []
     sql_order_by = []
     sql_reversed_order_by = []
     for field_name in order_by:
@@ -54,12 +55,14 @@ def get_update_paths_function_creation(
         field = meta.pk if field_name == 'pk' else meta.get_field(field_name)
         quoted_field_name = quote_ident(field.attname)
         where_columns.append(quoted_field_name)
+        descending_flags.append(descending)
         sql_order_by.append(f'{quoted_field_name} {"DESC" if descending else "ASC"}')
         sql_reversed_order_by.append(
             f'{quoted_field_name} {"ASC" if descending else "DESC"}'
         )
 
-    table = meta.db_table
+    function = quote_ident(f'update_{meta.db_table}_{path_field.attname}_paths')
+    table = quote_ident(meta.db_table)
     pk = quote_ident(meta.pk.attname)
     parent = quote_ident(parent_field.attname)
     path = quote_ident(path_field.attname)
@@ -117,7 +120,7 @@ def get_update_paths_function_creation(
         SELECT {path}[array_length({path}, 1)]
         FROM {table}
         WHERE
-            {get_prev_sibling_where_clause(where_columns, '$1')}
+            {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}
             AND {compare_columns(parent, f'$1.{parent}')}
             AND {pk} != $1.{pk}
         ORDER BY {sql_reversed_order_by}
@@ -132,7 +135,7 @@ def get_update_paths_function_creation(
         SELECT {path}[array_length({path}, 1)]
         FROM {table}
         WHERE
-            {get_next_sibling_where_clause(where_columns, '$1')}
+            {get_next_sibling_where_clause(where_columns, '$1', descending_flags)}
             AND {compare_columns(parent, f'$1.{parent}')}
             AND {pk} != $1.{pk}
         ORDER BY {sql_order_by}
@@ -160,7 +163,7 @@ def get_update_paths_function_creation(
     )
 
     return f"""
-        CREATE OR REPLACE FUNCTION update_{table}_{path}_paths() RETURNS trigger AS $$
+        CREATE OR REPLACE FUNCTION {function}() RETURNS trigger AS $$
         DECLARE
             prev_sibling_decimal decimal := NULL;
             next_sibling_decimal decimal := NULL;
@@ -233,13 +236,13 @@ CREATE_TRIGGER_QUERIES = (
     """
     CREATE TRIGGER "update_{path}_before"
     BEFORE INSERT OR UPDATE OF {update_columns}
-    ON "{table}"
+    ON {table}
     FOR EACH ROW
     WHEN (pg_trigger_depth() = 0)
-    EXECUTE FUNCTION update_{table}_{path}_paths();
+    EXECUTE FUNCTION {function}();
     """,
     """
-    CREATE OR REPLACE FUNCTION rebuild_{table}_{path}() RETURNS void AS $$
+    CREATE OR REPLACE FUNCTION {rebuild_function}() RETURNS void AS $$
     BEGIN
         UPDATE {table} SET {path} = '{{NULL}}'::decimal[] FROM (
             SELECT * FROM {table}
@@ -254,8 +257,8 @@ CREATE_TRIGGER_QUERIES = (
     # TODO: Find a way to create this unique constraint
     #       somewhere else.
     """
-    ALTER TABLE "{table}"
-    ADD CONSTRAINT "{table}_{path}_unique" UNIQUE ("{path}")
+    ALTER TABLE {table}
+    ADD CONSTRAINT {constraint} UNIQUE ({path})
     -- FIXME: Remove this `INITIALLY DEFERRED` whenever possible.
     INITIALLY DEFERRED;
     """,
@@ -264,15 +267,16 @@ CREATE_TRIGGER_QUERIES = (
 DROP_TRIGGER_QUERIES = (
     # TODO: Find a way to delete this unique constraint
     #       somewhere else.
-    'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{table}_{path}_unique";'
-    'DROP TRIGGER IF EXISTS "update_{path}_before" ON "{table}";',
-    'DROP FUNCTION IF EXISTS update_{table}_{path}_paths();',
+    'ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint};'
+    'DROP TRIGGER IF EXISTS "update_{path}_before" ON {table};',
+    'DROP FUNCTION IF EXISTS {function}();',
 )
 
 
 def rebuild(table, path_field, db_alias=DEFAULT_DB_ALIAS):
+    rebuild_function = quote_ident(f'rebuild_{table}_{path_field}')
     with connections[db_alias].cursor() as cursor:
-        cursor.execute(f'SELECT rebuild_{table}_{path_field}();')
+        cursor.execute(f'SELECT {rebuild_function}();')
 
 
 def disable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):

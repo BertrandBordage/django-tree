@@ -119,10 +119,8 @@ class WeirdTableNamePlace(TreeModel):
     """A tree stored in a table whose name requires SQL quoting.
 
     The tree trigger is intentionally NOT created by a migration for this
-    model: building the trigger function interpolates the (quoted) table
-    name into the function name, which currently breaks for quoted
-    identifiers. See `UnusualTableNameTest`, which installs the trigger at
-    runtime so the failure stays isolated to that test.
+    model: `UnusualTableNameTest` installs it at runtime so the create/drop
+    path for a quoted table name is exercised in isolation.
     """
 
     name = CharField(max_length=50)

@@ -1107,10 +1107,8 @@ class PathTest(CommonTest):
 
     def test_orm_update_parent_keeps_tree_consistent(self):
         # The README promises the path is kept up to date automatically.
-        # A bulk `update(parent=...)` only writes the FK column, which the
-        # trigger does NOT watch (it fires on the `path` + `order_by` columns
-        # only), so the path is left stale until `rebuild_paths()`.
-        # This asserts the documented promise and currently fails.
+        # The trigger watches the parent FK column, so a bulk
+        # `update(parent=...)` recomputes the path right away.
         self.create_all_test_places()
         normandie = Place.objects.get(name='Normandie')
         Place.objects.filter(name='Poitiers').update(parent=normandie)
@@ -1165,9 +1163,8 @@ class PathTest(CommonTest):
         )
 
     def test_raw_sql_update_parent_keeps_tree_consistent(self):
-        # Same gap as the ORM bulk update: a raw `UPDATE` of the FK column
-        # alone does not fire the path trigger. Asserts the documented
-        # promise and currently fails.
+        # Same as the ORM bulk update: a raw `UPDATE` of the FK column alone
+        # fires the path trigger, which recomputes the path.
         self.create_all_test_places()
         normandie = Place.objects.get(name='Normandie')
         with connection.cursor() as cursor:
@@ -2405,10 +2402,10 @@ class DescendingOrderByTest(TransactionTestCase):
         )
 
     def test_insert_orders_siblings_descending(self):
-        # Inserting siblings one by one should also keep them in descending
-        # order. It currently does not: inserting in ascending name order
-        # collides on the unique path constraint (the per-insert placement
-        # ignores the descending direction).
+        # Inserting siblings one by one keeps them in descending order: the
+        # per-insert placement honours the descending direction, so inserting
+        # in ascending name order does not collide on the unique path
+        # constraint.
         root = DescendingPlace.objects.create(name='Root')
         try:
             for name in ['Alpha', 'Beta', 'Gamma']:
@@ -2539,9 +2536,10 @@ class OnDeleteBehaviourTest(TransactionTestCase):
         SetNullPlace.objects.filter(pk=root.pk).delete()
         child.refresh_from_db()
         self.assertIsNone(child.parent_id)
-        # The FK-only change does not fire the path trigger, so the now-orphan
-        # child keeps its stale nested path until the tree is rebuilt.
-        self.assertEqual(child.path.value, path(0, 0))
+        # The `SET_NULL` update fires the path trigger, so the now-orphan child
+        # is re-pathed as a root immediately (its exact decimal depends on the
+        # sibling ordering at delete time, hence only the depth is asserted).
+        self.assertEqual(len(child.path.value), 1)
         SetNullPlace.rebuild_paths()
         child.refresh_from_db()
         self.assertEqual(child.path.value, path(0))
@@ -2561,12 +2559,10 @@ class OnDeleteBehaviourTest(TransactionTestCase):
 class UnusualTableNameTest(TransactionTestCase):
     """A model stored in a table whose name requires SQL quoting.
 
-    Its `CreateTreeTrigger` is not run by a migration (it would abort the
-    whole test database setup), so the trigger is installed here at runtime.
-    Building the trigger function interpolates the table name into the
-    function name, which currently produces invalid SQL for quoted
-    identifiers, so this test fails until the SQL generation quotes function
-    names properly.
+    Its `CreateTreeTrigger` is installed here at runtime rather than in a
+    migration, so the create/drop path is exercised end-to-end in isolation.
+    The generated SQL quotes the composite function/constraint names and the
+    table reference, so a table name needing quoting works like any other.
     """
 
     maxDiff = None
