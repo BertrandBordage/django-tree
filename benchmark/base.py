@@ -345,14 +345,21 @@ class Benchmark:
                 # the following tests and to clear some disk space.
                 model.objects.all().delete()
 
-        csv_path = os.path.join(self.results_path, 'data.csv')
+        csv_path = os.path.join(self.results_path, 'data.csv.gz')
         if self.run_django_tree_only:
             df = pd.read_csv(csv_path)
             df = df[df['Implementation'] != self.models[TreePlace]]
             df = pd.concat([df, pd.DataFrame(self.data)], ignore_index=True)
         else:
             df = pd.DataFrame(self.data)
-        df.to_csv(csv_path, index=False)
+        # Stored gzip-compressed (pandas infers it from the .gz extension, no extra
+        # dependency): ~10x smaller in the repo. Sorted first and written with a
+        # zeroed gzip timestamp so identical data always produces identical bytes,
+        # keeping diffs minimal.
+        df = df.sort_values(
+            ['Database', 'Y label', 'Test name', 'Implementation', 'Count']
+        )
+        df.to_csv(csv_path, index=False, compression={'method': 'gzip', 'mtime': 0})
 
         stats_df = df.set_index(['Database', 'Test name', 'Count'])
         stats_df.sort_index(inplace=True)
