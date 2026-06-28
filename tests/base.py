@@ -1066,6 +1066,26 @@ class PathTest(CommonTest):
         manche.save()
         self.assertPlaces(self.correct_raw_places_data)
 
+        # Changing a watched `order_by` value while the node stays in the same
+        # slot (Manche remains alphabetically between Eure and Seine-Maritime)
+        # must keep its current path rather than re-deriving a new one, so no
+        # hole opens at its former position.
+        manche.name = 'Manche-bis'
+        manche.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, -1), 'Eure'),
+                (path(0, 0, -0.5), 'Manche-bis'),
+                (path(0, 0, 0), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
     def test_orm_update_on_order_by_field(self):
         # `name` is part of the `PathField.order_by`, so the trigger watches
         # it: a bulk `update(name=...)` repositions the row immediately.
@@ -2498,10 +2518,14 @@ class OnDeleteBehaviourTest(TransactionTestCase):
 
     def test_protect_blocks_parent_deletion(self):
         root = ProtectPlace.objects.create(name='Root')
-        ProtectPlace.objects.create(name='Child', parent=root)
+        child = ProtectPlace.objects.create(name='Child', parent=root)
+        self.assertEqual(child.path.value, path(0, 0))
         # The FK is `PROTECT`, so deleting a referenced parent is refused.
         with self.assertRaises(ProtectedError):
             ProtectPlace.objects.filter(pk=root.pk).delete()
+        # The whole tree is left untouched by the refused deletion.
+        self.assertEqual(ProtectPlace.objects.get(pk=root.pk).path.value, path(0))
+        self.assertEqual(ProtectPlace.objects.get(pk=child.pk).path.value, path(0, 0))
 
 
 class UnusualTableNameTest(TransactionTestCase):
