@@ -145,6 +145,11 @@ class Benchmark:
 
     def run_tests(self, tested_model, count):
         connection = connections[self.current_db_alias]
+        # Every test at this checkpoint sees identical data, so the root/branch/leaf
+        # selection (the expensive, untimed part of each test's setup) is computed
+        # once and reused across tests instead of being recomputed per test. The
+        # cache is reset per checkpoint because the tree grows between checkpoints.
+        self._selection_cache = {}
         for (test_name, model, y_label), test_class in self.tests.items():
             if model is not tested_model or self.skip_test(test_name):
                 continue
@@ -165,6 +170,81 @@ class Benchmark:
             if value is None:
                 value = elapsed_time
             self.add_data(model, test_name, count, value, y_label=y_label)
+
+    # Sentinel meaning "this selection legitimately has no candidate at this
+    # checkpoint", cached so the (expensive) lookup is not retried per test.
+    _SKIP = object()
+
+    def select_root(self, model, fresh=False):
+        cache = self._selection_cache
+        if 'root' not in cache:
+            qs = model._default_manager.all()
+            qs = (
+                qs.filter(depth=1)
+                if model in (TreebeardMPPlace, TreebeardNSPlace)
+                else qs.filter(parent__isnull=True)
+            )
+            cache['root'] = qs[qs.count() // 2]
+        obj = cache['root']
+        # Write tests mutate the selected object (rename, reparent, delete), so they
+        # get a fresh, isolated copy; read tests can safely share the cached object.
+        return model._default_manager.get(pk=obj.pk) if fresh else obj
+
+    def select_branch(self, model, root, fresh=False):
+        cache = self._selection_cache
+        key = ('branch', root is not None)
+        if key not in cache:
+            qs = model._default_manager.all()
+            if root is not None:
+                descendants = root.get_descendants()
+                if isinstance(descendants, list):
+                    descendants = [d.pk for d in descendants]
+                qs = qs.exclude(pk__in=descendants)
+            if model is MPTTPlace:
+                qs = qs.filter(level=1)
+            elif model is TreePlace:
+                qs = qs.filter(path__len=2)
+            elif model is TreebeardALPlace:
+                qs = qs.filter(parent__isnull=False, parent__parent__isnull=True)
+            else:
+                qs = qs.filter(depth=2)
+            try:
+                cache[key] = qs[qs.count() // 2]
+            except IndexError:
+                cache[key] = self._SKIP
+        obj = cache[key]
+        if obj is self._SKIP:
+            raise SkipTest
+        return model._default_manager.get(pk=obj.pk) if fresh else obj
+
+    def select_leaf(self, model, root, branch, fresh=False):
+        cache = self._selection_cache
+        key = ('leaf', root is not None, branch is not None)
+        if key not in cache:
+            qs = model._default_manager.all()
+            if root is not None:
+                descendants = root.get_descendants()
+                if isinstance(descendants, list):
+                    descendants = [d.pk for d in descendants]
+                qs = qs.exclude(pk=root.pk).exclude(pk__in=descendants)
+            if branch is not None:
+                descendants = branch.get_descendants()
+                if isinstance(descendants, list):
+                    descendants = [d.pk for d in descendants]
+                qs = qs.exclude(pk=branch.pk).exclude(pk__in=descendants)
+            qs = (
+                qs.annotate(n=Max('depth')).filter(depth=F('n'), depth__gt=1)
+                if model in (TreebeardMPPlace, TreebeardNSPlace)
+                else qs.filter(children__isnull=True, parent__isnull=False)
+            )
+            try:
+                cache[key] = qs[qs.count() // 2]
+            except IndexError:
+                cache[key] = self._SKIP
+        obj = cache[key]
+        if obj is self._SKIP:
+            raise SkipTest
+        return model._default_manager.get(pk=obj.pk) if fresh else obj
 
     def plot(self, df, database_name, test_name, y_label):
         means = df.rolling(max(df.index.max() // 20, 1)).mean()
@@ -311,66 +391,29 @@ class TestDiskUsage(BenchmarkTest):
 
 class GetRootMixin:
     def setup(self):
-        qs = self.model._default_manager.all()
-        qs = (
-            qs.filter(depth=1)
-            if self.model in (TreebeardMPPlace, TreebeardNSPlace)
-            else qs.filter(parent__isnull=True)
-        )
-        self.root = qs[qs.count() // 2]
+        self.root = self.benchmark.select_root(self.model, fresh=self.rollback)
         super().setup()
 
 
 class GetBranchMixin:
     def setup(self):
         super().setup()
-
-        qs = self.model._default_manager.all()
-        if hasattr(self, 'root'):
-            descendants = self.root.get_descendants()
-            if isinstance(descendants, list):
-                descendants = [d.pk for d in descendants]
-            qs = qs.exclude(pk__in=descendants)
-
-        if self.model is MPTTPlace:
-            qs = qs.filter(level=1)
-        elif self.model is TreePlace:
-            qs = qs.filter(path__len=2)
-        elif self.model is TreebeardALPlace:
-            qs = qs.filter(parent__isnull=False, parent__parent__isnull=True)
-        else:
-            qs = qs.filter(depth=2)
-        try:
-            self.branch = qs[qs.count() // 2]
-        except IndexError:
-            raise SkipTest
+        # Selection depends on whether a root was also picked (to exclude its
+        # subtree), so pass it along when present, matching the original logic.
+        self.branch = self.benchmark.select_branch(
+            self.model, getattr(self, 'root', None), fresh=self.rollback
+        )
 
 
 class GetLeafMixin:
     def setup(self):
         super(GetLeafMixin, self).setup()
-
-        qs = self.model._default_manager.all()
-        if hasattr(self, 'root'):
-            descendants = self.root.get_descendants()
-            if isinstance(descendants, list):
-                descendants = [d.pk for d in descendants]
-            qs = qs.exclude(pk=self.root.pk).exclude(pk__in=descendants)
-        if hasattr(self, 'branch'):
-            descendants = self.branch.get_descendants()
-            if isinstance(descendants, list):
-                descendants = [d.pk for d in descendants]
-            qs = qs.exclude(pk=self.branch.pk).exclude(pk__in=descendants)
-
-        qs = (
-            qs.annotate(n=Max('depth')).filter(depth=F('n'), depth__gt=1)
-            if self.model in (TreebeardMPPlace, TreebeardNSPlace)
-            else qs.filter(children__isnull=True, parent__isnull=False)
+        self.leaf = self.benchmark.select_leaf(
+            self.model,
+            getattr(self, 'root', None),
+            getattr(self, 'branch', None),
+            fresh=self.rollback,
         )
-        try:
-            self.leaf = qs[qs.count() // 2]
-        except IndexError:
-            raise SkipTest
 
 
 #
