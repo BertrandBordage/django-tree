@@ -2494,6 +2494,35 @@ class NonIntegerPrimaryKeyTest(TransactionTestCase):
             ],
         )
 
+    def test_uuid_pk_breaks_order_by_ties(self):
+        # The trigger appends `pk` to `order_by` to break ties between siblings
+        # sharing the same ordering values. With a UUID pk, that tie-break must
+        # still yield distinct, non-colliding paths.
+        root = UUIDPlace.objects.create(name='Root')
+        UUIDPlace.objects.create(name='Same', parent=root)
+        UUIDPlace.objects.create(name='Same', parent=root)
+        # The two same-named siblings get distinct paths and stay direct
+        # children of root. Their exact decimals on insert depend on the random
+        # UUID tie-break, so only the distinctness/depth is asserted here.
+        children_paths = [
+            tuple(p.path.value) for p in UUIDPlace.objects.exclude(pk=root.pk)
+        ]
+        self.assertEqual(len(set(children_paths)), 2)
+        for child_path in children_paths:
+            self.assertEqual(len(child_path), 2)
+            self.assertEqual(child_path[0], 0.0)
+        # A rebuild normalises the tie-break to consecutive integer slots,
+        # whichever UUID happens to sort first.
+        UUIDPlace.rebuild_paths()
+        self.assertListEqual(
+            [(p.path.value, p.name) for p in UUIDPlace.objects.order_by('path')],
+            [
+                (path(0), 'Root'),
+                (path(0, 0), 'Same'),
+                (path(0, 1), 'Same'),
+            ],
+        )
+
 
 class OnDeleteBehaviourTest(TransactionTestCase):
     """`on_delete` behaviours other than the `CASCADE` covered elsewhere."""
