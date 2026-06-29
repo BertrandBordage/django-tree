@@ -1,4 +1,4 @@
-from typing import List, Optional, Type
+from typing import Type
 
 from django.db import DEFAULT_DB_ALIAS, connections
 from django.db.models import Model
@@ -129,25 +129,6 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 """
 
 
-def execute_format(
-    sql: str,
-    *args: str,
-    using: Optional[List[str]] = None,
-    into: Optional[List[str]] = None,
-):
-    if using is None:
-        using = []
-    if into is None:
-        into = []
-
-    sql = sql.replace("'", "''")
-
-    args = ', ' + (', '.join(args)) if args else ''
-    using = ' USING ' + ', '.join(using) if using else ''
-    into = ' INTO ' + ', '.join(into) if into else ''
-    return f"EXECUTE format('{sql}'{args}){using}{into};"
-
-
 def get_update_paths_function_creation(
     model: Type[Model],
     path_field_lookup: str,
@@ -185,8 +166,13 @@ def get_update_paths_function_creation(
         [f't2.{ordered_column}' for ordered_column in sql_order_by]
     )
 
-    rebuild = execute_format(
-        f"""
+    # All three statements below are emitted as *static* SQL in the trigger
+    # function body (not `EXECUTE`d dynamic strings): the table and column names
+    # are fixed at `CREATE FUNCTION` time, so PL/pgSQL prepares and plan-caches
+    # each statement once per session instead of re-planning it on every trigger
+    # firing. `NEW`/`OLD` are referenced directly (PL/pgSQL passes their fields as
+    # query parameters).
+    rebuild = f"""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
                 SELECT {parent}, ''::bytea
@@ -219,16 +205,15 @@ def get_update_paths_function_creation(
         ), updated AS (
             UPDATE {table} AS t2 SET {path} = t1.path
             FROM generate_paths AS t1
-            WHERE t2.{pk} = t1.pk AND t2.{pk} != $1.{pk}
+            WHERE t2.{pk} = t1.pk AND t2.{pk} != OLD.{pk}
                 AND (t2.{path} IS NULL OR t2.{path} != t1.path)
         )
-        SELECT path FROM generate_paths
-        WHERE pk = $1.{pk}
+        SELECT path
+        INTO NEW.{path}
+        FROM generate_paths
+        WHERE pk = OLD.{pk}
         LIMIT 1
-    """,
-        using=['OLD'],
-        into=[f'NEW.{path}'],
-    )
+    """
 
     # Three scalar subqueries yield the parent's path and both neighbouring
     # siblings' full paths. A path's own segment is strictly monotonic with
@@ -239,39 +224,33 @@ def get_update_paths_function_creation(
     # LIMIT 1` reads just that one neighbour with a top-1 pass instead of sorting
     # and materialising the whole sibling set (the portable stand-in for the
     # PostgreSQL-18-only `min`/`max(bytea)`).
-    sibling_match = f'{compare_columns(parent, f"$1.{parent}")} AND {pk} != $1.{pk}'
+    sibling_match = f'{compare_columns(parent, f"NEW.{parent}")} AND {pk} != NEW.{pk}'
     prev_sibling_where = get_prev_sibling_where_clause(
-        where_columns, '$1', descending_flags
+        where_columns, 'NEW', descending_flags
     )
     next_sibling_where = get_next_sibling_where_clause(
-        where_columns, '$1', descending_flags
+        where_columns, 'NEW', descending_flags
     )
-    get_sibling_values = execute_format(
-        f"""
+    get_sibling_values = f"""
         SELECT
-            (SELECT {path} FROM {table} WHERE {pk} = $1.{parent}),
+            (SELECT {path} FROM {table} WHERE {pk} = NEW.{parent}),
             (SELECT {path} FROM {table}
                 WHERE {sibling_match} AND {prev_sibling_where}
                 ORDER BY {path} DESC LIMIT 1),
             (SELECT {path} FROM {table}
                 WHERE {sibling_match} AND {next_sibling_where}
                 ORDER BY {path} ASC LIMIT 1)
-    """,
-        using=['NEW'],
-        into=['new_parent_path', 'prev_sibling_path', 'next_sibling_path'],
-    )
+        INTO new_parent_path, prev_sibling_path, next_sibling_path
+    """
 
     # When a node moves, rewrite every descendant's stored prefix (the moved node's
     # old path) to its new path, preserving the descendant-local suffix.
-    update_descendants = execute_format(
-        f"""
+    update_descendants = f"""
         UPDATE {table}
-        SET {path} = $1.{path} || substr({path}, octet_length($2.{path}) + 1)
-        WHERE substr({path}, 1, octet_length($2.{path})) = $2.{path}
-            AND {pk} != $2.{pk}
-    """,
-        using=['NEW', 'OLD'],
-    )
+        SET {path} = NEW.{path} || substr({path}, octet_length(OLD.{path}) + 1)
+        WHERE substr({path}, 1, octet_length(OLD.{path})) = OLD.{path}
+            AND {pk} != OLD.{pk}
+    """
 
     row_unchanged = join_and(
         [
@@ -295,7 +274,7 @@ def get_update_paths_function_creation(
         BEGIN
             IF TG_OP = 'UPDATE' THEN
                 IF NEW.{path} IS NULL THEN
-                    {rebuild}
+                    {rebuild};
                     RETURN NEW;
                 END IF;
 
@@ -304,7 +283,7 @@ def get_update_paths_function_creation(
                 END IF;
             END IF;
 
-            {get_sibling_values}
+            {get_sibling_values};
             new_parent_path := coalesce(new_parent_path, ''::bytea);
             parent_len := octet_length(new_parent_path);
 
@@ -350,7 +329,7 @@ def get_update_paths_function_creation(
                 || '\\x00'::bytea;
 
             IF TG_OP = 'UPDATE' THEN
-                {update_descendants}
+                {update_descendants};
             END IF;
 
             RETURN NEW;

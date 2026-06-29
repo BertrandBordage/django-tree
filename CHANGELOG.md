@@ -67,6 +67,12 @@
     once per model class (cached) instead of scanning `concrete_fields` and
     running `isinstance` on every save — the handler runs ~2.6× faster and the
     cost is removed from every non-tree model's save too.
+  - The trigger function emits its parent/sibling lookup, descendant rewrite and
+    rebuild as static SQL instead of `EXECUTE`'d dynamic strings. The statements
+    are now planned once and plan-cached instead of being re-planned on every
+    firing — e.g. inserting under a small parent drops from ~0.1 ms to ~0.02 ms of
+    trigger time (planning had dominated there); the gain shrinks on large
+    fan-outs where the sibling scan dominates.
 
 # 0.6.2 (2025-09-29)
 
