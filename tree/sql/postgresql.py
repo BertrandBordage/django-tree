@@ -179,8 +179,8 @@ def get_update_paths_function_creation(
     pk = quote_ident(meta.pk.attname)
     parent = quote_ident(parent_field.attname)
     path = quote_ident(path_field.attname)
-    # Only the rebuild's recursive CTE still needs an explicit ORDER BY; the sibling
-    # lookups order implicitly via min/max.
+    # Both the rebuild's recursive CTE and the sibling lookups order by the path;
+    # the latter as `ORDER BY path ... LIMIT 1` to read a single neighbour.
     sql_t2_order_by = ', '.join(
         [f't2.{ordered_column}' for ordered_column in sql_order_by]
     )
@@ -230,16 +230,16 @@ def get_update_paths_function_creation(
         into=[f'NEW.{path}'],
     )
 
-    # A single scan over the sibling set yields the parent's path (a correlated
-    # scalar subquery, evaluated once even when there are no siblings) and both
-    # neighbouring siblings' full paths. A path's own segment is strictly
-    # monotonic with `order_by` among siblings (the same invariant the read side
-    # relies on, e.g. `get_prev_sibling` ordering by `path`), and siblings share
-    # the parent prefix, so the previous sibling is the greatest path among those
-    # ordered before us and the next is the smallest among those ordered after.
-    # `max(bytea)`/`min(bytea)` aggregates only exist on PostgreSQL 18+, so we
-    # take the first element of an ordered `array_agg` instead, which works on
-    # every supported version.
+    # Three scalar subqueries yield the parent's path and both neighbouring
+    # siblings' full paths. A path's own segment is strictly monotonic with
+    # `order_by` among siblings (the same invariant the read side relies on, e.g.
+    # `get_prev_sibling` ordering by `path`), and siblings share the parent prefix,
+    # so the previous sibling is the greatest path among those ordered before us
+    # and the next is the smallest among those ordered after. `ORDER BY path
+    # LIMIT 1` reads just that one neighbour with a top-1 pass instead of sorting
+    # and materialising the whole sibling set (the portable stand-in for the
+    # PostgreSQL-18-only `min`/`max(bytea)`).
+    sibling_match = f'{compare_columns(parent, f"$1.{parent}")} AND {pk} != $1.{pk}'
     prev_sibling_where = get_prev_sibling_where_clause(
         where_columns, '$1', descending_flags
     )
@@ -250,14 +250,12 @@ def get_update_paths_function_creation(
         f"""
         SELECT
             (SELECT {path} FROM {table} WHERE {pk} = $1.{parent}),
-            (array_agg({path} ORDER BY {path} DESC)
-                FILTER (WHERE {prev_sibling_where}))[1],
-            (array_agg({path} ORDER BY {path} ASC)
-                FILTER (WHERE {next_sibling_where}))[1]
-        FROM {table}
-        WHERE
-            {compare_columns(parent, f'$1.{parent}')}
-            AND {pk} != $1.{pk}
+            (SELECT {path} FROM {table}
+                WHERE {sibling_match} AND {prev_sibling_where}
+                ORDER BY {path} DESC LIMIT 1),
+            (SELECT {path} FROM {table}
+                WHERE {sibling_match} AND {next_sibling_where}
+                ORDER BY {path} ASC LIMIT 1)
     """,
         using=['NEW'],
         into=['new_parent_path', 'prev_sibling_path', 'next_sibling_path'],

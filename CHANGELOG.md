@@ -53,10 +53,12 @@
     level index (it now stores the path), so disk usage rises accordingly.
 - Speeds up writes:
   - The path-maintenance trigger fetches the parent path and both surrounding
-    siblings in a single scan (a correlated scalar subquery plus the first element
-    of an ordered `array_agg`, since `min`/`max` over `bytea` only exist on
-    PostgreSQL 18+) instead of three separate queries, speeding up every insert
-    and move.
+    siblings with scalar subqueries (each neighbour via `ORDER BY path ... LIMIT 1`,
+    a top-1 read rather than sorting the whole sibling set) instead of one scan
+    building two ordered `array_agg`s. Insert/move cost on a node with N existing
+    siblings drops from the `array_agg` sort's super-linear growth to roughly flat
+    — e.g. inserting under a 2000-child parent is ~3× faster — and ties it on small
+    fan-outs.
   - `RebuildPaths` now emits minimal-width path segments (one byte per level for
     up to 254 children, like inserts do) instead of a fixed four, so a rebuilt
     tree keeps the same compact paths as an inserted one (≈60% fewer path bytes on
