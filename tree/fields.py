@@ -82,8 +82,10 @@ class PathField(BinaryField):
         if isinstance(value, Path):
             return value
         if value is not None:
-            # psycopg returns a `memoryview` for `bytea`; `bytes` is hashable and
-            # supports the lexicographic ordering `Path` relies on.
+            # psycopg3 already returns `bytes` for `bytea` (so this is a no-op),
+            # but psycopg2 returns a `memoryview`, which can't be ordered, hashed,
+            # split or `startswith`-ed -- all things `Path` relies on -- so coerce
+            # to `bytes` either way.
             value = bytes(value)
         return Path(self, value)
 
