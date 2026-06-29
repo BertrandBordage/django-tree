@@ -8,9 +8,9 @@ Fast and easy tree structures.
 
 **In beta, it can’t be used yet in production.**
 
-django-tree solves the same problem as **django-treebeard**, **django-mptt**
-and **django-treenode**: storing and querying tree (hierarchy) structures with
-Django. It does it differently: you add a `PathField` to an ordinary model
+django-tree solves the same problem as **django-treebeard**,
+**django-tree-queries**, **django-mptt** and **django-treenode**: storing and
+querying tree (hierarchy) structures with Django. It does it differently: you add a `PathField` to an ordinary model
 with a self-referencing `ForeignKey`, and the hierarchy is maintained
 **inside PostgreSQL by a trigger** — not in Python. There is no model, manager
 or queryset to subclass; an optional `TreeModelMixin` only adds convenience
@@ -28,28 +28,29 @@ consistent.
 > out: its reads are slow enough to rule it out for most projects (see the
 > [detailed benchmark](benchmark/results/results.md)).
 
-| | django-tree | [django-treebeard](https://github.com/django-treebeard/django-treebeard) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
-|---|:---:|:---:|:---:|:---:|
-| **Works on any Django database** | ❌ PostgreSQL only | ✅ | ✅ | ✅ |
-| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
-| **Build & move with plain `parent` + `save()`** | ✅ | ❌ `add_child()`/`move()` API | ✅ | ✅ |
-| **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python | ❌ in Python | ❌ in Python + cache |
-| **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only | ❌ | ❌ manual resync |
-| **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__level` | 🟡 manager methods | 🟡 manager methods | 🟡 cached properties |
-| **Fast reads** | ✅ [\*](#bench) | ✅ MP fast [\*](#bench) | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
-| **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 MP ok [\*](#bench)<br>_NS slow_ | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
-| **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ❌ MP path strings [\*](#bench)<br>_NS lighter_ | ❌ 4 indexed columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
-| **Admin integration** | ❌ form field only | ✅ drag-and-drop | ✅ drag-and-drop | ✅ |
-| **Template tags to render trees** | ❌ | 🟡 | ✅ `{% recursetree %}` | 🟡 |
-| **Production-ready** | ❌ beta | ✅ | 🟡 works, unmaintained | ✅ |
-| **Actively maintained** | 🟡 beta | ✅ | ❌ unmaintained | ✅ |
+| | django-tree | [django-treebeard](https://github.com/django-treebeard/django-treebeard) | [django-tree-queries](https://github.com/feincms/django-tree-queries) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Works on any Django database** | ❌ PostgreSQL only | ✅ | ✅ | ✅ | ✅ |
+| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `TreeNode` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
+| **Build & move with plain `parent` + `save()`** | ✅ | ❌ `add_child()`/`move()` API | ✅ | ✅ | ✅ |
+| **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python | ❌ in Python + cache |
+| **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only | ✅ | ❌ | ❌ manual resync |
+| **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__level` | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 manager methods | 🟡 cached properties |
+| **Fast reads** | ✅ [\*](#bench) | ✅ MP fast [\*](#bench) | 🟡 recursive CTE [\*](#bench) | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
+| **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 MP ok [\*](#bench)<br>_NS slow_ | ✅ FK update [\*](#bench) | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
+| **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ❌ MP path strings [\*](#bench)<br>_NS lighter_ | ✅ just a FK [\*](#bench) | ❌ 4 indexed columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
+| **Admin integration** | ❌ form field only | ✅ drag-and-drop | ✅ cut/paste | ✅ drag-and-drop | ✅ |
+| **Template tags to render trees** | ❌ | 🟡 | ✅ `{% recursetree %}` | ✅ `{% recursetree %}` | 🟡 |
+| **Production-ready** | ❌ beta | ✅ | ✅ | 🟡 works, unmaintained | ✅ |
 
 ✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
 
 <a id="bench"></a>
 \* Performance ratings come from [our benchmark against the other
-libraries](benchmark/results/results.md) (django-treenode is not included; its
-profile — very fast cached reads, heavy writes — is taken from its design).
+libraries](benchmark/results/results.md) (django-tree-queries and
+django-treenode are not in it; their profiles — a recursive query per read but
+cheap writes and storage for the former, very fast cached reads but heavy
+writes for the latter — are taken from their design).
 
 In short:
 
@@ -59,6 +60,9 @@ In short:
   tree-rendering template tags yet.
 - **treebeard** in its usual MP form reads fast and is well maintained, but
   enforces no database constraint and only stays correct through its Python API.
+- **tree-queries** derives the hierarchy from a plain `parent` FK with recursive
+  CTEs, so nothing can get out of sync, writes are cheap and it runs on most
+  databases — at the cost of a recursive query on every read.
 - **MPTT** stores the tree safely but writes get very slow on large or
   write-heavy tables and need periodic rebuilds. No longer maintained.
 - **treenode** caches everything for very fast reads, but every write
