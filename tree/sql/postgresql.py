@@ -146,7 +146,8 @@ def get_update_paths_function_creation(
     ):
         order_by = [*order_by, 'pk']
 
-    # TODO: Handle related lookups in `order_by`.
+    # TODO: `order_by` resolves local model fields and `pk` only; related lookups
+    #       (e.g. `parent__name`) are not yet supported here.
     where_columns = []
     descending_flags = []
     sql_order_by = []
@@ -180,7 +181,12 @@ def get_update_paths_function_creation(
     # firing. `NEW`/`OLD` are referenced directly (PL/pgSQL passes their fields as
     # query parameters).
     rebuild = f"""
-        -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
+        -- NOTE: This full rebuild does not lock the rows it reparents, so a
+        -- concurrent write during the rebuild is not serialized. `FOR UPDATE`
+        -- cannot be added here: the recursive term uses window functions
+        -- (`row_number()` / `count(*) OVER`), which PostgreSQL forbids together
+        -- with row-level locking. A different rebuild shape would be needed to
+        -- close this race.
         WITH RECURSIVE generate_paths(pk, path) AS ((
                 SELECT {parent}, ''::bytea
                 FROM {table}
@@ -368,19 +374,24 @@ CREATE_TRIGGER_QUERIES = (
     END;
     $$ LANGUAGE plpgsql;
     """,
-    # TODO: Find a way to create this unique constraint
-    #       somewhere else.
+    # The path uniqueness constraint is created here (alongside the trigger)
+    # rather than via Django's `unique=True`/`Index` machinery because it must be
+    # `INITIALLY DEFERRED`: a reparent or rebuild shifts many rows' paths within a
+    # single statement, so a moved node transiently shares a path with another row
+    # mid-statement. Immediate (per-row) checking would reject those valid
+    # intermediate states; deferring the check to commit time lets the statement
+    # finish with the tree once again consistent. Django's field/index API can't
+    # express `INITIALLY DEFERRED`, hence the raw DDL here.
     """
     ALTER TABLE {table}
     ADD CONSTRAINT {constraint} UNIQUE ({path})
-    -- FIXME: Remove this `INITIALLY DEFERRED` whenever possible.
     INITIALLY DEFERRED;
     """,
 )
 
 DROP_TRIGGER_QUERIES = (
-    # TODO: Find a way to delete this unique constraint
-    #       somewhere else.
+    # Dropped here for symmetry with its creation above (see the deferred-constraint
+    # rationale in `CREATE_TRIGGER_QUERIES`).
     'ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint};'
     'DROP TRIGGER IF EXISTS "update_{path}_before" ON {table};',
     'DROP FUNCTION IF EXISTS {function}();',

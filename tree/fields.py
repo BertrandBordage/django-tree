@@ -12,7 +12,6 @@ from .types import Path
 
 
 # TODO: Handle ManyToManyField('self') instead of ForeignKey('self').
-# TODO: Add queryset methods like `get_descendants` in a mixin.
 # TODO: Implement an alternative for other db backends.
 
 

@@ -44,7 +44,8 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
         parent_field = path_field.parent_field
         order_by = path_field.order_by
 
-        # TODO: Handle related lookups in `order_by`.
+        # TODO: `order_by` resolves local model fields and `pk` only; related
+        #       lookups (e.g. `parent__name`) are not yet supported here.
         path = quote_ident(path_field.attname)
         parent = quote_ident(parent_field.attname)
         # The parent column must be watched too, otherwise re-parenting through
