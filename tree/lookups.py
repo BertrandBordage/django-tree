@@ -6,12 +6,16 @@ from django.db.models import Lookup
 # constraint created by `CreateTreeTrigger`), instead of slicing the column
 # (which is not sargable and forced dedicated slice indexes).
 #
+# A path is `<segment> 0x00` per level, with `0x00` the reserved level delimiter.
 # The descendants of a path P are exactly the rows whose path falls in
-# `[P, P || {Infinity})`: appending any element keeps the prefix and stays below
-# `P || {Infinity}`, while the next sibling (a larger value at P's last level)
-# sits above it. `Infinity` only exists for floating-point arrays, which is why
-# this relies on the `double precision` base type.
-INFINITY = "ARRAY['Infinity']::double precision[]"
+# `[P, tree_upper(P))`: `tree_upper(P)` drops P's trailing `0x00` delimiter and
+# appends `0x01`. Every descendant continues with the `0x00` delimiter (which
+# sorts below `0x01`), while the next sibling has a larger byte within P's last
+# segment and sorts at or above it. `0x01` thus plays the role the float
+# `Infinity` upper bound used to. `tree_upper` is the IMMUTABLE helper installed
+# with the trigger, so it stays a constant per query (index-friendly), and it
+# returns NULL for the empty prefix (the virtual root), leaving the range
+# unbounded above.
 
 
 class AncestorOf(Lookup):
@@ -21,7 +25,7 @@ class AncestorOf(Lookup):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
         return (
-            '%s = (%s)[:array_length(%s, 1)]' % (lhs, rhs, lhs),
+            '%s = substr(%s, 1, octet_length(%s))' % (lhs, rhs, lhs),
             lhs_params + rhs_params + lhs_params,
         )
 
@@ -33,7 +37,7 @@ class DescendantOf(Lookup):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
         return (
-            '%s >= %s AND %s < %s || %s' % (lhs, rhs, lhs, rhs, INFINITY),
+            '%s >= %s AND %s < tree_upper(%s)' % (lhs, rhs, lhs, rhs),
             lhs_params + rhs_params + lhs_params + rhs_params,
         )
 
@@ -46,10 +50,10 @@ class StrictDescendantOf(Lookup):
         rhs, rhs_params = self.process_rhs(compiler, connection)
         # Same range as `descendant_of`, but the strict lower bound `> P` excludes
         # P itself. Since the path is `UNIQUE`, P matches exactly one row (the node
-        # itself), so this returns its strict descendants without the extra
-        # `array_length(...) > N` predicate.
+        # itself), so this returns its strict descendants without an extra depth
+        # predicate.
         return (
-            '%s > %s AND %s < %s || %s' % (lhs, rhs, lhs, rhs, INFINITY),
+            '%s > %s AND %s < tree_upper(%s)' % (lhs, rhs, lhs, rhs),
             lhs_params + rhs_params + lhs_params + rhs_params,
         )
 
@@ -61,9 +65,8 @@ class ChildOf(Lookup):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
         return (
-            '%s > %s AND %s < %s || %s '
-            'AND array_length(%s, 1) = array_length(%s, 1) + 1'
-            % (lhs, rhs, lhs, rhs, INFINITY, lhs, rhs),
+            '%s > %s AND %s < tree_upper(%s) '
+            'AND tree_level(%s) = tree_level(%s) + 1' % (lhs, rhs, lhs, rhs, lhs, rhs),
             lhs_params + rhs_params + lhs_params + rhs_params + lhs_params + rhs_params,
         )
 
@@ -74,19 +77,21 @@ class SiblingOf(Lookup):
     def as_sql(self, compiler, connection):
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
-        # The siblings of P are the children of its parent, i.e. the rows sharing
-        # the prefix `P[:-1]` and having the same depth as P.
-        # TODO: Simplify the parent slice using `trim_array`
-        #       once support for PostgreSQL < 14 is dropped.
-        parent = '(%s)[:array_length(%s, 1) - 1]' % (rhs, rhs)
+        # The siblings of P are the children of its parent, i.e. the rows in the
+        # parent's descendant range at P's depth. `tree_parent_prefix(P)` strips
+        # P's own segment (and trailing delimiter), yielding the parent path. For
+        # a root that prefix is empty, so `tree_upper` returns NULL and the upper
+        # bound is dropped (every other root qualifies).
+        parent = 'tree_parent_prefix(%s)' % rhs
         return (
-            '%s > %s AND %s < %s || %s '
-            'AND array_length(%s, 1) = array_length(%s, 1)'
-            % (lhs, parent, lhs, parent, INFINITY, lhs, rhs),
+            '%s > %s AND (tree_upper(%s) IS NULL OR %s < tree_upper(%s)) '
+            'AND tree_level(%s) = tree_level(%s)'
+            % (lhs, parent, parent, lhs, parent, lhs, rhs),
             lhs_params
-            + rhs_params * 2
+            + rhs_params
+            + rhs_params
             + lhs_params
-            + rhs_params * 2
+            + rhs_params
             + lhs_params
             + rhs_params,
         )

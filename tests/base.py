@@ -48,7 +48,35 @@ from .models import (
 
 
 def path(*path_components):
+    # A reference path used only as a *structural* descriptor: its length encodes
+    # the node's depth and its prefix relationships encode ancestry. The stored
+    # `bytea` keys are an implementation detail of the trigger, so tests assert the
+    # tree's shape (order, depth, ancestry) rather than literal path values.
     return [float(value) for value in path_components]
+
+
+def assert_structure(test, instances, values, label=lambda p: p.name):
+    """Assert that ``instances`` (in path order) match the reference ``values``.
+
+    ``values`` is a list of ``(reference_path, label)`` tuples. Three things are
+    checked: the labels appear in the given order, each node's depth matches the
+    reference path length, and ancestry (byte-prefix of the real paths) matches
+    the prefix relationships of the reference paths.
+    """
+    refs = [v[0] for v in values]
+    test.assertListEqual([label(p) for p in instances], [v[-1] for v in values])
+    test.assertListEqual(
+        [p.path.get_level() for p in instances], [len(r) for r in refs]
+    )
+    for i, ref_i in enumerate(refs):
+        for j, ref_j in enumerate(refs):
+            expected = list(ref_j[: len(ref_i)]) == list(ref_i)
+            actual = instances[j].path.value.startswith(instances[i].path.value)
+            test.assertEqual(
+                expected,
+                actual,
+                'ancestry mismatch between %r and %r' % (values[i][-1], values[j][-1]),
+            )
 
 
 class CommonTest(TransactionTestCase):
@@ -112,7 +140,7 @@ class CommonTest(TransactionTestCase):
             if queryset is None:
                 queryset = Place.objects.all()
             places = list(queryset)
-            self.assertListEqual([(p.path.value, p.name) for p in places], values)
+        assert_structure(self, places, values)
 
 
 class PathTest(CommonTest):
@@ -124,17 +152,18 @@ class PathTest(CommonTest):
         # 1 query because the path got deferred,  forcing Django to run
         # a new query to get the updated value when we need it. Same below.
         with self.assertNumQueries(1):
-            self.assertEqual(place1.path.value, path(0))
+            self.assertTrue(place1.path.is_root())
         with self.assertNumQueries(1):
             place2 = Place.objects.create(name='place2', parent=place1)
         with self.assertNumQueries(1):
-            self.assertEqual(place2.path.value, path(0, 0))
+            self.assertEqual(place2.path.get_level(), 2)
+            self.assertTrue(place2.path.is_descendant_of(place1.path))
         with self.assertNumQueries(1):
             place2.parent = None
             place2.clean()
             place2.save()
         with self.assertNumQueries(1):
-            self.assertEqual(place2.path.value, path(1))
+            self.assertTrue(place2.path.is_root())
 
     def test_insert(self):
         it = self.create_test_places()
@@ -1978,7 +2007,9 @@ class PathTest(CommonTest):
         with Place.disabled_tree_trigger():
             updated_places = []
             for i, place in enumerate(Place.objects.order_by('name')):
-                place.path = [i]
+                # Assign arbitrary, distinct single-segment paths (byte values
+                # increase with `i`, so path order follows name order).
+                place.path = bytes([i + 2]) + b'\x00'
                 updated_places.append(place)
             Place.objects.bulk_update(updated_places, ['path'])
         self.assertPlaces(
@@ -2000,7 +2031,8 @@ class PathTest(CommonTest):
 
         # Root
         with Place.disabled_tree_trigger():
-            Place.objects.filter(name='France').update(path=[89])
+            # A level-1 path that sorts after every other root.
+            Place.objects.filter(name='France').update(path=b'\xff\x00')
         self.assertPlaces(
             [
                 (path(0, 0), 'Normandie'),
@@ -2020,7 +2052,8 @@ class PathTest(CommonTest):
 
         # Branch
         with Place.disabled_tree_trigger():
-            Place.objects.filter(name='Normandie').update(path=[89, 89])
+            # A level-2 path detached from France's subtree, sorting last.
+            Place.objects.filter(name='Normandie').update(path=b'\xff\x00\xff\x00')
         self.assertPlaces(
             [
                 (path(0), 'France'),
@@ -2040,7 +2073,11 @@ class PathTest(CommonTest):
 
         # Leaf
         with Place.disabled_tree_trigger():
-            Place.objects.filter(name='Seine-Maritime').update(path=[0, 89])
+            # A level-2 path under France that sorts after France's children.
+            france = Place.objects.get(name='France')
+            Place.objects.filter(name='Seine-Maritime').update(
+                path=france.path.value + b'\xff\x00'
+            )
         self.assertPlaces(
             [
                 (path(0), 'France'),
@@ -2188,10 +2225,14 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
             if queryset is None:
                 queryset = Person.objects.all()
             persons = list(queryset)
-            self.assertListEqual(
-                [(p.path.value, p.century, p.first_name, p.last_name) for p in persons],
-                values,
-            )
+        # Reuse the structural check, labelling each person by its ordering
+        # fields. `values` rows are `(reference_path, century, first, last)`.
+        assert_structure(
+            self,
+            persons,
+            [(v[0], v[1:]) for v in values],
+            label=lambda p: (p.century, p.first_name, p.last_name),
+        )
 
     def test_rebuild(self):
         self.assertPersons(self.correct_raw_persons_data)
@@ -2199,10 +2240,11 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
             for i, person in enumerate(
                 Person.objects.order_by('-last_name', '-first_name')
             ):
-                # We add 10 to make sure
-                # we do not clash with the existing paths.
-                person.path = [10 + i]
-                person.clean()
+                # Assign distinct single-segment paths that cannot collide with
+                # the existing ones; the segment grows with `i` so path order
+                # follows the iteration order. This deliberately flattens the
+                # tree before rebuilding it.
+                person.path = b'\xff' + bytes([i + 1]) + b'\x00'
                 person.save()
         self.assertPersons(
             [
@@ -2348,24 +2390,23 @@ class QuerySetTest(CommonTest):
 class Issue17Test(CommonTest):
     # https://github.com/BertrandBordage/django-tree/issues/17
     #
-    # Inserting a node normally uses the midpoint between the previous and the
-    # next sibling values. When many nodes are inserted into the same gap, the
-    # float8 path values would eventually get crammed together until the
-    # computed midpoint rounds to a value that already exists, raising an
-    # IntegrityError on the unique constraint of the path column (the error
-    # reported in #17 was `Key (path)=({277.9999999987}) already exists`).
+    # Inserting a node uses an order-preserving key strictly between the previous
+    # and the next sibling's segments. With the old float8 paths, cramming many
+    # nodes into one gap exhausted the bisection headroom until a computed
+    # midpoint collided with an existing value, raising an IntegrityError on the
+    # path unique constraint (the error reported in #17 was
+    # `Key (path)=({277.9999999987}) already exists`).
     #
-    # The trigger now detects an exhausted gap and renumbers the siblings to
-    # consecutive integers, spacing them back out, so the insertions keep
-    # distinct paths however many land in the same gap.
+    # With the `bytea` fractional-index keys a tight gap simply grows the key by a
+    # byte, so the insertions keep distinct, ordered paths however many land in
+    # the same gap -- no renumbering needed.
     def test_inserting_many_nodes_in_the_same_gap(self):
         root = self.create_place('root')
         # Two siblings delimiting the gap we will keep inserting into.
         self.create_place('a', root)
         self.create_place('b', root)
-        # Each new name sorts after the previous one but still before 'b', so
-        # the trigger keeps halving the gap toward 'b''s value. With float8
-        # paths the gap is exhausted in well under 70 insertions.
+        # Each new name sorts after the previous one but still before 'b', so the
+        # gap toward 'b' keeps halving -- far past where float8 ran out.
         n = 69
         for i in range(1, n + 1):
             self.create_place('a%04d' % i, root)
@@ -2375,12 +2416,10 @@ class Issue17Test(CommonTest):
         self.assertEqual(len(paths), n + 3)
         self.assertEqual(len(set(paths)), len(paths))
 
-    def test_renumbering_a_crammed_gap_updates_descendants(self):
+    def test_cramming_a_gap_keeps_descendants_consistent(self):
         # Same crammed-gap scenario, but the bounding siblings carry their own
-        # subtrees. Exhausting the gap forces the trigger to renumber root's
-        # children; every descendant's path must be rewritten so it stays under
-        # its ancestor (otherwise the renumbered sibling and its subtree split
-        # apart).
+        # subtrees. Cramming the gap must never disturb a sibling's subtree:
+        # every descendant must stay strictly under its ancestor.
         root = self.create_place('root')
         # 'a' is the lower bound and has a two-level subtree.
         a = self.create_place('a', root)
@@ -2390,7 +2429,7 @@ class Issue17Test(CommonTest):
         z = self.create_place('z', root)
         self.create_place('z1', z)
         # Cram many nodes into the (a, z) gap, each sorting just before 'z', so
-        # the gap is halved until it is exhausted and the trigger renumbers.
+        # the gap is halved well past where float8 would have run out.
         n = 60
         for i in range(1, n + 1):
             self.create_place('b%04d' % i, root)
@@ -2403,17 +2442,17 @@ class Issue17Test(CommonTest):
         self.assertEqual(len(set(paths)), len(paths))
 
         # Every node sits directly under its FK parent in the path space: its
-        # path is the parent's path plus exactly one extra component. A
-        # descendant left behind by the renumbering would fail this.
+        # path extends the parent's path by exactly one level. A descendant left
+        # behind by the gap growth would fail this.
         for p in places:
             if p.parent_id is None:
-                self.assertEqual(len(p.path.value), 1)
+                self.assertEqual(p.path.get_level(), 1)
             else:
-                parent_path = by_pk[p.parent_id].path.value
-                self.assertEqual(p.path.value[: len(parent_path)], parent_path)
-                self.assertEqual(len(p.path.value), len(parent_path) + 1)
+                parent_path = by_pk[p.parent_id].path
+                self.assertTrue(p.path.value.startswith(parent_path.value))
+                self.assertEqual(p.path.get_level(), parent_path.get_level() + 1)
 
-        # The bounding subtrees survived the renumbering intact and ordered.
+        # The bounding subtrees survived the gap cramming intact and ordered.
         a = Place.objects.get(name='a')
         self.assertEqual(
             [p.name for p in a.get_descendants(include_self=True).order_by('path')],
@@ -2425,7 +2464,7 @@ class Issue17Test(CommonTest):
             ['z', 'z1'],
         )
 
-        # Root's children stay in ascending name order after the renumbers.
+        # Root's children stay in ascending name order after the cramming.
         child_names = list(
             root.get_children().order_by('path').values_list('name', flat=True)
         )
@@ -2451,7 +2490,7 @@ class DescendingOrderByTest(TransactionTestCase):
                 DescendingPlace.objects.create(name=name, parent=root)
         DescendingPlace.rebuild_paths()
         root = DescendingPlace.objects.get(name='Root')
-        self.assertEqual(root.path.value, path(0))
+        self.assertTrue(root.path.is_root())
         self.assertListEqual(
             self._children_names_by_path(root), ['Gamma', 'Beta', 'Alpha']
         )
@@ -2528,24 +2567,15 @@ class NonIntegerPrimaryKeyTest(TransactionTestCase):
         self.assertIsInstance(root.pk, uuid.UUID)
         UUIDPlace.objects.create(name='Aaa', parent=root)
         UUIDPlace.objects.create(name='Bbb', parent=root)
-        self.assertListEqual(
-            [(p.path.value, p.name) for p in UUIDPlace.objects.order_by('path')],
-            [
-                (path(0), 'Root'),
-                (path(0, 0), 'Aaa'),
-                (path(0, 1), 'Bbb'),
-            ],
-        )
+        expected = [
+            (path(0), 'Root'),
+            (path(0, 0), 'Aaa'),
+            (path(0, 1), 'Bbb'),
+        ]
+        assert_structure(self, list(UUIDPlace.objects.order_by('path')), expected)
         # Rebuild is stable on a non-integer pk.
         UUIDPlace.rebuild_paths()
-        self.assertListEqual(
-            [(p.path.value, p.name) for p in UUIDPlace.objects.order_by('path')],
-            [
-                (path(0), 'Root'),
-                (path(0, 0), 'Aaa'),
-                (path(0, 1), 'Bbb'),
-            ],
-        )
+        assert_structure(self, list(UUIDPlace.objects.order_by('path')), expected)
 
     def test_uuid_pk_breaks_order_by_ties(self):
         # The trigger appends `pk` to `order_by` to break ties between siblings
@@ -2557,18 +2587,18 @@ class NonIntegerPrimaryKeyTest(TransactionTestCase):
         # The two same-named siblings get distinct paths and stay direct
         # children of root. Their exact values on insert depend on the random
         # UUID tie-break, so only the distinctness/depth is asserted here.
-        children_paths = [
-            tuple(p.path.value) for p in UUIDPlace.objects.exclude(pk=root.pk)
-        ]
-        self.assertEqual(len(set(children_paths)), 2)
-        for child_path in children_paths:
-            self.assertEqual(len(child_path), 2)
-            self.assertEqual(child_path[0], 0.0)
-        # A rebuild normalises the tie-break to consecutive integer slots,
-        # whichever UUID happens to sort first.
+        root = UUIDPlace.objects.get(name='Root')
+        children = list(UUIDPlace.objects.exclude(pk=root.pk))
+        self.assertEqual(len({c.path.value for c in children}), 2)
+        for child in children:
+            self.assertEqual(child.path.get_level(), 2)
+            self.assertTrue(child.path.is_descendant_of(root.path))
+        # A rebuild normalises the tie-break to consecutive slots, whichever UUID
+        # happens to sort first.
         UUIDPlace.rebuild_paths()
-        self.assertListEqual(
-            [(p.path.value, p.name) for p in UUIDPlace.objects.order_by('path')],
+        assert_structure(
+            self,
+            list(UUIDPlace.objects.order_by('path')),
             [
                 (path(0), 'Root'),
                 (path(0, 0), 'Same'),
@@ -2585,7 +2615,7 @@ class OnDeleteBehaviourTest(TransactionTestCase):
     def test_set_null_keeps_children(self):
         root = SetNullPlace.objects.create(name='Root')
         child = SetNullPlace.objects.create(name='Child', parent=root)
-        self.assertEqual(child.path.value, path(0, 0))
+        self.assertEqual(child.path.get_level(), 2)
         # Delete only the parent row (not the whole subtree): the FK is
         # `SET_NULL`, so the child survives with a null parent.
         SetNullPlace.objects.filter(pk=root.pk).delete()
@@ -2594,21 +2624,24 @@ class OnDeleteBehaviourTest(TransactionTestCase):
         # The `SET_NULL` update fires the path trigger, so the now-orphan child
         # is re-pathed as a root immediately (its exact value depends on the
         # sibling ordering at delete time, hence only the depth is asserted).
-        self.assertEqual(len(child.path.value), 1)
+        self.assertEqual(child.path.get_level(), 1)
         SetNullPlace.rebuild_paths()
         child.refresh_from_db()
-        self.assertEqual(child.path.value, path(0))
+        self.assertTrue(child.path.is_root())
 
     def test_protect_blocks_parent_deletion(self):
         root = ProtectPlace.objects.create(name='Root')
         child = ProtectPlace.objects.create(name='Child', parent=root)
-        self.assertEqual(child.path.value, path(0, 0))
+        self.assertEqual(child.path.get_level(), 2)
         # The FK is `PROTECT`, so deleting a referenced parent is refused.
         with self.assertRaises(ProtectedError):
             ProtectPlace.objects.filter(pk=root.pk).delete()
         # The whole tree is left untouched by the refused deletion.
-        self.assertEqual(ProtectPlace.objects.get(pk=root.pk).path.value, path(0))
-        self.assertEqual(ProtectPlace.objects.get(pk=child.pk).path.value, path(0, 0))
+        root = ProtectPlace.objects.get(pk=root.pk)
+        child = ProtectPlace.objects.get(pk=child.pk)
+        self.assertTrue(root.path.is_root())
+        self.assertEqual(child.path.get_level(), 2)
+        self.assertTrue(child.path.is_descendant_of(root.path))
 
 
 class UnusualTableNameTest(TransactionTestCase):
@@ -2636,10 +2669,8 @@ class UnusualTableNameTest(TransactionTestCase):
 
         root = WeirdTableNamePlace.objects.create(name='Root')
         WeirdTableNamePlace.objects.create(name='Child', parent=root)
-        self.assertEqual(
-            WeirdTableNamePlace.objects.get(name='Root').path.value, path(0)
-        )
-        self.assertEqual(
-            WeirdTableNamePlace.objects.get(name='Child').path.value,
-            path(0, 0),
-        )
+        root = WeirdTableNamePlace.objects.get(name='Root')
+        child = WeirdTableNamePlace.objects.get(name='Child')
+        self.assertTrue(root.path.is_root())
+        self.assertEqual(child.path.get_level(), 2)
+        self.assertTrue(child.path.is_descendant_of(root.path))

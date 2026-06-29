@@ -3,6 +3,10 @@ from django.db.models import QuerySet
 from django.utils.functional import cached_property
 
 
+# The level delimiter separating path segments (see `tree.sql.postgresql`).
+DELIMITER = b'\x00'
+
+
 class Path:
     def __init__(self, field, value):
         # Kept minimal: `from_db_value` builds a `Path` for every fetched row, so
@@ -26,6 +30,14 @@ class Path:
         if self.field_bound:
             return self.field.model._default_manager.all()
         return QuerySet()
+
+    @cached_property
+    def _segments(self):
+        # The per-level segments, without their `0x00` terminators. A stored path
+        # always ends with a delimiter, so the trailing empty split is dropped.
+        if not self.value:
+            return []
+        return self.value.split(DELIMITER)[:-1]
 
     def __repr__(self):
         if self.field_bound:
@@ -86,7 +98,7 @@ class Path:
         return self.value >= other
 
     def __iter__(self):
-        return iter(self.value)
+        return iter(self._segments)
 
     def get_children(self):
         if not self.value:
@@ -100,22 +112,23 @@ class Path:
     def get_ancestors(self, include_self=False):
         if not self.value or (self.is_root() and not include_self):
             return self.qs.none()
-        path = self.value
+        segments = self._segments
         if not include_self:
-            path = path[:-1]
-        # Using the lookup `ancestor_of` here is slower,
-        # so we explicitly specify the ancestors’ paths.
-        return self.qs.filter(
-            **{self.attname + '__in': [path[:i] for i in range(1, len(path) + 1)]}
-        )
+            segments = segments[:-1]
+        # Using the lookup `ancestor_of` here is slower, so we explicitly specify
+        # the ancestors’ paths (each prefix ending on a `0x00` delimiter).
+        paths = [
+            DELIMITER.join(segments[:i]) + DELIMITER
+            for i in range(1, len(segments) + 1)
+        ]
+        return self.qs.filter(**{self.attname + '__in': paths})
 
     def get_descendants(self, include_self=False):
         if not self.value:
             return self.qs.none()
         # Both lookups are range comparisons on the whole path, so they use the
         # btree index backing the path instead of a dedicated slice index. The
-        # strict variant excludes self via `> P` alone, avoiding a second
-        # `array_length(...)` predicate.
+        # strict variant excludes self via `> P` alone.
         lookup = 'descendant_of' if include_self else 'strict_descendant_of'
         return self.qs.filter(**{f'{self.attname}__{lookup}': self.value})
 
@@ -186,61 +199,90 @@ class Path:
 
     def get_level(self):
         if self.value:
-            return len(self.value)
+            return len(self._segments)
 
     def is_root(self):
         if self.value:
-            return len(self.value) == 1
+            return len(self._segments) == 1
 
     def is_leaf(self):
         if self.value:
             return not self.get_children().exists()
 
-    def is_ancestor_of(self, other, include_self=False):
-        if not self.value:
-            return False
+    @staticmethod
+    def _as_bytes(other):
         if isinstance(other, Path):
             other = other.value
         if not other:
+            return None
+        if not isinstance(other, (bytes, bytearray, memoryview)):
+            raise TypeError('`other` must be a `Path` instance or a bytes path.')
+        return bytes(other)
+
+    def is_ancestor_of(self, other, include_self=False):
+        if not self.value:
             return False
-        if not isinstance(other, list):
-            raise TypeError('`other` must be a `Path` instance or a list of floats.')
+        other = self._as_bytes(other)
+        if other is None:
+            return False
         if not include_self and self.value == other:
             return False
-        return other[: len(self.value)] == self.value
+        # The `0x00` terminator of `self.value` makes this a level-aligned prefix
+        # test, so a sibling that merely shares leading bytes cannot match.
+        return other.startswith(self.value)
 
     def is_descendant_of(self, other, include_self=False):
         if not self.value:
             return False
-        if isinstance(other, Path):
-            other = other.value
-        if not other:
+        other = self._as_bytes(other)
+        if other is None:
             return False
-        if not isinstance(other, list):
-            raise TypeError('`other` must be a `Path` instance or a list of floats.')
         if not include_self and self.value == other:
             return False
-        return self.value[: len(other)] == other
+        return self.value.startswith(other)
 
     @staticmethod
     def register_psycopg2():
-        from psycopg2.extensions import register_adapter, adapt
+        from psycopg2 import Binary
+        from psycopg2.extensions import register_adapter, AsIs
 
         def adapt_path(path):
-            return adapt(path.value)
+            if path.value is None:
+                return AsIs('NULL')
+            return Binary(path.value)
 
         register_adapter(Path, adapt_path)
 
     @staticmethod
-    def register_psycopg3():
+    def _psycopg3_dumper(fmt):
+        # psycopg3's built-in bytea dumpers are C types that cannot be subclassed,
+        # so emit the wire format directly: raw bytes for the binary format, the
+        # `\x<hex>` escape for the text one.
         import psycopg
-        from psycopg.types.string import StrDumper
+        from psycopg.adapt import Dumper
+        from psycopg import pq
 
-        class PathDumper(StrDumper):
-            def quote(self, obj: Path):
-                return psycopg.sql.quote(obj.value).encode()
+        bytea_oid = psycopg.adapters.types['bytea'].oid
 
-        psycopg.adapters.register_dumper(Path, PathDumper)
+        class PathDumper(Dumper):
+            format = fmt
+            oid = bytea_oid
+
+            def dump(self, obj):
+                value = b'' if obj.value is None else obj.value
+                if self.format == pq.Format.BINARY:
+                    return value
+                return b'\\x' + value.hex().encode()
+
+        return PathDumper
+
+    @classmethod
+    def register_psycopg3(cls):
+        import psycopg
+        from psycopg import pq
+
+        for fmt in (pq.Format.TEXT, pq.Format.BINARY):
+            psycopg.adapters.register_dumper(Path, cls._psycopg3_dumper(fmt))
 
     @classmethod
     def register_psycopg(cls):

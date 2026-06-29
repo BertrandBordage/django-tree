@@ -18,7 +18,7 @@ from ..models import get_random_name
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('tree', '0001_initial'),
+        ('tree', '0003_tree_functions'),
     ]
 
     operations = [
