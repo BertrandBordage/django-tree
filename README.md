@@ -1,12 +1,14 @@
 # Django-tree
 
-## ⚠ Open to financing MySQL & SQLite compatibility ⚠
-
-Fast and easy tree structures.
+Fast and easy tree structures for Django, maintained inside PostgreSQL.
 
 [![](https://img.shields.io/pypi/v/django-tree.svg?style=flat-square)](https://pypi.python.org/pypi/django-tree) [![](https://img.shields.io/github/actions/workflow/status/BertrandBordage/django-tree/ci.yml?branch=master&style=flat-square)](https://github.com/BertrandBordage/django-tree/actions/workflows/ci.yml) [![](https://img.shields.io/codecov/c/github/BertrandBordage/django-tree/master.svg?style=flat-square)](https://codecov.io/gh/BertrandBordage/django-tree)
 
-**In beta, it can’t be used yet in production.**
+> [!WARNING]
+> In beta — not production-ready yet.
+
+> [!NOTE]
+> Open to financing MySQL & SQLite compatibility (PostgreSQL only today).
 
 django-tree solves the same problem as **django-treebeard**,
 **django-tree-queries**, **django-mptt** and **django-treenode**: storing and
@@ -17,6 +19,18 @@ or queryset to subclass; an optional `TreeModelMixin` only adds convenience
 methods (`get_descendants()`, `get_ancestors()`, …). Because the logic lives in
 the database, bulk operations, `QuerySet.update()` and raw SQL all keep the tree
 consistent.
+
+
+## Table of contents
+
+- [Comparison](#comparison)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Usage](#usage)
+- [Differences with MPTT and treebeard](#differences-with-mptt-and-treebeard)
+- [Contributing](#contributing)
+- [License](#license)
 
 
 ## Comparison
@@ -52,18 +66,18 @@ measurement; below it, the rank in that row (`#n`) and a marker.
 
 | | django-tree | treebeard MP | treebeard NS | treebeard AL | django-mptt | django-tree-queries | django-treenode |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| **Reads · best** | 195 µs<br>🟢 #7 | 0.5 µs<br>👑🟢 #1 | 0.7 µs<br>🟢 #3 | 10 µs<br>🟢 #5 | 1.7 µs<br>🟢 #4 | 75 µs<br>🟢 #6 | 0.5 µs<br>👑🟢 #1 |
-| **Reads · typical** | 501 µs<br>🟢 #4 | 250 µs<br>👑🟢 #1 | 393 µs<br>🟢 #3 | 1.6 ms<br>🟢 #6 | 300 µs<br>🟢 #2 | 1.1 ms<br>🟢 #5 | 1.9 ms<br>🟢 #7 |
-| **Reads · worst** | 71 ms<br>👑🟠 #1 | 344 ms<br>🔴 #3 | 518 ms<br>🔴 #4 | 853 ms<br>🔴 #6 | 118 ms<br>🔴 #2 | 627 ms<br>🔴 #5 | 5 min<br>💩 #7 |
-| **Writes · best** | 418 µs<br>🟢 #6 | 235 µs<br>🟢 #4 | 205 µs<br>🟢 #3 | 193 µs<br>🟢 #2 | 307 µs<br>🟢 #5 | 183 µs<br>👑🟢 #1 | 390 ms<br>🔴 #7 |
-| **Writes · typical** | 2.5 ms<br>🟢 #3 | 5.7 ms<br>🟠 #4 | 6.1 ms<br>🟠 #5 | 969 µs<br>👑🟢 #1 | 13 ms<br>🟠 #6 | 1.0 ms<br>🟢 #2 | 837 ms<br>🔴 #7 |
-| **Writes · worst** | 1.9 s<br>💩 #3 | 9.0 s<br>💩 #4 | 21.8 s<br>💩 #6 | 926 ms<br>🔴 #2 | 19.0 s<br>💩 #5 | 829 ms<br>👑🔴 #1 | 25 min<br>💩 #7 |
-| **Storage** | 0.91 MB<br>🟢 #5 | 0.97 MB<br>🟢 #6 | 0.79 MB<br>🟢 #3 | 0.57 MB<br>👑🟢 #1 | 0.85 MB<br>🟢 #4 | 0.57 MB<br>👑🟢 #1 | 0.98 MB<br>🟢 #6 |
+| **Reads · best** | 195 µs<br>🟢 #7 | 0.5 µs<br>🟢 #1 👑 | 0.7 µs<br>🟢 #3 | 10 µs<br>🟢 #5 | 1.7 µs<br>🟢 #4 | 75 µs<br>🟢 #6 | 0.5 µs<br>🟢 #1 👑 |
+| **Reads · typical** | 501 µs<br>🟢 #4 | 250 µs<br>🟢 #1 👑 | 393 µs<br>🟢 #3 | 1.6 ms<br>🟢 #6 | 300 µs<br>🟢 #2 | 1.1 ms<br>🟢 #5 | 1.9 ms<br>🟢 #7 |
+| **Reads · worst** | 71 ms<br>🟠 #1 👑 | 344 ms<br>🔴 #3 | 518 ms<br>🔴 #4 | 853 ms<br>🔴 #6 | 118 ms<br>🔴 #2 | 627 ms<br>🔴 #5 | 5 min<br>💩 #7 |
+| **Writes · best** | 418 µs<br>🟢 #6 | 235 µs<br>🟢 #4 | 205 µs<br>🟢 #3 | 193 µs<br>🟢 #2 | 307 µs<br>🟢 #5 | 183 µs<br>🟢 #1 👑 | 390 ms<br>🔴 #7 |
+| **Writes · typical** | 2.5 ms<br>🟢 #3 | 5.7 ms<br>🟠 #4 | 6.1 ms<br>🟠 #5 | 969 µs<br>🟢 #1 👑 | 13 ms<br>🟠 #6 | 1.0 ms<br>🟢 #2 | 837 ms<br>🔴 #7 |
+| **Writes · worst** | 1.9 s<br>💩 #3 | 9.0 s<br>💩 #4 | 21.8 s<br>💩 #6 | 926 ms<br>🔴 #2 | 19.0 s<br>💩 #5 | 829 ms<br>🔴 #1 👑 | 25 min<br>💩 #7 |
+| **Storage** | 0.91 MB<br>🟢 #5 | 0.97 MB<br>🟢 #6 | 0.79 MB<br>🟢 #3 | 0.57 MB<br>🟢 #1 👑 | 0.85 MB<br>🟢 #4 | 0.57 MB<br>🟢 #1 👑 | 0.98 MB<br>🟢 #6 |
 
 Two results within 5 % share a rank. Markers use the same thresholds for reads
 and writes:
 
-- 👑 best of the row — shown before the severity marker.
+- 👑 best of the row — shown after the rank.
 - 🟢 fine · 🟠 laggy (> 3 ms) · 🔴 very laggy (> 100 ms) · 💩 horrible (> 1 s).
 
 See the [full benchmark](benchmark/results/results.md) for every test.
@@ -87,37 +101,31 @@ In short:
   resync.
 
 
-## Benchmark
+## Requirements
 
-[The detailed benchmark](benchmark/results/results.md) gives a good idea
-on how well django-tree performs compared to other Django solutions.
-All that while being simpler to use, more robust and fully generalized to raw SQL, bulk etc.
-
-A few noteworthy extracts of the benchmark (less is better):
-
-![](benchmark/results/postgresql_-_Create_all_objects.svg)
-![](benchmark/results/postgresql_-_Rebuild_paths.svg)
-![](benchmark/results/postgresql_-_Create_[root].svg)
+- **PostgreSQL** — the hierarchy is maintained by a PL/pgSQL trigger; other
+  databases are open work (see the note at the top).
+- **Django** 4.2+
+- **Python** 3.10+
 
 
 ## Installation
 
-Django-tree requires Django 4.2+ and Python 3.10+, and runs on PostgreSQL
-only. Support for other databases is open work (see the note at the top).
+Install the package from PyPI:
 
-After installing the module, you need to add `'tree',` to your
-`INSTALLED_APPS`, then add a `PathField` to a model with a
-`ForeignKey('self')`, typically named `parent` (use the `parent_field`
-argument of `CreateTreeTrigger` if the field has another name).
-`PathField` stores `Path` objects which have methods to execute queries,
-such as getting all the descendants of the current object, its siblings, etc.
-To call these methods more conveniently, you can add `TreeModelMixin`
-to your model.  The inheriting order is not important, as the mixin methods
-do not clash with Django.  If you have multiple `PathField`
-on the same model, you will have to specify the field name in the method
-you’re calling using `path_field`.
+```bash
+pip install django-tree
+```
 
-This should give you a model like this:
+Then add `'tree'` to your `INSTALLED_APPS`.
+
+
+## Quick start
+
+Add a `PathField` to a model that has a `ForeignKey('self')` — typically named
+`parent` — and add `TreeModelMixin` for the convenience query methods
+(`get_children()`, `get_descendants()`, …). The mixin order is not important,
+as its methods do not clash with Django.
 
 ```python
 from django.db.models import Model, CharField, ForeignKey, BooleanField
@@ -134,9 +142,9 @@ class YourModel(Model, TreeModelMixin):
         ordering = ['path']
 ```
 
-Then you need to create the SQL trigger that will automatically update `path`.
-To do that, create a migration with a dependency
-to the latest django-tree migration and add a `CreateTreeTrigger` operation:
+Then create a migration that depends on the latest django-tree migration and
+adds a `CreateTreeTrigger` operation — this installs the SQL trigger that keeps
+`path` up to date automatically:
 
 ```python
 from django.db import migrations
@@ -152,78 +160,23 @@ class Migration(migrations.Migration):
     ]
 ```
 
-If you already have data in `YourModel`, you will need to add an operation
-for allowing SQL `NULL` values before creating the trigger,
-then rebuild the paths and revert the allowance of `NULL` values:
+Once the trigger exists, the field maintains itself — building and moving nodes
+is just `parent` + `save()`:
 
 ```python
-from django.db import migrations
-from tree.fields import PathField
-from tree.operations import CreateTreeTrigger, RebuildPaths
-
-class Migration(migrations.Migration):
-    dependencies = [
-        ('tree', '0001_initial'),
-    ]
-
-    operations = [
-        migrations.AlterField('YourModel', 'path', PathField(null=True)),
-        CreateTreeTrigger('YourModel'),
-        RebuildPaths('YourModel', 'path'),
-        migrations.AlterField('YourModel', 'path', PathField()),
-    ]
+root = YourModel.objects.create(name='root')
+child = YourModel.objects.create(name='child', parent=root)
+root.get_descendants()   # QuerySet of every node under `root`
+child.get_ancestors()    # QuerySet from the root down to `child`'s parent
 ```
 
-However, the model above is not ordered. The children of a same parent will be
-ordered by primary key. You can specify how children are ordered using the
-`order_by` argument of `PathField`. If needed, you can add a field
-for users to explicitly order these objects, typically a position field.
-Example model:
+That's the whole setup. See [Usage](#usage) for the full API, custom child
+ordering, and adding the trigger to a table that already holds data.
 
-```python
-from django.db.models import (
-    Model, CharField, ForeignKey, IntegerField, BooleanField)
-from tree.fields import PathField
-from tree.models import TreeModelMixin
-
-class YourModel(Model, TreeModelMixin):
-    name = CharField(max_length=30)
-    parent = ForeignKey('self', null=True, blank=True)
-    position = IntegerField(default=1)
-    path = PathField(order_by=['position', 'name'])
-    public = BooleanField(default=False)
-
-    class Meta:
-        ordering = ['path']
-```
-
-And the corresponding migration:
-
-```python
-    from django.db import models, migrations
-    from tree.operations import CreateTreeTrigger
-
-    class Migration(migrations.Migration):
-        dependencies = [
-            ('tree', '0001_initial'),
-        ]
-
-        operations = [
-            migrations.AddField('YourModel', 'position',
-                                models.IntegerField(default=1))
-            CreateTreeTrigger('YourModel'),
-        ]
-```
-
-Here, the children of a same parent will be ordered by position, and then
-by name if the position is the same.
-
-> [!NOTE]
-> You can also use `PathField` without adding a `CreateTreeTrigger`
-> operation. However, the field will not automatically be updated, you
-> will have to do it by yourself. In most cases this is not useful, so you
-> should not use `PathField` without `CreateTreeTrigger` unless you know
-> what you are doing.
+If you have multiple `PathField`s on the same model, pass the field name as the
+`path_field` argument of the method you call. If your self-referencing key is
+not named `parent`, pass its name to the `parent_field` argument of
+`CreateTreeTrigger`.
 
 
 ## Usage
@@ -276,6 +229,77 @@ with YourModel.disabled_tree_trigger():
 There is also a bunch of less useful lookups and transforms
 available. They will be documented with examples in the future.
 
+### Ordering children
+
+By default the children of a same parent are ordered by primary key. Pass
+`order_by` to `PathField` to order them differently — for instance by an
+explicit position field, falling back to the name:
+
+```python
+from django.db.models import (
+    Model, CharField, ForeignKey, IntegerField, BooleanField)
+from tree.fields import PathField
+from tree.models import TreeModelMixin
+
+class YourModel(Model, TreeModelMixin):
+    name = CharField(max_length=30)
+    parent = ForeignKey('self', null=True, blank=True)
+    position = IntegerField(default=1)
+    path = PathField(order_by=['position', 'name'])
+    public = BooleanField(default=False)
+
+    class Meta:
+        ordering = ['path']
+```
+
+And the corresponding migration:
+
+```python
+from django.db import models, migrations
+from tree.operations import CreateTreeTrigger
+
+class Migration(migrations.Migration):
+    dependencies = [
+        ('tree', '0001_initial'),
+    ]
+
+    operations = [
+        migrations.AddField('YourModel', 'position',
+                            models.IntegerField(default=1)),
+        CreateTreeTrigger('YourModel'),
+    ]
+```
+
+### Adding the trigger to a table that already has data
+
+If `YourModel` already holds rows, allow SQL `NULL` on `path` before creating
+the trigger, rebuild the paths, then revert the `NULL` allowance:
+
+```python
+from django.db import migrations
+from tree.fields import PathField
+from tree.operations import CreateTreeTrigger, RebuildPaths
+
+class Migration(migrations.Migration):
+    dependencies = [
+        ('tree', '0001_initial'),
+    ]
+
+    operations = [
+        migrations.AlterField('YourModel', 'path', PathField(null=True)),
+        CreateTreeTrigger('YourModel'),
+        RebuildPaths('YourModel', 'path'),
+        migrations.AlterField('YourModel', 'path', PathField()),
+    ]
+```
+
+> [!NOTE]
+> You can also use `PathField` without adding a `CreateTreeTrigger`
+> operation. However, the field will not automatically be updated, you
+> will have to do it by yourself. In most cases this is not useful, so you
+> should not use `PathField` without `CreateTreeTrigger` unless you know
+> what you are doing.
+
 
 ## Differences with MPTT and treebeard
 
@@ -299,7 +323,7 @@ and it gives the impression that a child of a root
 can be at a different depth than a child of another root, like in real life.
 
 
-## Development
+## Contributing
 
 To run the `run_tests.py` and `run_benchmark.py` scripts:
 - Make sure you have `uv` installed
@@ -307,3 +331,8 @@ To run the `run_tests.py` and `run_benchmark.py` scripts:
 - `docker run --rm -e POSTGRES_DB=tree -e POSTGRES_USER=tree -e POSTGRES_PASSWORD=test-only -p 5432:5432 postgres:latest -d`
 - `uv run run_tests.py` to run regression tests
 - `uv run run_benchmark.py` to run the full benchmark against other tree solutions (very long)
+
+
+## License
+
+django-tree is released under the BSD license. See [LICENSE](LICENSE).

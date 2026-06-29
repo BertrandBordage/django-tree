@@ -497,11 +497,11 @@ class Benchmark:
         )
         df.to_csv(csv_path, index=False, compression={'method': 'gzip', 'mtime': 0})
 
-        # Report absolute numbers on the largest tree measured, keeping only the tests
-        # every implementation runs (so the comparison is apples-to-apples — tests like
-        # "Get descendants from queryset" that some libraries lack are dropped). For each
-        # timing category we give the best, typical (geometric mean) and worst single
-        # test per implementation; storage is a single figure. Each cell carries the
+        # Report absolute numbers on the largest tree measured. Every test runs on
+        # every implementation (those without a native method use a simple-ORM
+        # equivalent), so the whole grid is comparable. For each timing category we
+        # give the best, typical (geometric mean) and worst single test per
+        # implementation; storage is a single figure. Each cell carries the
         # implementation's rank in its row and a severity marker derived from absolute
         # latency thresholds, so a fast-on-average library with one catastrophic test is
         # still flagged.
@@ -555,19 +555,15 @@ class Benchmark:
         return ('%.1f µs' if us < 10 else '%.0f µs') % us
 
     @classmethod
-    def _marker(cls, ms, rank, thresholds):
+    def _marker(cls, ms, thresholds):
         laggy, very, horrible = thresholds
         if ms > horrible:
-            dot = '💩'
-        elif ms > very:
-            dot = '🔴'
-        elif ms > laggy:
-            dot = '🟠'
-        else:
-            dot = '🟢'
-        # The crown flags the best of the row; it is prepended to the severity
-        # dot rather than replacing it.
-        return '👑' + dot if rank == 1 else dot
+            return '💩'
+        if ms > very:
+            return '🔴'
+        if ms > laggy:
+            return '🟠'
+        return '🟢'
 
     @classmethod
     def _ranks_within(cls, series):
@@ -600,10 +596,11 @@ class Benchmark:
             cells = []
             for impl, _ in self.STATS_ORDER:
                 ms = series[impl] * 1000
-                marker = self._marker(ms, int(ranks[impl]), thresholds)
-                cells.append(
-                    '%s<br>%s #%d' % (self._format_ms(ms), marker, ranks[impl])
-                )
+                dot = self._marker(ms, thresholds)
+                rank = int(ranks[impl])
+                # The crown flags the best of the row; it trails the rank.
+                crown = ' 👑' if rank == 1 else ''
+                cells.append('%s<br>%s #%d%s' % (self._format_ms(ms), dot, rank, crown))
             rows[name] = cells
 
         for y_label, prefix in ((READ_LATENCY, 'Reads'), (WRITE_LATENCY, 'Writes')):
@@ -625,11 +622,11 @@ class Benchmark:
         )
         ranks = self._ranks_within(storage)
         rows['Storage'] = [
-            '%.2f MB<br>%s #%d'
+            '%.2f MB<br>🟢 #%d%s'
             % (
                 storage[impl] / 1e6,
-                '👑🟢' if ranks[impl] == 1 else '🟢',
                 ranks[impl],
+                ' 👑' if ranks[impl] == 1 else '',
             )
             for impl, _ in self.STATS_ORDER
         ]
