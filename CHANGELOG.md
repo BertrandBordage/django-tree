@@ -1,14 +1,14 @@
 # Unreleased
 
 Rewrites how a path is stored: each path is now a single compact `bytea` key
-instead of an array of floats (`double precision[]`). This makes most reads and
-writes faster, removes a long-standing scaling limit, and changes the type of
+instead of an array of decimals (`numeric[]`). This makes most reads and writes
+faster, removes a long-standing scaling limit, and changes the type of
 `path.value` (see Upgrading below).
 
 ## What changed
 
 - `PathField` is now a `BinaryField` subclass, and `path.value` is raw `bytes`
-  instead of a list of floats. If you read `path.value` directly, update your
+  instead of a list of `Decimal`s. If you read `path.value` directly, update your
   code; the `TreeModelMixin`/`Path` helpers (`get_ancestors`, `get_descendants`,
   `get_children`, `get_level`, etc.) are unchanged.
 - New siblings are now placed with fractional indexing: each insert computes a
@@ -25,7 +25,7 @@ writes faster, removes a long-standing scaling limit, and changes the type of
   tree).
 - `get_descendants`, `get_prev_sibling`/`get_next_sibling` and several other
   reads now run as a single query each.
-- Paths take less storage (a compact key per level instead of a float array),
+- Paths take less storage (a compact key per level instead of a decimal array),
   which also shrinks the path index.
 - Trade-off: the depth index now stores the path too, so it is a bit larger.
 
@@ -33,7 +33,7 @@ writes faster, removes a long-standing scaling limit, and changes the type of
 
 Each application containing `PathField`s needs one migration that drops the old
 trigger, switches the column to `bytea`, and rebuilds the tree from the `parent`
-foreign keys. There is no automatic `float8[]` → `bytea` conversion, so the
+foreign keys. There is no automatic `numeric[]` → `bytea` conversion, so the
 column is reset to `NULL` and recomputed by `RebuildPaths`.
 
 The migration must depend on `('tree', '0003_tree_functions')` and run, for each
