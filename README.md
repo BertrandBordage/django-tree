@@ -22,19 +22,20 @@ consistent.
 ## Comparison
 
 > [!NOTE]
-> django-treebeard is kept as a single column because it ships three
-> interchangeable algorithms — **MP** (materialized path), **NS** (nested sets)
-> and **AL** (adjacency list); cells note the variant when they differ.
+> django-treebeard ships three algorithms — **MP** (materialized path),
+> **NS** (nested sets) and **AL** (adjacency list). MP is by far the most used,
+> so its column shows the tick/cross and the figure for MP, with NS/AL noted
+> underneath when they differ.
 
 | | django-tree | [django-treebeard](https://github.com/django-treebeard/django-treebeard) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
 |---|:---:|:---:|:---:|:---:|
 | **Works on any Django database** | ❌ PostgreSQL only | ✅ | ✅ | ✅ |
-| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `*_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
-| **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python | ❌ in Python | ❌ in Python + cache |
-| **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ | ❌ | ❌ manual resync |
-| **Fast reads** | ✅ [\*](#bench) | 🟡 MP fast, AL slow [\*](#bench) | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
-| **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 AL fast, NS slow [\*](#bench) | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
-| **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ✅ AL is just a FK [\*](#bench) | 🟡 4 columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
+| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node`<br>_NS/AL: same_ | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
+| **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python<br>_AL: only a `parent` FK_ | ❌ in Python | ❌ in Python + cache |
+| **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only<br>_AL: structure only_ | ❌ | ❌ manual resync |
+| **Fast reads** | ✅ [\*](#bench) | ✅ MP fast [\*](#bench)<br>_NS ok, AL slow_ | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
+| **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 MP ok [\*](#bench)<br>_AL fast, NS slow_ | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
+| **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ❌ MP path strings [\*](#bench)<br>_AL tiny, NS medium_ | 🟡 4 columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
 | **Actively maintained** | 🟡 beta | ✅ | ❌ unmaintained | ✅ |
 
 ✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
@@ -49,8 +50,9 @@ In short:
 - **django-tree** is the only one that keeps the tree correct in the database
   itself, so bulk operations, `update()` and raw SQL stay safe — at the cost of
   being PostgreSQL-only.
-- **treebeard** is flexible (pick MP for reads, AL for writes) but enforces no
-  database constraint and only stays correct through its Python API.
+- **treebeard** in its usual MP form reads fast and is well maintained, but
+  enforces no database constraint and only stays correct through its Python API
+  (its AL/NS variants trade read for write speed).
 - **MPTT** stores the tree safely but writes get very slow on large or
   write-heavy tables and need periodic rebuilds. No longer maintained.
 - **treenode** caches everything for very fast reads, but every write
