@@ -1,78 +1,66 @@
 # Unreleased
 
-- Stores each path as a single `bytea` column instead of a `double precision[]`
-  (array of float8). A path is the per-level concatenation of an order-preserving
-  byte *segment* followed by a `0x00` delimiter, so the whole path is one compact
-  key compared with a single `memcmp`, and ancestor/descendant relations are
-  byte-prefix / byte-range comparisons. This drops the array overhead from the
-  column and from every path index. `PathField` is now a `BinaryField` subclass
-  and `path.value` is the raw `bytes` (it was a list of floats).
-- Places new siblings with fractional indexing: the trigger generates an
-  order-preserving byte key strictly between the two neighbouring siblings. A
-  tight gap simply grows the key by a byte, so insertions never run out of
-  headroom — the float8 gap-exhaustion renumbering (#17) is gone.
-- Serves the `descendant_of`, `child_of` and `sibling_of` lookups (and
-  `get_descendants`) as range comparisons on the whole path —
-  `path >= P AND path < tree_upper(P)` — so they use the btree index already
-  backing the path (the `UNIQUE` constraint) instead of per-level slice indexes.
-  `tree_upper(P)` replaces P's trailing `0x00` delimiter with `0x01`, the bytea
-  analogue of the old float `Infinity` upper bound.
-- Adds a few table-independent PL/pgSQL helpers (`tree_mid`, `tree_int_to_seg`,
-  `tree_level`, `tree_upper`, `tree_parent_prefix`) backing the encoding. They are
-  installed by the `tree` `0003_tree_functions` migration — so the functional
-  `(tree_level(path), path)` index can be built before any trigger — and
-  re-created by every `CreateTreeTrigger`.
-- `PathField.get_indexes()` still creates a single composite `(level, path)`
-  index; `level` now resolves to `tree_level(path)` (a `0x00`-delimiter count)
-  instead of `array_length`. The parent-slice and per-level `path__0_N` slice
-  indexes remain gone.
+Rewrites how a path is stored: each path is now a single compact `bytea` key
+instead of an array of floats (`double precision[]`). This makes most reads and
+writes faster, removes a long-standing scaling limit, and changes the type of
+`path.value` (see Upgrading below).
 
-  Upgrading: existing projects must drop the old trigger, recast the column and
-  rebuild with a migration that runs `DeleteTreeTrigger('YourModel', 'path')`, an
-  `AlterField` paired with `RunSQL('ALTER TABLE ... ALTER COLUMN path TYPE bytea
-  USING NULL')` (no float8[]→bytea cast exists; the tree is preserved in the
-  parent FK), `CreateTreeTrigger('YourModel', 'path')` and
-  `RebuildPaths('YourModel', 'path')`. The migration must depend on
-  `('tree', '0003_tree_functions')`.
-- Speeds up reads:
-  - `Path.__init__` only stores the two essential attributes; `attname`,
-    `field_bound` and `qs` are now derived lazily, so loading rows no longer does
-    redundant per-row work (e.g. cloning a throwaway queryset for every `Path`).
-  - `Path.get_descendants()` excludes the node itself with a single strict range
-    comparison (new `strict_descendant_of` lookup) instead of an extra
-    `array_length(...)` predicate.
-  - `Path.get_prev_sibling()`/`get_next_sibling()` issue a single query each
-    instead of chaining several queryset clones.
-  - `TreeQuerySetMixin.get_descendants()` runs as one correlated `EXISTS` query
-    instead of an extra query plus one OR'd range clause per matching row.
-  - The composite `(level, path)` index lets `child_of`/`sibling_of` (and the
-    `get_children`/`get_siblings`/children-count queries built on them) scan just
-    the matching rows via an index seek, instead of range-scanning the whole
-    subtree and filtering by depth — a win that grows with subtree size (e.g.
-    ~4.7× faster `get_children` on a 56k-node tree). The trade-off is a larger
-    level index (it now stores the path), so disk usage rises accordingly.
-- Speeds up writes:
-  - The path-maintenance trigger fetches the parent path and both surrounding
-    siblings with scalar subqueries (each neighbour via `ORDER BY path ... LIMIT 1`,
-    a top-1 read rather than sorting the whole sibling set) instead of one scan
-    building two ordered `array_agg`s. Insert/move cost on a node with N existing
-    siblings drops from the `array_agg` sort's super-linear growth to roughly flat
-    — e.g. inserting under a 2000-child parent is ~3× faster — and ties it on small
-    fan-outs.
-  - `RebuildPaths` now emits minimal-width path segments (one byte per level for
-    up to 254 children, like inserts do) instead of a fixed four, so a rebuilt
-    tree keeps the same compact paths as an inserted one (≈60% fewer path bytes on
-    a deep tree) and its path indexes stay small.
-  - The `post_save` path-deferral receiver resolves which fields are `PathField`s
-    once per model class (cached) instead of scanning `concrete_fields` and
-    running `isinstance` on every save — the handler runs ~2.6× faster and the
-    cost is removed from every non-tree model's save too.
-  - The trigger function emits its parent/sibling lookup, descendant rewrite and
-    rebuild as static SQL instead of `EXECUTE`'d dynamic strings. The statements
-    are now planned once and plan-cached instead of being re-planned on every
-    firing — e.g. inserting under a small parent drops from ~0.1 ms to ~0.02 ms of
-    trigger time (planning had dominated there); the gain shrinks on large
-    fan-outs where the sibling scan dominates.
+## What changed
+
+- `PathField` is now a `BinaryField` subclass, and `path.value` is raw `bytes`
+  instead of a list of floats. If you read `path.value` directly, update your
+  code; the `TreeModelMixin`/`Path` helpers (`get_ancestors`, `get_descendants`,
+  `get_children`, `get_level`, etc.) are unchanged.
+- New siblings are now placed with fractional indexing: each insert computes a
+  key strictly between its two neighbours. There is no longer a periodic
+  full-renumber of siblings (the old `#17` gap-exhaustion rebuild is gone), so
+  inserts stay cheap no matter how many siblings already exist.
+
+## Performance
+
+- Inserting and moving nodes is faster, and no longer slows down as a parent
+  gains more children (e.g. ~3× faster inserting under a 2000-child parent).
+- `get_children` / `get_siblings` and children counts use a better index and
+  scan only the matching rows (e.g. ~4.7× faster `get_children` on a 56k-node
+  tree).
+- `get_descendants`, `get_prev_sibling`/`get_next_sibling` and several other
+  reads now run as a single query each.
+- Paths take less storage (a compact key per level instead of a float array),
+  which also shrinks the path index.
+- Trade-off: the depth index now stores the path too, so it is a bit larger.
+
+## Upgrading
+
+Each application containing `PathField`s needs one migration that drops the old
+trigger, switches the column to `bytea`, and rebuilds the tree from the `parent`
+foreign keys. There is no automatic `float8[]` → `bytea` conversion, so the
+column is reset to `NULL` and recomputed by `RebuildPaths`.
+
+The migration must depend on `('tree', '0003_tree_functions')` and run, for each
+`PathField`:
+
+```python
+class Migration(migrations.Migration):
+    dependencies = [
+        ('tree', '0003_tree_functions'),
+        # ... your previous migration ...
+    ]
+
+    operations = [
+        DeleteTreeTrigger('Place', 'path'),
+        migrations.AlterField(
+            model_name='Place',
+            name='path',
+            field=PathField(order_by=['name']),
+        ),
+        migrations.RunSQL(
+            'ALTER TABLE myapp_place ALTER COLUMN path TYPE bytea USING NULL',
+            reverse_sql=migrations.RunSQL.noop,
+        ),
+        CreateTreeTrigger('Place', 'path'),
+        RebuildPaths('Place', 'path'),
+    ]
+```
 
 # 0.6.2 (2025-09-29)
 
