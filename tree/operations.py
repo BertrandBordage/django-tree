@@ -70,16 +70,21 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
         self.check_database_backend(schema_editor)
         model = self.get_model(app_label, to_state)
-        # We escape the modulo operator '%' otherwise Django considers it
-        # as a placeholder for a parameter.
+        # `params=None` runs the SQL without parameter interpolation, so a literal
+        # `%` (e.g. the modulo operator) is sent verbatim instead of being read as
+        # a placeholder -- no `%`-escaping needed. These statements carry no
+        # parameters anyway (every value is a quoted identifier from the model).
         schema_editor.execute(
             postgresql.get_update_paths_function_creation(
                 model=model,
                 path_field_lookup=self.path_field_lookup,
-            ).replace('%', '%%')
+            ),
+            params=None,
         )
         for sql_query in postgresql.CREATE_TRIGGER_QUERIES:
-            schema_editor.execute(sql_query.format(**self.get_pre_params(model=model)))
+            schema_editor.execute(
+                sql_query.format(**self.get_pre_params(model=model)), params=None
+            )
 
     def database_backwards(self, app_label, schema_editor, from_state, to_state):
         self.check_database_backend(schema_editor)
@@ -87,7 +92,8 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
             schema_editor.execute(
                 sql_query.format(
                     **self.get_pre_params(self.get_model(app_label, to_state))
-                )
+                ),
+                params=None,
             )
 
     def describe(self):
