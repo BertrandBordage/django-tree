@@ -8,47 +8,51 @@ Fast and easy tree structures.
 
 **In beta, it can’t be used yet in production.**
 
-django-tree solves the same problem as **django-mptt**, **django-treebeard**
+django-tree solves the same problem as **django-treebeard**, **django-mptt**
 and **django-treenode**: storing and querying tree (hierarchy) structures with
 Django. It does it differently: you add a `PathField` to an ordinary model
 with a self-referencing `ForeignKey`, and the hierarchy is maintained
 **inside PostgreSQL by a trigger** — not in Python. There is no model, manager
-or queryset to subclass, and because the logic lives in the database, bulk
-operations, `QuerySet.update()` and raw SQL all keep the tree consistent.
+or queryset to subclass; an optional `TreeModelMixin` only adds convenience
+methods (`get_descendants()`, `get_ancestors()`, …). Because the logic lives in
+the database, bulk operations, `QuerySet.update()` and raw SQL all keep the tree
+consistent.
 
 
 ## Comparison
 
-One column per library. django-treebeard is kept as a single column because it
-ships three interchangeable algorithms — **MP** (materialized path), **NS**
-(nested sets) and **AL** (adjacency list); cells note the variant when they
-differ.
+> [!NOTE]
+> django-treebeard is kept as a single column because it ships three
+> interchangeable algorithms — **MP** (materialized path), **NS** (nested sets)
+> and **AL** (adjacency list); cells note the variant when they differ.
 
-| | django-tree | django-mptt | django-treebeard | django-treenode |
+| | django-tree | [django-treebeard](https://github.com/django-treebeard/django-treebeard) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
 |---|:---:|:---:|:---:|:---:|
 | **Works on any Django database** | ❌ PostgreSQL only | ✅ | ✅ | ✅ |
-| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MPTTModel` | ❌ subclass `*_Node` | ❌ subclass `TreeNodeModel` |
+| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `*_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
 | **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python | ❌ in Python | ❌ in Python + cache |
 | **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ | ❌ | ❌ manual resync |
-| **Fast reads** | ✅ | 🟡 ok | 🟡 MP fast, AL slow | ✅ cached |
-| **Fast writes (insert / move)** | ✅ | ❌ slow | 🟡 AL fast, NS slow | ❌ recomputes cache |
-| **Low storage overhead** | 🟡 tunable indexes | 🟡 4 columns | ✅ AL is just a FK | ❌ many cached fields |
-| **Actively maintained** | 🟡 beta | ❌ unmaintained | ✅ | ✅ |
+| **Fast reads** | ✅ [\*](#bench) | 🟡 MP fast, AL slow [\*](#bench) | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
+| **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 AL fast, NS slow [\*](#bench) | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
+| **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ✅ AL is just a FK [\*](#bench) | 🟡 4 columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
+| **Actively maintained** | 🟡 beta | ✅ | ❌ unmaintained | ✅ |
 
 ✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
-Performance ratings come from [the benchmark](benchmark/results/results.md)
-(django-treenode is not in it; its profile — very fast cached reads, heavy
-writes — is from its design).
+
+<a id="bench"></a>
+\* Performance ratings come from [our benchmark against the other
+libraries](benchmark/results/results.md) (django-treenode is not included; its
+profile — very fast cached reads, heavy writes — is taken from its design).
 
 In short:
 
 - **django-tree** is the only one that keeps the tree correct in the database
   itself, so bulk operations, `update()` and raw SQL stay safe — at the cost of
   being PostgreSQL-only.
-- **MPTT** stores the tree safely but writes get very slow on large or
-  write-heavy tables and need periodic rebuilds. No longer maintained.
 - **treebeard** is flexible (pick MP for reads, AL for writes) but enforces no
   database constraint and only stays correct through its Python API.
+- **MPTT** stores the tree safely but writes get very slow on large or
+  write-heavy tables and need periodic rebuilds. No longer maintained.
 - **treenode** caches everything for very fast reads, but every write
   recomputes those caches and bulk writes need a manual resync.
 
