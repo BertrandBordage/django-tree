@@ -250,7 +250,7 @@ class Benchmark:
             if model is MPTTPlace:
                 qs = qs.filter(level=1)
             elif model is TreePlace:
-                qs = qs.filter(path__len=2)
+                qs = qs.filter(path__level=2)
             elif model is TreebeardALPlace:
                 qs = qs.filter(parent__isnull=False, parent__parent__isnull=True)
             else:

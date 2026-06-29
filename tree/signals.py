@@ -45,23 +45,19 @@ def _register_tree_path_dumper(connection):
     django-tree registers its psycopg ``Path`` dumper on the *global*
     ``psycopg.adapters`` map (in ``TreeAppConfig.ready()``), but Django's
     psycopg3 connections build their own adapter map and do not inherit that
-    global registration. Without this, saving any tree model
-    raises ``cannot adapt type 'Path'`` because the raw ``Path``
-    reaches psycopg (``ArrayField.get_db_prep_value`` skips non-list values, so
-    ``PathField.get_prep_value`` is never called). Mirrors
-    ``tree.types.Path.register_psycopg3`` but targets the connection's adapters.
+    global registration. Without this, a raw ``Path`` reaching psycopg (outside
+    the ORM's ``get_prep_value``) raises ``cannot adapt type 'Path'``. Mirrors
+    ``tree.types.Path.register_psycopg3`` but targets the connection's adapters,
+    dumping the path's raw ``bytes`` as ``bytea``.
     """
     if connection.vendor != 'postgresql' or connection.connection is None:
         return
-    import psycopg
-    from psycopg.types.string import StrDumper
+    from psycopg import pq
     from tree.types import Path
 
-    class PathDumper(StrDumper):
-        def quote(self, obj):
-            return psycopg.sql.quote(obj.value).encode()
-
-    connection.connection.adapters.register_dumper(Path, PathDumper)
+    adapters = connection.connection.adapters
+    for fmt in (pq.Format.TEXT, pq.Format.BINARY):
+        adapters.register_dumper(Path, Path._psycopg3_dumper(fmt))
 
 
 @receiver(connection_created)

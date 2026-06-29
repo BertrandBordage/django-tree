@@ -12,6 +12,123 @@ from .base import (
 )
 
 
+# Table-independent helper functions backing the `bytea` path encoding. A path is
+# the concatenation, per depth level, of `<segment bytes> 0x00`: `0x00` is the
+# reserved level delimiter (never appears inside a segment), so `bytea`'s unsigned
+# byte-wise comparison reproduces the tree order and ancestor = byte-prefix at a
+# level boundary. Created with `CREATE OR REPLACE` (idempotent) both here (so every
+# trigger install is self-contained) and by a `tree` migration (so the functional
+# `tree_level(path)` index can be built before any trigger exists).
+#
+# These contain no `%`, so they survive the `.replace('%', '%%')` escaping in
+# `operations.CreateTreeTrigger` and can be reused verbatim in migration `RunSQL`.
+TREE_HELPER_FUNCTIONS = r"""
+CREATE OR REPLACE FUNCTION tree_mid(a bytea, b bytea) RETURNS bytea AS $$
+DECLARE
+    result bytea := ''::bytea;
+    i integer := 0;
+    x integer;
+    y integer;
+BEGIN
+    -- Order-preserving "between" key (fractional indexing). Segment bytes are
+    -- base-256 fraction digits whose value is `byte - 1`, so byte 0x01 is the
+    -- smallest digit (0). `a` is the lower neighbour (NULL => -infinity) and `b`
+    -- the upper (NULL => +infinity). Past the end of `a` (and a NULL `a`) we read
+    -- the low filler digit 0x01, past the end of `b` (and a NULL `b`) the virtual
+    -- value 256 (one above the largest byte). The returned segment is strictly
+    -- between `a` and `b`, never contains 0x00, and always ends on an emitted byte
+    -- >= 0x02, which keeps every gap (head, tail, internal) splittable forever, so
+    -- the path never needs renumbering.
+    LOOP
+        IF a IS NOT NULL AND i < octet_length(a) THEN
+            x := get_byte(a, i);
+        ELSE
+            x := 1;
+        END IF;
+        IF b IS NOT NULL AND i < octet_length(b) THEN
+            y := get_byte(b, i);
+        ELSE
+            y := 256;
+        END IF;
+        IF y - x >= 2 THEN
+            RETURN result || set_byte('\x00'::bytea, 0, x + (y - x) / 2);
+        END IF;
+        result := result || set_byte('\x00'::bytea, 0, x);
+        i := i + 1;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION tree_int_to_seg(rank integer, width integer)
+    RETURNS bytea AS $$
+DECLARE
+    result bytea := ''::bytea;
+    i integer;
+    r integer := rank;
+BEGIN
+    -- Fixed-width big-endian base-254 encoding of a rebuild rank, digits mapped to
+    -- bytes 0x02..0xFF (left-padded with 0x02). Order-preserving for a fixed width,
+    -- never emits 0x00 or 0x01 -- leaving 0x01-prefixed room below every rebuilt
+    -- sibling so `tree_mid` can still insert before the first one.
+    FOR i IN 1 .. width LOOP
+        result := set_byte('\x00'::bytea, 0, mod(r, 254) + 2) || result;
+        r := r / 254;
+    END LOOP;
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION tree_level(p bytea) RETURNS integer AS $$
+DECLARE
+    n integer := 0;
+    i integer;
+BEGIN
+    -- Depth = number of 0x00 level delimiters.
+    IF p IS NULL THEN
+        RETURN NULL;
+    END IF;
+    FOR i IN 0 .. octet_length(p) - 1 LOOP
+        IF get_byte(p, i) = 0 THEN
+            n := n + 1;
+        END IF;
+    END LOOP;
+    RETURN n;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION tree_upper(p bytea) RETURNS bytea AS $$
+BEGIN
+    -- Exclusive upper bound of p's descendant range: drop p's trailing 0x00
+    -- delimiter and append 0x01 (which sorts above the delimiter but below every
+    -- segment byte). NULL for the empty prefix (the virtual root above all
+    -- roots), meaning the range is unbounded above.
+    IF p IS NULL OR octet_length(p) = 0 THEN
+        RETURN NULL;
+    END IF;
+    RETURN substr(p, 1, octet_length(p) - 1) || '\x01'::bytea;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION tree_parent_prefix(p bytea) RETURNS bytea AS $$
+DECLARE
+    i integer;
+BEGIN
+    -- `p` ends with its own 0x00 terminator; return everything up to and including
+    -- the previous 0x00 (the parent's terminator), or '' for a root.
+    IF p IS NULL OR octet_length(p) = 0 THEN
+        RETURN ''::bytea;
+    END IF;
+    FOR i IN REVERSE octet_length(p) - 1 .. 1 LOOP
+        IF get_byte(p, i - 1) = 0 THEN
+            RETURN substr(p, 1, i);
+        END IF;
+    END LOOP;
+    RETURN ''::bytea;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+"""
+
+
 def execute_format(
     sql: str,
     *args: str,
@@ -62,29 +179,28 @@ def get_update_paths_function_creation(
     pk = quote_ident(meta.pk.attname)
     parent = quote_ident(parent_field.attname)
     path = quote_ident(path_field.attname)
-    # Only the rebuild's recursive CTE and the renumbering still need an explicit
-    # ORDER BY; the sibling lookups order implicitly via min/max.
+    # Only the rebuild's recursive CTE still needs an explicit ORDER BY; the sibling
+    # lookups order implicitly via min/max.
     sql_t2_order_by = ', '.join(
         [f't2.{ordered_column}' for ordered_column in sql_order_by]
     )
-    sql_order_by = ', '.join(sql_order_by)
 
     rebuild = execute_format(
         f"""
         -- TODO: Handle concurrent writes during this query (using FOR UPDATE).
         WITH RECURSIVE generate_paths(pk, path) AS ((
-                SELECT {parent}, NULL::double precision[]
+                SELECT {parent}, ''::bytea
                 FROM {table}
                 WHERE {parent} IS NULL
                 LIMIT 1
             ) UNION ALL (
                 SELECT
                     t2.{pk},
-                    t1.path || (
-                        row_number() OVER (
+                    t1.path || tree_int_to_seg(
+                        (row_number() OVER (
                             PARTITION BY t1.pk ORDER BY {sql_t2_order_by}
-                        ) - 1
-                    )::double precision
+                        ) - 1)::integer, 4
+                    ) || '\\x00'::bytea
                 FROM generate_paths AS t1
                 INNER JOIN {table} AS t2 ON (
                     t2.{parent} = t1.pk
@@ -112,17 +228,14 @@ def get_update_paths_function_creation(
         into=['new_parent_path'],
     )
 
-    # A single scan over the sibling set yields everything the trigger needs to
-    # place the new node. A path's last element is strictly monotonic with
-    # `order_by` among siblings (the same invariant the read side relies on,
-    # e.g. `get_prev_sibling` ordering by `path`), so:
-    #   - the previous sibling's value is the greatest value among siblings
-    #     ordered before us (`max(...) FILTER`), and the next sibling's the
-    #     smallest among those ordered after (`min(...) FILTER`), replacing two
-    #     `ORDER BY ... LIMIT 1` queries;
-    #   - the new node's rank (how many siblings sort before it) is just
-    #     `count(*) FILTER` over the same predicate, and becomes its slot if the
-    #     gap turns out to be exhausted and the siblings have to be renumbered.
+    # A single scan over the sibling set yields the neighbouring siblings' full
+    # paths. A path's own segment is strictly monotonic with `order_by` among
+    # siblings (the same invariant the read side relies on, e.g. `get_prev_sibling`
+    # ordering by `path`), and siblings share the parent prefix, so the previous
+    # sibling is the greatest path among those ordered before us and the next is
+    # the smallest among those ordered after. `max(bytea)`/`min(bytea)` aggregates
+    # only exist on PostgreSQL 18+, so we take the first element of an ordered
+    # `array_agg` instead, which works on every supported version.
     prev_sibling_where = get_prev_sibling_where_clause(
         where_columns, '$1', descending_flags
     )
@@ -132,52 +245,29 @@ def get_update_paths_function_creation(
     get_sibling_values = execute_format(
         f"""
         SELECT
-            max({path}[array_length({path}, 1)]) FILTER (WHERE {prev_sibling_where}),
-            min({path}[array_length({path}, 1)]) FILTER (WHERE {next_sibling_where}),
-            count(*) FILTER (WHERE {prev_sibling_where})
+            (array_agg({path} ORDER BY {path} DESC)
+                FILTER (WHERE {prev_sibling_where}))[1],
+            (array_agg({path} ORDER BY {path} ASC)
+                FILTER (WHERE {next_sibling_where}))[1]
         FROM {table}
         WHERE
             {compare_columns(parent, f'$1.{parent}')}
             AND {pk} != $1.{pk}
     """,
         using=['NEW'],
-        into=['prev_sibling_value', 'next_sibling_value', 'new_sibling_rank'],
+        into=['prev_sibling_path', 'next_sibling_path'],
     )
 
+    # When a node moves, rewrite every descendant's stored prefix (the moved node's
+    # old path) to its new path, preserving the descendant-local suffix.
     update_descendants = execute_format(
         f"""
         UPDATE {table}
-        SET {path} = $1.{path}
-            || {path}[array_length($2.{path}, 1) + 1:]
-        WHERE {path}[:array_length($2.{path}, 1)] = $2.{path} AND {pk} != $2.{pk}
+        SET {path} = $1.{path} || substr({path}, octet_length($2.{path}) + 1)
+        WHERE substr({path}, 1, octet_length($2.{path})) = $2.{path}
+            AND {pk} != $2.{pk}
     """,
         using=['NEW', 'OLD'],
-    )
-
-    # Renumber every child of the new node's parent to a consecutive integer
-    # value (skipping the slot the new node will take), cascading the change
-    # to each sibling's whole subtree. This spaces crammed siblings back out
-    # when a gap has been exhausted.
-    renumber_siblings = execute_format(
-        f"""
-        WITH sibling_renumber AS (
-            SELECT
-                {path} AS old_path,
-                (row_number() OVER (ORDER BY {sql_order_by}) - 1)
-                    + CASE WHEN {get_prev_sibling_where_clause(where_columns, '$1', descending_flags)}
-                        THEN 0 ELSE 1 END AS new_value
-            FROM {table}
-            WHERE {compare_columns(parent, f'$1.{parent}')}
-                AND {pk} != $1.{pk}
-                AND array_length({path}, 1) = coalesce(array_length($2, 1), 0) + 1
-        )
-        UPDATE {table} AS t
-        SET {path} = $2 || sr.new_value::double precision
-            || t.{path}[coalesce(array_length($2, 1), 0) + 2:]
-        FROM sibling_renumber AS sr
-        WHERE t.{path}[:coalesce(array_length($2, 1), 0) + 1] = sr.old_path
-    """,
-        using=['NEW', 'new_parent_path'],
     )
 
     row_unchanged = join_and(
@@ -187,17 +277,21 @@ def get_update_paths_function_creation(
         ]
     )
 
-    return f"""
+    return (
+        TREE_HELPER_FUNCTIONS
+        + f"""
         CREATE OR REPLACE FUNCTION {function}() RETURNS trigger AS $$
         DECLARE
-            prev_sibling_value double precision := NULL;
-            next_sibling_value double precision := NULL;
-            new_sibling_value double precision := NULL;
-            new_sibling_rank integer := NULL;
-            new_parent_path double precision[];
+            prev_sibling_path bytea := NULL;
+            next_sibling_path bytea := NULL;
+            prev_sibling_seg bytea := NULL;
+            next_sibling_seg bytea := NULL;
+            old_sibling_seg bytea := NULL;
+            new_parent_path bytea;
+            parent_len integer;
         BEGIN
             IF TG_OP = 'UPDATE' THEN
-                IF NEW.{path} = '{{NULL}}'::double precision[] THEN
+                IF NEW.{path} IS NULL THEN
                     {rebuild}
                     RETURN NEW;
                 END IF;
@@ -207,58 +301,52 @@ def get_update_paths_function_creation(
                 END IF;
             END IF;
 
+            {get_new_parent_path}
+            new_parent_path := coalesce(new_parent_path, ''::bytea);
+            parent_len := octet_length(new_parent_path);
+
             {get_sibling_values}
 
-            IF prev_sibling_value IS NULL AND next_sibling_value IS NULL THEN
-                prev_sibling_value := 0;
-                next_sibling_value := 0;
-            ELSE
-                IF prev_sibling_value IS NULL THEN
-                    -- We use `- 2` so that the middle between prev and next
-                    -- will be next - 1, that way the new lower bound
-                    -- is the former lower bound - 1.
-                    prev_sibling_value := coalesce(next_sibling_value, 0) - 2;
-                END IF;
-                IF next_sibling_value IS NULL THEN
-                    -- We use `+ 2` so that the middle between prev and next
-                    -- will be prev + 1, that way the new upper bound
-                    -- is the former upper bound + 1.
-                    next_sibling_value := coalesce(prev_sibling_value, 0) + 2;
-                END IF;
+            IF prev_sibling_path IS NOT NULL THEN
+                prev_sibling_seg := substr(
+                    prev_sibling_path, parent_len + 1,
+                    octet_length(prev_sibling_path) - parent_len - 1
+                );
+            END IF;
+            IF next_sibling_path IS NOT NULL THEN
+                next_sibling_seg := substr(
+                    next_sibling_path, parent_len + 1,
+                    octet_length(next_sibling_path) - parent_len - 1
+                );
             END IF;
 
-            -- Preserve the current path when it is still relevant,
-            -- even though it might not be at the middle between prev and next.
+            -- Preserve the current path when it is still relevant, even though it
+            -- might not be at the middle between prev and next.
             IF TG_OP = 'UPDATE'
                 AND {compare_columns(f'NEW.{parent}', f'OLD.{parent}')}
-                AND OLD.{path}[array_length(OLD.{path}, 1)]
-                    BETWEEN prev_sibling_value AND next_sibling_value
             THEN
-                RETURN NEW;
+                old_sibling_seg := substr(
+                    OLD.{path}, parent_len + 1,
+                    octet_length(OLD.{path}) - parent_len - 1
+                );
+                IF (prev_sibling_seg IS NULL OR old_sibling_seg > prev_sibling_seg)
+                    AND (next_sibling_seg IS NULL
+                         OR old_sibling_seg < next_sibling_seg)
+                THEN
+                    RETURN NEW;
+                END IF;
             END IF;
 
-            {get_new_parent_path}
             IF TG_OP = 'UPDATE' THEN
-                IF new_parent_path[:array_length(OLD.{path}, 1)] = OLD.{path} THEN
+                IF substr(new_parent_path, 1, octet_length(OLD.{path})) = OLD.{path}
+                THEN
                     RAISE 'Cannot set itself or a descendant as parent.';
                 END IF;
             END IF;
 
-            new_sibling_value := (
-                prev_sibling_value + next_sibling_value
-            ) / 2;
-            -- When the midpoint can no longer fall strictly between the two
-            -- neighbours, float8 has run out of bisection headroom and the gap
-            -- is exhausted: renumber this parent's children to consecutive
-            -- integers so siblings are spaced out again, and give the new node
-            -- its own slot.
-            IF new_sibling_value <= prev_sibling_value
-                OR new_sibling_value >= next_sibling_value THEN
-                {renumber_siblings}
-                new_sibling_value := new_sibling_rank;
-            END IF;
-
-            NEW.{path} = new_parent_path || new_sibling_value;
+            NEW.{path} = new_parent_path
+                || tree_mid(prev_sibling_seg, next_sibling_seg)
+                || '\\x00'::bytea;
 
             IF TG_OP = 'UPDATE' THEN
                 {update_descendants}
@@ -268,6 +356,7 @@ def get_update_paths_function_creation(
         END;
         $$ LANGUAGE plpgsql;
         """
+    )
 
 
 CREATE_TRIGGER_QUERIES = (
@@ -282,7 +371,7 @@ CREATE_TRIGGER_QUERIES = (
     """
     CREATE OR REPLACE FUNCTION {rebuild_function}() RETURNS void AS $$
     BEGIN
-        UPDATE {table} SET {path} = '{{NULL}}'::double precision[] FROM (
+        UPDATE {table} SET {path} = NULL FROM (
             SELECT * FROM {table}
             WHERE {parent} IS NULL
             LIMIT 1

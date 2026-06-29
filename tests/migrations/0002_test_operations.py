@@ -1,5 +1,12 @@
-from django.db import models, migrations
+from django.db import migrations, models
 from django.db.models import CASCADE
+
+from tree.fields import PathField
+from tree.operations import (
+    CreateTreeTrigger,
+    RebuildPaths,
+    DeleteTreeTrigger,
+)
 
 
 def populate(apps, schema_editor):
@@ -17,6 +24,8 @@ class Migration(migrations.Migration):
         ('tests', '0001_initial'),
     ]
 
+    # Exercises the full add/rebuild/alter/drop lifecycle of the tree operations
+    # on a throwaway model, then removes it.
     operations = [
         migrations.CreateModel(
             name='Something',
@@ -38,4 +47,10 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.RunPython(populate),
+        migrations.AddField('Something', 'path', PathField(order_by=['name'])),
+        CreateTreeTrigger('Something'),
+        RebuildPaths('Something'),
+        migrations.AlterField('Something', 'path', PathField(order_by=['name'])),
+        DeleteTreeTrigger('Something'),
+        migrations.DeleteModel('Something'),
     ]
