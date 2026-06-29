@@ -16,7 +16,7 @@ from django.core.exceptions import (
 from django.db import transaction, connection
 from django.db.migrations.recorder import MigrationRecorder
 from django.db.migrations.state import ProjectState
-from django.db.models import ProtectedError, QuerySet
+from django.db.models import F, ProtectedError, QuerySet
 from django.db.utils import IntegrityError, ProgrammingError
 from django.test import SimpleTestCase, TransactionTestCase
 
@@ -2952,6 +2952,149 @@ class PsycopgAdapterTest(SimpleTestCase):
             with mock.patch.object(Path, 'register_psycopg2') as register_psycopg2:
                 Path.register_psycopg()
                 register_psycopg2.assert_called_once()
+
+
+class TreeHelpersTest(SimpleTestCase):
+    """The pure-Python byte helpers used both to maintain paths off PostgreSQL
+    and to precompute the lookups everywhere."""
+
+    def test_tree_mid(self):
+        from tree.sql.helpers import tree_mid
+
+        self.assertEqual(tree_mid(None, None), b'\x80')
+        self.assertEqual(tree_mid(b'\x02', b'\x04'), b'\x03')
+        # A tight gap grows the key by a byte instead of running out of room.
+        self.assertEqual(tree_mid(b'\x02', b'\x03'), b'\x02\x80')
+        self.assertGreater(tree_mid(b'\x02', None), b'\x02')
+
+    def test_tree_int_to_seg(self):
+        from tree.sql.helpers import tree_int_to_seg
+
+        self.assertEqual(tree_int_to_seg(0, 1), b'\x02')
+        self.assertEqual(tree_int_to_seg(255, 2), b'\x03\x03')
+
+    def test_tree_level(self):
+        from tree.sql.helpers import tree_level
+
+        self.assertIsNone(tree_level(None))
+        self.assertEqual(tree_level(b''), 0)
+        self.assertEqual(tree_level(b'\x02\x00\x02\x00'), 2)
+
+    def test_tree_upper(self):
+        from tree.sql.helpers import tree_upper
+
+        self.assertIsNone(tree_upper(None))
+        self.assertIsNone(tree_upper(b''))
+        self.assertEqual(tree_upper(b'\x02\x00'), b'\x02\x01')
+
+    def test_tree_parent_prefix(self):
+        from tree.sql.helpers import tree_parent_prefix
+
+        self.assertEqual(tree_parent_prefix(None), b'')
+        self.assertEqual(tree_parent_prefix(b''), b'')
+        self.assertEqual(tree_parent_prefix(b'\x02\x00'), b'')  # root
+        self.assertEqual(tree_parent_prefix(b'\x02\x00\x03\x00'), b'\x02\x00')
+
+    def test_seg_width(self):
+        from tree.sql.helpers import seg_width
+
+        self.assertEqual(
+            [seg_width(n) for n in (254, 255, 64516, 64517, 16387064, 16387065)],
+            [1, 2, 2, 3, 3, 4],
+        )
+
+
+@skipUnless(
+    connection.vendor != 'postgresql',
+    'Exercises the Python (non-trigger) maintenance code paths.',
+)
+class GenericMaintenanceTest(CommonTest):
+    """Covers the path maintenance that runs in Python off PostgreSQL."""
+
+    def test_bulk_create_builds_paths(self):
+        Place.objects.bulk_create([Place(name='Aaa'), Place(name='Bbb')])
+        aaa = Place.objects.get(name='Aaa')
+        Place.objects.bulk_create([Place(name='Aaa-child', parent=aaa)])
+        child = Place.objects.get(name='Aaa-child')
+        self.assertEqual(child.path.get_level(), 2)
+        self.assertTrue(child.path.is_descendant_of(Place.objects.get(name='Aaa').path))
+
+    def test_bulk_update_reparents(self):
+        self.create_all_test_places()
+        normandie = Place.objects.get(name='Normandie')
+        poitiers = Place.objects.get(name='Poitiers')
+        poitiers.parent = normandie
+        Place.objects.bulk_update([poitiers], ['parent'])
+        normandie = Place.objects.get(name='Normandie')
+        self.assertIn(
+            'Poitiers',
+            list(normandie.get_children().values_list('name', flat=True)),
+        )
+
+    def test_move_branch_moves_descendants(self):
+        # ASCII-only names so sibling order is collation-independent.
+        aaa = self.create_place('Aaa')
+        bbb = self.create_place('Bbb', aaa)
+        self.create_place('Ccc', bbb)
+        ddd = self.create_place('Ddd')
+        bbb = Place.objects.get(name='Bbb')
+        bbb.parent = ddd
+        bbb.clean()
+        bbb.save()
+        ccc = Place.objects.get(name='Ccc')
+        self.assertTrue(ccc.path.is_descendant_of(Place.objects.get(name='Bbb').path))
+        self.assertTrue(ccc.path.is_descendant_of(Place.objects.get(name='Ddd').path))
+
+    def test_lookups_require_a_constant_path(self):
+        # A column/expression right-hand operand is only supported on PostgreSQL.
+        for lookup in ('descendant_of', 'child_of', 'sibling_of'):
+            with self.assertRaises(NotImplementedError):
+                list(Place.objects.filter(**{f'path__{lookup}': F('path')}))
+
+    def test_lookup_accepts_path_object_and_empty_path(self):
+        self.create_all_test_places()
+        france = Place.objects.get(name='France')
+        # A `Path` object as the operand (not raw bytes).
+        names = Place.objects.filter(path__descendant_of=france.path).values_list(
+            'name', flat=True
+        )
+        self.assertIn('Normandie', list(names))
+        # The empty path is the virtual root: an unbounded descendant range.
+        self.assertEqual(
+            Place.objects.filter(path__descendant_of=b'').count(),
+            Place.objects.count(),
+        )
+
+    def test_filter_roots(self):
+        self.create_all_test_places()
+        self.assertEqual(
+            sorted(Place.objects.filter_roots().values_list('name', flat=True)),
+            ['France', 'Österreich'],
+        )
+
+    def test_disabled_trigger_skips_bulk_maintenance(self):
+        self.create_all_test_places()
+        france = Place.objects.get(name='France')
+        with Place.disabled_tree_trigger():
+            # While suspended, bulk writes do not re-path anything.
+            Place.objects.bulk_update([france], ['name'])
+            Place.objects.filter(name='Manche').delete()
+
+
+class WatchedNamesTest(SimpleTestCase):
+    def test_skips_pk_in_order_by(self):
+        from tree.query import _watched_names
+
+        field = Place._meta.get_field('path')
+        original_order_by = field.order_by
+        field.order_by = ['pk', 'name']
+        try:
+            names = _watched_names(field)
+        finally:
+            field.order_by = original_order_by
+        # `pk` is the trigger's own tie-break, not a watched column.
+        self.assertIn('name', names)
+        self.assertNotIn('pk', names)
 
 
 def load_tests(loader, tests, pattern):

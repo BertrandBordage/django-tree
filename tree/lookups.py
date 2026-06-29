@@ -35,14 +35,9 @@ from .sql.helpers import tree_level, tree_parent_prefix, tree_upper
 
 
 def _as_bytes(value: Any) -> bytes:
-    # Late import avoids a circular dependency (``tree.types`` imports helpers).
-    from .types import Path
-
-    if isinstance(value, Path):
-        value = value.value
-    if value is None:
-        return b''
-    return bytes(value)
+    # `get_prep_lookup` has already applied `PathField.get_prep_value`, so `value`
+    # is the raw bytes (or empty/None for the virtual root above all roots).
+    return bytes(value) if value else b''
 
 
 class AncestorOf(Lookup):

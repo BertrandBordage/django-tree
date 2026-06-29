@@ -48,15 +48,13 @@ def is_trigger_disabled(field: 'PathField', db_alias: str) -> bool:
 
 
 def _to_bytes(value: Any) -> bytes | None:
-    # `values()` runs `PathField.from_db_value`, so a stored path comes back as a
-    # `Path`; raw drivers may hand back `bytearray`/`memoryview`.
+    # `values()` runs `PathField.from_db_value`, so a stored path always comes
+    # back as a `Path` (whose `.value` is the raw bytes, or `None`).
     from .types import Path
 
-    if value is None:
-        return None
     if isinstance(value, Path):
         return value.value
-    return bytes(value)
+    return value
 
 
 def _compare_q(column: str, value: Any, greater: bool | None, strict: bool) -> Q:
@@ -278,9 +276,10 @@ class PathMaintainer:
         to_update = []
         prefix_len = len(old_path)
         for child_pk, path in rows:
+            # `descendant_of` already restricts to rows whose path starts with
+            # `old_path`, so the local suffix is everything past it.
             path = _to_bytes(path)
-            if path is None or not path.startswith(old_path):
-                continue
+            assert path is not None
             obj = self.model(**{self.pk_attname: child_pk})
             setattr(obj, self.path_attname, new_path + path[prefix_len:])
             to_update.append(obj)
