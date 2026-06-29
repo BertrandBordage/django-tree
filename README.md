@@ -28,30 +28,32 @@ consistent.
 > out: its reads are slow enough to rule it out for most projects (see the
 > [detailed benchmark](benchmark/results/results.md)).
 
+### Features
+
 | | django-tree | [django-treebeard](https://github.com/django-treebeard/django-treebeard) | [django-tree-queries](https://github.com/feincms/django-tree-queries) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
 |---|:---:|:---:|:---:|:---:|:---:|
 | **Works on any Django database** | ❌ PostgreSQL only | ✅ | ✅ | ✅ | ✅ |
 | **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `TreeNode` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
 | **Build & move with plain `parent` + `save()`** | ✅ | ❌ `add_child()`/`move()` API | ✅ | ✅ | ✅ |
+| **Several independent trees per model** | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
 | **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python | ❌ in Python + cache |
 | **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only | ✅ | ❌ | ❌ manual resync |
 | **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__level` | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 manager methods | 🟡 cached properties |
-| **Several independent trees per model** | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
-| **Fast reads** | ✅ [\*](#bench) | ✅ MP fast [\*](#bench) | 🟡 recursive CTE [\*](#bench) | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
-| **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 MP ok [\*](#bench)<br>_NS slow_ | ✅ FK update [\*](#bench) | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
-| **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ❌ MP path strings [\*](#bench)<br>_NS lighter_ | ✅ just a FK [\*](#bench) | ❌ 4 indexed columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
 | **Admin integration** | ❌ form field only | ✅ drag-and-drop | ✅ cut/paste | ✅ drag-and-drop | ✅ |
 | **Template tags to render trees** | ❌ | 🟡 | ✅ `{% recursetree %}` | ✅ `{% recursetree %}` | 🟡 |
 | **Production-ready** | ❌ beta | ✅ | ✅ | 🟡 works, unmaintained | ✅ |
 
 ✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
 
-<a id="bench"></a>
-\* Performance ratings come from [our benchmark against the other
-libraries](benchmark/results/results.md) (django-tree-queries and
-django-treenode are not in it; their profiles — a recursive query per read but
-cheap writes and storage for the former, very fast cached reads but heavy
-writes for the latter — are taken from their design).
+### Performance
+
+| | django-tree | django-treebeard | django-tree-queries | django-mptt | django-treenode |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **Reads** | 🥉 | 🥇 MP<br>_NS slower_ | #4 | 🥈 | #5 |
+| **Writes (insert / move)** | 🥈 | 🥉 MP<br>_NS slower_ | 🥇 | #4 | #5 |
+| **Storage on disk** | 🥈 | #4 MP<br>_NS lighter_ | 🥇 | 🥉 | #5 |
+
+🥇 best, then 🥈 🥉 #4 #5 — by **average rank in [our benchmark](benchmark/results/results.md)** (lower is better; equal ranks share a medal). treebeard is ranked on its MP variant.
 
 In short:
 
@@ -59,15 +61,15 @@ In short:
   itself, so bulk operations, `update()` and raw SQL stay safe — at the cost of
   being PostgreSQL-only, still beta, and without admin drag-and-drop or
   tree-rendering template tags yet.
-- **treebeard** in its usual MP form reads fast and is well maintained, but
+- **treebeard** in its usual MP form reads fastest and is well maintained, but
   enforces no database constraint and only stays correct through its Python API.
 - **tree-queries** derives the hierarchy from a plain `parent` FK with recursive
-  CTEs, so nothing can get out of sync, writes are cheap and it runs on most
-  databases — at the cost of a recursive query on every read.
+  CTEs, so nothing can get out of sync, writes and storage are the cheapest and
+  it runs on most databases — at the cost of a recursive query on every read.
 - **MPTT** stores the tree safely but writes get very slow on large or
   write-heavy tables and need periodic rebuilds. No longer maintained.
-- **treenode** caches everything for very fast reads, but every write
-  recomputes those caches and bulk writes need a manual resync.
+- **treenode** keeps denormalized caches of the whole tree, but every write
+  rebuilds them — the slowest writes here — and bulk writes need a manual resync.
 
 
 ## Benchmark
