@@ -1,18 +1,26 @@
 # Summary
 
-Take this summary with a mountain of salt. For every individual measurement, the
-competing implementations are ranked from fastest/smallest (1st) to slowest/largest,
-and the table shows each implementation's **average rank** within a category (so a
-lower number is better, 1 being always-first). It does not take into account that
-some implementations have deal-breaker performance.
+Take this summary with a mountain of salt. The [table of stats](stats.html) reports
+**absolute** numbers on the largest tree measured (3905 rows). Every test runs on
+every implementation — those without a native method use a simple, unofficial ORM
+equivalent — so the whole grid is comparable. For each timing category it gives
+three figures per implementation — the **best**, **typical** (geometric mean) and
+**worst** single test — plus a single storage figure. Each cell carries the rank in
+its row (two results within 5 % share a rank) and a severity marker based on
+absolute latency, the same for reads and writes: laggy above 3 ms, very laggy above
+100 ms, horrible above 1 s.
 
-For example, most reads are too slow with treebeard AL to make it a serious choice for anything other than a toy project.
+The worst-case rows are where deal-breakers show up. django-treenode rebuilds the
+whole tree in Python on every write, so its worst write is ~25 minutes — and its
+worst *read* balloons to ~5 minutes too, since it has no set-level descendants query
+and the unofficial equivalent walks the tree node by node. treebeard NS and MPTT
+reach ~19–22 s on their worst write. The adjacency-based readers (treebeard AL,
+django-tree-queries) climb to ~0.6–0.9 s on the heaviest read traversal, where
+django-tree stays at ~71 ms.
 
-In the same way, MPTT can be extremely slow at writing data, making it unusable on a wide range of projects.
-
-Note as well that despite the extremely low grade of django-tree in terms of storage,
-it is absolutely not a deal breaker. By the way, the amount of indexes from django-tree
-is based on a parameter that can be customized field by field.
+Note as well that despite django-tree being middle-of-the-pack on storage, it is
+absolutely not a deal breaker — and the amount of indexes is a per-field parameter
+that can be tuned down.
 
 [Table of stats](stats.html)
 

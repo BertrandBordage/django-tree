@@ -1,98 +1,86 @@
 <table border="1" class="dataframe">
   <thead>
-    <tr>
-      <th>Y label</th>
-      <th>Implementation</th>
+    <tr style="text-align: right;">
       <th></th>
+      <th>django-tree</th>
+      <th>treebeard MP</th>
+      <th>treebeard NS</th>
+      <th>treebeard AL</th>
+      <th>django-mptt</th>
+      <th>django-tree-queries</th>
+      <th>django-treenode</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <th rowspan="7" valign="top">Disk usage (bytes)</th>
-      <th>MPTT</th>
-      <td>5.36</td>
+      <th>Reads · best</th>
+      <td>195 µs<br>🟢 #7</td>
+      <td>0.5 µs<br>🟢 #1 👑</td>
+      <td>0.7 µs<br>🟢 #3</td>
+      <td>10 µs<br>🟢 #5</td>
+      <td>1.7 µs<br>🟢 #4</td>
+      <td>75 µs<br>🟢 #6</td>
+      <td>0.5 µs<br>🟢 #1 👑</td>
     </tr>
     <tr>
-      <th>tree</th>
-      <td>5.16</td>
+      <th>Reads · typical</th>
+      <td>501 µs<br>🟢 #4</td>
+      <td>250 µs<br>🟢 #1 👑</td>
+      <td>393 µs<br>🟢 #3</td>
+      <td>1.6 ms<br>🟢 #6</td>
+      <td>300 µs<br>🟢 #2</td>
+      <td>1.1 ms<br>🟢 #5</td>
+      <td>1.9 ms<br>🟢 #7</td>
     </tr>
     <tr>
-      <th>tree-queries</th>
-      <td>1.50</td>
+      <th>Reads · worst</th>
+      <td>71 ms<br>🟠 #1 👑</td>
+      <td>344 ms<br>🔴 #3</td>
+      <td>518 ms<br>🔴 #4</td>
+      <td>853 ms<br>🔴 #6</td>
+      <td>118 ms<br>🔴 #2</td>
+      <td>627 ms<br>🔴 #5</td>
+      <td>5 min<br>💩 #7</td>
     </tr>
     <tr>
-      <th>treebeard AL</th>
-      <td>1.50</td>
+      <th>Writes · best</th>
+      <td>418 µs<br>🟢 #6</td>
+      <td>235 µs<br>🟢 #4</td>
+      <td>205 µs<br>🟢 #3</td>
+      <td>193 µs<br>🟢 #2</td>
+      <td>307 µs<br>🟢 #5</td>
+      <td>183 µs<br>🟢 #1 👑</td>
+      <td>390 ms<br>🔴 #7</td>
     </tr>
     <tr>
-      <th>treebeard MP</th>
-      <td>5.50</td>
+      <th>Writes · typical</th>
+      <td>2.5 ms<br>🟢 #3</td>
+      <td>5.7 ms<br>🟠 #4</td>
+      <td>6.1 ms<br>🟠 #5</td>
+      <td>969 µs<br>🟢 #1 👑</td>
+      <td>13 ms<br>🟠 #6</td>
+      <td>1.0 ms<br>🟢 #2</td>
+      <td>837 ms<br>🔴 #7</td>
     </tr>
     <tr>
-      <th>treebeard NS</th>
-      <td>3.46</td>
+      <th>Writes · worst</th>
+      <td>1.9 s<br>💩 #3</td>
+      <td>9.0 s<br>💩 #4</td>
+      <td>21.8 s<br>💩 #6</td>
+      <td>926 ms<br>🔴 #2</td>
+      <td>19.0 s<br>💩 #5</td>
+      <td>829 ms<br>🔴 #1 👑</td>
+      <td>25 min<br>💩 #7</td>
     </tr>
     <tr>
-      <th>treenode</th>
-      <td>5.51</td>
-    </tr>
-    <tr>
-      <th rowspan="7" valign="top">Read latency (s)</th>
-      <th>MPTT</th>
-      <td>3.33</td>
-    </tr>
-    <tr>
-      <th>tree</th>
-      <td>3.45</td>
-    </tr>
-    <tr>
-      <th>tree-queries</th>
-      <td>4.61</td>
-    </tr>
-    <tr>
-      <th>treebeard AL</th>
-      <td>3.91</td>
-    </tr>
-    <tr>
-      <th>treebeard MP</th>
-      <td>3.24</td>
-    </tr>
-    <tr>
-      <th>treebeard NS</th>
-      <td>3.37</td>
-    </tr>
-    <tr>
-      <th>treenode</th>
-      <td>5.01</td>
-    </tr>
-    <tr>
-      <th rowspan="7" valign="top">Write latency (s)</th>
-      <th>MPTT</th>
-      <td>5.06</td>
-    </tr>
-    <tr>
-      <th>tree</th>
-      <td>3.52</td>
-    </tr>
-    <tr>
-      <th>tree-queries</th>
-      <td>2.06</td>
-    </tr>
-    <tr>
-      <th>treebeard AL</th>
-      <td>2.07</td>
-    </tr>
-    <tr>
-      <th>treebeard MP</th>
-      <td>3.54</td>
-    </tr>
-    <tr>
-      <th>treebeard NS</th>
-      <td>4.52</td>
-    </tr>
-    <tr>
-      <th>treenode</th>
-      <td>6.76</td>
+      <th>Storage</th>
+      <td>0.91 MB<br>🟢 #5</td>
+      <td>0.97 MB<br>🟢 #6</td>
+      <td>0.79 MB<br>🟢 #3</td>
+      <td>0.57 MB<br>🟢 #1 👑</td>
+      <td>0.85 MB<br>🟢 #4</td>
+      <td>0.57 MB<br>🟢 #1 👑</td>
+      <td>0.98 MB<br>🟢 #6</td>
     </tr>
   </tbody>
 </table>
