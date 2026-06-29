@@ -25,9 +25,10 @@ faster, removes a long-standing scaling limit, and changes the type of
   tree).
 - `get_descendants`, `get_prev_sibling`/`get_next_sibling` and several other
   reads now run as a single query each.
-- Paths take less storage (a compact key per level instead of a decimal array),
-  which also shrinks the path index.
-- Trade-off: the depth index now stores the path too, so it is a bit larger.
+- Uses noticeably less disk space overall: the column is a compact key per level
+  instead of a decimal array, and the per-level slice indexes and the
+  parent-slice index are gone — a model now needs just two path indexes (the
+  unique path index and a `(level, path)` index) instead of eight.
 
 ## Upgrading
 
