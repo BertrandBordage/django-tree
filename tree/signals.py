@@ -1,7 +1,8 @@
 from functools import lru_cache
-from typing import Type
+from typing import Any
 
 from django.db import connections
+from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
 from django.db.models import Model
 from django.db.models.signals import post_save
@@ -11,7 +12,7 @@ from tree.fields import PathField
 
 
 @lru_cache(maxsize=None)
-def _path_attnames(sender: Type[Model]):
+def _path_attnames(sender: type[Model]) -> tuple[str, ...]:
     # `defer_paths` runs on *every* model's save, so resolve (and cache) which
     # attributes are `PathField`s once per model class instead of scanning
     # `concrete_fields` and running `isinstance` on every single save.
@@ -23,7 +24,7 @@ def _path_attnames(sender: Type[Model]):
 
 
 @receiver(post_save)
-def defer_paths(sender: Type[Model], **kwargs):
+def defer_paths(sender: type[Model], **kwargs: Any) -> None:
     attnames = _path_attnames(sender)
     if not attnames:
         return
@@ -38,7 +39,7 @@ def defer_paths(sender: Type[Model], **kwargs):
         instance_dict.pop(attname, None)
 
 
-def _register_tree_path_dumper(connection):
+def _register_tree_path_dumper(connection: BaseDatabaseWrapper) -> None:
     """
     Make django-tree's ``Path`` type adaptable on a single DB connection.
 
@@ -61,7 +62,9 @@ def _register_tree_path_dumper(connection):
 
 
 @receiver(connection_created)
-def register_tree_path_psycopg_dumper(sender, connection, **kwargs):
+def register_tree_path_psycopg_dumper(
+    sender: Any, connection: BaseDatabaseWrapper, **kwargs: Any
+) -> None:
     # Register on every newly-opened connection (the idiomatic place for
     # custom psycopg types).
     _register_tree_path_dumper(connection)

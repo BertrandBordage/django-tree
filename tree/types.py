@@ -1,6 +1,15 @@
 from importlib.util import find_spec
-from django.db.models import QuerySet
+from typing import TYPE_CHECKING
+
+from collections.abc import Iterator
+
+from django.db.models import Model, QuerySet
 from django.utils.functional import cached_property
+
+if TYPE_CHECKING:
+    from psycopg import pq
+
+    from .fields import PathField
 
 
 # The level delimiter separating path segments (see `tree.sql.postgresql`).
@@ -8,7 +17,7 @@ DELIMITER = b'\x00'
 
 
 class Path:
-    def __init__(self, field, value):
+    def __init__(self, field: 'PathField', value: bytes | None) -> None:
         # Kept minimal: `from_db_value` builds a `Path` for every fetched row, so
         # anything derivable from the field (`attname`, `field_bound`, `qs`) is
         # computed lazily below instead of on this per-row hot path.
@@ -16,15 +25,15 @@ class Path:
         self.value = value
 
     @cached_property
-    def attname(self):
+    def attname(self) -> str | None:
         return getattr(self.field, 'attname', None)
 
     @cached_property
-    def field_bound(self):
+    def field_bound(self) -> bool:
         return self.attname is not None
 
     @cached_property
-    def qs(self):
+    def qs(self) -> QuerySet:
         # Cloning a queryset here would otherwise cost one clone per loaded row,
         # even when the path is only read (never used to navigate the tree).
         if self.field_bound:
@@ -32,32 +41,32 @@ class Path:
         return QuerySet()
 
     @cached_property
-    def _segments(self):
+    def _segments(self) -> list[bytes]:
         # The per-level segments, without their `0x00` terminators. A stored path
         # always ends with a delimiter, so the trailing empty split is dropped.
         if not self.value:
             return []
         return self.value.split(DELIMITER)[:-1]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if self.field_bound:
-            return '<Path %s %s>' % (self.field, self.value)
-        return '<Path %s>' % self.value
+            return f'<Path {self.field} {self.value!r}>'
+        return f'<Path {self.value!r}>'
 
-    def __str__(self):
+    def __str__(self) -> str:
         return str(self.value)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, Path):
             other = other.value
         return self.value == other
 
-    def __ne__(self, other):
+    def __ne__(self, other: object) -> bool:
         if isinstance(other, Path):
             other = other.value
         return self.value != other
 
-    def __lt__(self, other):
+    def __lt__(self, other: 'Path | bytes | None') -> bool:
         # We simulate the effects of a NULLS LAST.
         if not self.value:
             return False
@@ -67,7 +76,7 @@ class Path:
             return True
         return self.value < other
 
-    def __le__(self, other):
+    def __le__(self, other: 'Path | bytes | None') -> bool:
         # We simulate the effects of a NULLS LAST.
         if not self.value:
             return False
@@ -77,7 +86,7 @@ class Path:
             return True
         return self.value <= other
 
-    def __gt__(self, other):
+    def __gt__(self, other: 'Path | bytes | None') -> bool:
         # We simulate the effects of a NULLS LAST.
         if not self.value:
             return True
@@ -87,7 +96,7 @@ class Path:
             return False
         return self.value > other
 
-    def __ge__(self, other):
+    def __ge__(self, other: 'Path | bytes | None') -> bool:
         # We simulate the effects of a NULLS LAST.
         if not self.value:
             return True
@@ -97,10 +106,10 @@ class Path:
             return False
         return self.value >= other
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[bytes]:
         return iter(self._segments)
 
-    def get_children(self):
+    def get_children(self) -> QuerySet:
         if not self.value:
             return self.qs.none()
         return self.qs.filter(
@@ -109,9 +118,11 @@ class Path:
             }
         )
 
-    def get_ancestors(self, include_self=False):
+    def get_ancestors(self, include_self: bool = False) -> QuerySet:
         if not self.value or (self.is_root() and not include_self):
             return self.qs.none()
+        # A path with a value always comes from a field-bound `Path`.
+        assert self.attname is not None
         segments = self._segments
         if not include_self:
             segments = segments[:-1]
@@ -123,7 +134,7 @@ class Path:
         ]
         return self.qs.filter(**{self.attname + '__in': paths})
 
-    def get_descendants(self, include_self=False):
+    def get_descendants(self, include_self: bool = False) -> QuerySet:
         if not self.value:
             return self.qs.none()
         # Both lookups are range comparisons on the whole path, so they use the
@@ -132,9 +143,12 @@ class Path:
         lookup = 'descendant_of' if include_self else 'strict_descendant_of'
         return self.qs.filter(**{f'{self.attname}__{lookup}': self.value})
 
-    def get_siblings(self, include_self=False, queryset=None):
+    def get_siblings(
+        self, include_self: bool = False, queryset: QuerySet | None = None
+    ) -> QuerySet:
         if not self.value:
             return self.qs.none()
+        assert self.attname is not None
 
         qs = self.qs if queryset is None else queryset
         qs = qs.filter(
@@ -146,27 +160,34 @@ class Path:
             return qs
         return qs.exclude(**{self.attname: self.value})
 
-    def get_prev_siblings(self, include_self=False, queryset=None):
+    def get_prev_siblings(
+        self, include_self: bool = False, queryset: QuerySet | None = None
+    ) -> QuerySet:
         if not self.value:
             return self.qs.none()
+        assert self.attname is not None
         siblings = self.get_siblings(include_self=include_self, queryset=queryset)
         lookup = '__lte' if include_self else '__lt'
         return siblings.filter(**{self.attname + lookup: self.value}).order_by(
             '-' + self.attname
         )
 
-    def get_next_siblings(self, include_self=False, queryset=None):
+    def get_next_siblings(
+        self, include_self: bool = False, queryset: QuerySet | None = None
+    ) -> QuerySet:
         if not self.value:
             return self.qs.none()
+        assert self.attname is not None
         siblings = self.get_siblings(include_self=include_self, queryset=queryset)
         lookup = '__gte' if include_self else '__gt'
         return siblings.filter(**{self.attname + lookup: self.value}).order_by(
             self.attname
         )
 
-    def get_prev_sibling(self, queryset=None):
+    def get_prev_sibling(self, queryset: QuerySet | None = None) -> Model | None:
         if not self.value:
-            return
+            return None
+        assert self.attname is not None
         # Single query: `sibling_of` enforces same parent and depth, while
         # `__lt` against our own path both keeps only earlier siblings and
         # excludes self (a path is never `<` itself).
@@ -182,9 +203,10 @@ class Path:
             .first()
         )
 
-    def get_next_sibling(self, queryset=None):
+    def get_next_sibling(self, queryset: QuerySet | None = None) -> Model | None:
         if not self.value:
             return None
+        assert self.attname is not None
         qs = self.qs if queryset is None else queryset
         return (
             qs.filter(
@@ -197,20 +219,25 @@ class Path:
             .first()
         )
 
-    def get_level(self):
+    def get_level(self) -> int | None:
         if self.value:
             return len(self._segments)
+        return None
 
-    def is_root(self):
+    def is_root(self) -> bool | None:
         if self.value:
             return len(self._segments) == 1
+        return None
 
-    def is_leaf(self):
+    def is_leaf(self) -> bool | None:
         if self.value:
             return not self.get_children().exists()
+        return None
 
     @staticmethod
-    def _as_bytes(other):
+    def _as_bytes(
+        other: 'Path | bytes | bytearray | memoryview | None',
+    ) -> bytes | None:
         if isinstance(other, Path):
             other = other.value
         if not other:
@@ -219,7 +246,11 @@ class Path:
             raise TypeError('`other` must be a `Path` instance or a bytes path.')
         return bytes(other)
 
-    def is_ancestor_of(self, other, include_self=False):
+    def is_ancestor_of(
+        self,
+        other: 'Path | bytes | bytearray | memoryview | None',
+        include_self: bool = False,
+    ) -> bool:
         if not self.value:
             return False
         other = self._as_bytes(other)
@@ -231,7 +262,11 @@ class Path:
         # test, so a sibling that merely shares leading bytes cannot match.
         return other.startswith(self.value)
 
-    def is_descendant_of(self, other, include_self=False):
+    def is_descendant_of(
+        self,
+        other: 'Path | bytes | bytearray | memoryview | None',
+        include_self: bool = False,
+    ) -> bool:
         if not self.value:
             return False
         other = self._as_bytes(other)
@@ -242,11 +277,11 @@ class Path:
         return self.value.startswith(other)
 
     @staticmethod
-    def register_psycopg2():
+    def register_psycopg2() -> None:
         from psycopg2 import Binary
         from psycopg2.extensions import register_adapter, AsIs
 
-        def adapt_path(path):
+        def adapt_path(path: 'Path') -> object:
             if path.value is None:
                 return AsIs('NULL')
             return Binary(path.value)
@@ -254,7 +289,7 @@ class Path:
         register_adapter(Path, adapt_path)
 
     @staticmethod
-    def _psycopg3_dumper(fmt):
+    def _psycopg3_dumper(fmt: 'pq.Format') -> type:
         # psycopg3's built-in bytea dumpers are C types that cannot be subclassed,
         # so emit the wire format directly: raw bytes for the binary format, the
         # `\x<hex>` escape for the text one.
@@ -268,7 +303,7 @@ class Path:
             format = fmt
             oid = bytea_oid
 
-            def dump(self, obj):
+            def dump(self, obj: 'Path') -> bytes:
                 value = b'' if obj.value is None else obj.value
                 if self.format == pq.Format.BINARY:
                     return value
@@ -277,7 +312,7 @@ class Path:
         return PathDumper
 
     @classmethod
-    def register_psycopg3(cls):
+    def register_psycopg3(cls) -> None:
         import psycopg
         from psycopg import pq
 
@@ -285,7 +320,7 @@ class Path:
             psycopg.adapters.register_dumper(Path, cls._psycopg3_dumper(fmt))
 
     @classmethod
-    def register_psycopg(cls):
+    def register_psycopg(cls) -> None:
         # Tells psycopg how to prepare a Path object for the database,
         # in case it doesn't go through the ORM.
         if find_spec('psycopg') is not None:

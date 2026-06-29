@@ -1,17 +1,27 @@
+from typing import TYPE_CHECKING, cast
+
 from django.core.exceptions import FieldDoesNotExist
-from django.db.models import Exists, OuterRef, QuerySet
+from django.db.models import Exists, Model, OuterRef, QuerySet
 from django.db.models.manager import Manager
 
 from .fields import PathField
 
+if TYPE_CHECKING:
+    # `TreeQuerySetMixin` is only ever combined with `QuerySet` (see
+    # `TreeQuerySet` below), so for type-checking we give it that base to resolve
+    # `self.model`, `self.filter`, ...; at runtime it stays a plain mixin.
+    _QuerySetBase = QuerySet
+else:
+    _QuerySetBase = object
 
-def _get_path_fields(model, name=None):
+
+def _get_path_fields(model: type[Model], name: str | None = None) -> list[PathField]:
     if name is None:
         return [f for f in model._meta.fields if isinstance(f, PathField)]
-    return [model._meta.get_field(name)]
+    return [cast(PathField, model._meta.get_field(name))]
 
 
-def _get_path_field(model, name):
+def _get_path_field(model: type[Model], name: str | None) -> PathField:
     path_fields = _get_path_fields(model, name)
     n = len(path_fields)
     if n == 0:
@@ -27,15 +37,17 @@ def _get_path_field(model, name):
 
 
 # TODO: Implement a faster `QuerySet.delete` and add it to the benchmark.
-class TreeQuerySetMixin:
-    def _get_path_field_attname(self, name):
+class TreeQuerySetMixin(_QuerySetBase):
+    def _get_path_field_attname(self, name: str | None) -> str:
         return _get_path_field(self.model, name).attname
 
-    def filter_roots(self, path_field=None):
+    def filter_roots(self, path_field: str | None = None) -> QuerySet:
         attname = self._get_path_field_attname(path_field)
         return self.filter(**{f'{attname}__level': 1})
 
-    def get_descendants(self, include_self=False, path_field=None):
+    def get_descendants(
+        self, include_self: bool = False, path_field: str | None = None
+    ) -> QuerySet:
         attname = self._get_path_field_attname(path_field)
         # A row is a descendant of this queryset when one of its members is an
         # ancestor (or itself). We express that as a single correlated `EXISTS`
@@ -52,5 +64,5 @@ class TreeQuerySet(TreeQuerySetMixin, QuerySet):
     pass
 
 
-class TreeManager(Manager.from_queryset(TreeQuerySet)):
+class TreeManager(Manager.from_queryset(TreeQuerySet)):  # type: ignore[misc]
     pass

@@ -1,5 +1,4 @@
 import re
-from typing import List, Optional
 
 
 # TODO: Integrate the doctests to the test runner.
@@ -8,7 +7,7 @@ from typing import List, Optional
 UNNECESSARY_QUOTE_RE = re.compile(r'^[a-z_]+$')
 
 
-def quote_ident(identifier: str):
+def quote_ident(identifier: str) -> str:
     """
     >>> quote_ident('usual')
     'usual'
@@ -37,23 +36,23 @@ def quote_ident(identifier: str):
     return f'"{identifier}"'
 
 
-def join_or(expressions: List[str]):
+def join_or(expressions: list[str]) -> str:
     if len(expressions) == 1:
         return expressions[0]
     return f'({" OR ".join(expressions)})'
 
 
-def join_and(expressions: List[str]):
+def join_and(expressions: list[str]) -> str:
     return ' AND '.join(expressions)
 
 
 def compare_columns(
     left: str,
     right: str,
-    greater: Optional[bool] = None,
+    greater: bool | None = None,
     strict: bool = False,
     nulls_last: bool = True,
-):
+) -> str:
     """
     >>> compare_columns('name', 'NEW.name')
     '(name IS NULL AND NEW.name IS NULL OR coalesce(name = NEW.name, FALSE))'
@@ -96,12 +95,12 @@ def compare_columns(
 
 
 def get_nearby_sibling_where_clause(
-    columns_in_order: List[str],
+    columns_in_order: list[str],
     record_name: str,
     greater: bool = True,
     nulls_last: bool = True,
-    descending: Optional[List[bool]] = None,
-):
+    descending: list[bool] | None = None,
+) -> str:
     """
     >>> get_nearby_sibling_where_clause(["col1"], 'NEW')
     '(col1 IS NULL OR coalesce(col1 >= NEW.col1, FALSE))'
@@ -136,10 +135,10 @@ def get_nearby_sibling_where_clause(
 
 
 def get_prev_sibling_where_clause(
-    columns_in_order: List[str],
+    columns_in_order: list[str],
     record_name: str,
-    descending: Optional[List[bool]] = None,
-):
+    descending: list[bool] | None = None,
+) -> str:
     return get_nearby_sibling_where_clause(
         columns_in_order=columns_in_order,
         record_name=record_name,
@@ -149,10 +148,10 @@ def get_prev_sibling_where_clause(
 
 
 def get_next_sibling_where_clause(
-    columns_in_order: List[str],
+    columns_in_order: list[str],
     record_name: str,
-    descending: Optional[List[bool]] = None,
-):
+    descending: list[bool] | None = None,
+) -> str:
     return get_nearby_sibling_where_clause(
         columns_in_order=columns_in_order,
         record_name=record_name,

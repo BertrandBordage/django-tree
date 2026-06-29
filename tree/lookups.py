@@ -1,4 +1,8 @@
+from typing import Any
+
+from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Lookup
+from django.db.models.sql.compiler import SQLCompiler
 
 
 # The descendant/child/sibling lookups are expressed as range comparisons on the
@@ -21,31 +25,37 @@ from django.db.models import Lookup
 class AncestorOf(Lookup):
     lookup_name = 'ancestor_of'
 
-    def as_sql(self, compiler, connection):
+    def as_sql(
+        self, compiler: SQLCompiler, connection: BaseDatabaseWrapper
+    ) -> tuple[str, list[Any]]:
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
         return (
             '%s = substr(%s, 1, octet_length(%s))' % (lhs, rhs, lhs),
-            lhs_params + rhs_params + lhs_params,
+            [*lhs_params, *rhs_params, *lhs_params],
         )
 
 
 class DescendantOf(Lookup):
     lookup_name = 'descendant_of'
 
-    def as_sql(self, compiler, connection):
+    def as_sql(
+        self, compiler: SQLCompiler, connection: BaseDatabaseWrapper
+    ) -> tuple[str, list[Any]]:
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
         return (
             '%s >= %s AND %s < tree_upper(%s)' % (lhs, rhs, lhs, rhs),
-            lhs_params + rhs_params + lhs_params + rhs_params,
+            [*lhs_params, *rhs_params, *lhs_params, *rhs_params],
         )
 
 
 class StrictDescendantOf(Lookup):
     lookup_name = 'strict_descendant_of'
 
-    def as_sql(self, compiler, connection):
+    def as_sql(
+        self, compiler: SQLCompiler, connection: BaseDatabaseWrapper
+    ) -> tuple[str, list[Any]]:
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
         # Same range as `descendant_of`, but the strict lower bound `> P` excludes
@@ -54,27 +64,38 @@ class StrictDescendantOf(Lookup):
         # predicate.
         return (
             '%s > %s AND %s < tree_upper(%s)' % (lhs, rhs, lhs, rhs),
-            lhs_params + rhs_params + lhs_params + rhs_params,
+            [*lhs_params, *rhs_params, *lhs_params, *rhs_params],
         )
 
 
 class ChildOf(Lookup):
     lookup_name = 'child_of'
 
-    def as_sql(self, compiler, connection):
+    def as_sql(
+        self, compiler: SQLCompiler, connection: BaseDatabaseWrapper
+    ) -> tuple[str, list[Any]]:
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
         return (
             '%s > %s AND %s < tree_upper(%s) '
             'AND tree_level(%s) = tree_level(%s) + 1' % (lhs, rhs, lhs, rhs, lhs, rhs),
-            lhs_params + rhs_params + lhs_params + rhs_params + lhs_params + rhs_params,
+            [
+                *lhs_params,
+                *rhs_params,
+                *lhs_params,
+                *rhs_params,
+                *lhs_params,
+                *rhs_params,
+            ],
         )
 
 
 class SiblingOf(Lookup):
     lookup_name = 'sibling_of'
 
-    def as_sql(self, compiler, connection):
+    def as_sql(
+        self, compiler: SQLCompiler, connection: BaseDatabaseWrapper
+    ) -> tuple[str, list[Any]]:
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
         # The siblings of P are the children of its parent, i.e. the rows in the
@@ -87,11 +108,13 @@ class SiblingOf(Lookup):
             '%s > %s AND (tree_upper(%s) IS NULL OR %s < tree_upper(%s)) '
             'AND tree_level(%s) = tree_level(%s)'
             % (lhs, parent, parent, lhs, parent, lhs, rhs),
-            lhs_params
-            + rhs_params
-            + rhs_params
-            + lhs_params
-            + rhs_params
-            + lhs_params
-            + rhs_params,
+            [
+                *lhs_params,
+                *rhs_params,
+                *rhs_params,
+                *lhs_params,
+                *rhs_params,
+                *lhs_params,
+                *rhs_params,
+            ],
         )
