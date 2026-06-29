@@ -139,10 +139,22 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Run tests
+      - name: Run tests with coverage
         env:
           TREE_DB_ENGINE: sqlite
-        run: uv run --with "${{ matrix.django.spec }}" run_tests.py
+        run: >-
+          uv run --with "${{ matrix.django.spec }}" --with coverage
+          coverage run --source=tree run_tests.py
+
+      - name: Generate coverage report
+        run: uv run --with coverage coverage xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
 
   test-mysql:
     name: MySQL / Django ${{ matrix.django.name }}
@@ -199,4 +211,14 @@ jobs:
           TREE_DB_PASSWORD: root-only
         run: >-
           uv run --with "${{ matrix.django.spec }}" --with mysqlclient
-          run_tests.py
+          --with coverage coverage run --source=tree run_tests.py
+
+      - name: Generate coverage report
+        run: uv run --with coverage coverage xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
