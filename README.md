@@ -22,20 +22,21 @@ consistent.
 ## Comparison
 
 > [!NOTE]
-> django-treebeard ships three algorithms — **MP** (materialized path),
-> **NS** (nested sets) and **AL** (adjacency list). MP is by far the most used,
-> so its column shows the tick/cross and the figure for MP, with NS/AL noted
-> underneath when they differ.
+> django-treebeard ships three algorithms. The column shows **MP**
+> (materialized path), by far the most used; **NS** (nested sets) is noted
+> underneath only where it differs. The third, **AL** (adjacency list), is left
+> out: its reads are slow enough to rule it out for most projects (see the
+> [detailed benchmark](benchmark/results/results.md)).
 
 | | django-tree | [django-treebeard](https://github.com/django-treebeard/django-treebeard) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
 |---|:---:|:---:|:---:|:---:|
 | **Works on any Django database** | ❌ PostgreSQL only | ✅ | ✅ | ✅ |
-| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node`<br>_NS/AL: same_ | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
-| **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python<br>_AL: only a `parent` FK_ | ❌ in Python | ❌ in Python + cache |
-| **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only<br>_AL: structure only_ | ❌ | ❌ manual resync |
-| **Fast reads** | ✅ [\*](#bench) | ✅ MP fast [\*](#bench)<br>_NS, AL slower_ | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
-| **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 MP ok [\*](#bench)<br>_AL fast, NS slow_ | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
-| **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ❌ MP path strings [\*](#bench)<br>_AL tiny, NS medium_ | ❌ 4 indexed columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
+| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
+| **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python | ❌ in Python | ❌ in Python + cache |
+| **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only | ❌ | ❌ manual resync |
+| **Fast reads** | ✅ [\*](#bench) | ✅ MP fast [\*](#bench) | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
+| **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 MP ok [\*](#bench)<br>_NS slow_ | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
+| **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ❌ MP path strings [\*](#bench)<br>_NS lighter_ | ❌ 4 indexed columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
 | **Actively maintained** | 🟡 beta | ✅ | ❌ unmaintained | ✅ |
 
 ✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
@@ -51,8 +52,7 @@ In short:
   itself, so bulk operations, `update()` and raw SQL stay safe — at the cost of
   being PostgreSQL-only.
 - **treebeard** in its usual MP form reads fast and is well maintained, but
-  enforces no database constraint and only stays correct through its Python API
-  (its AL/NS variants trade read for write speed).
+  enforces no database constraint and only stays correct through its Python API.
 - **MPTT** stores the tree safely but writes get very slow on large or
   write-heavy tables and need periodic rebuilds. No longer maintained.
 - **treenode** caches everything for very fast reads, but every write
