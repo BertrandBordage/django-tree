@@ -70,11 +70,12 @@ requires_db_trigger = skipUnless(
 
 # Sibling order follows the database's collation of the `order_by` column. These
 # fixtures mix non-ASCII names (e.g. 'Österreich') with ASCII ones, so their
-# expected order only holds under a locale collation (PostgreSQL, MySQL); SQLite's
-# default binary collation orders by byte value and would interleave differently.
-requires_locale_collation = skipIf(
-    connection.vendor == 'sqlite',
-    "SQLite's binary collation orders non-ASCII names differently.",
+# expected order only holds under PostgreSQL's locale collation; SQLite and the
+# CI MySQL order by byte value, interleaving non-ASCII names differently.
+requires_locale_collation = skipUnless(
+    connection.vendor == 'postgresql',
+    'Sibling order of non-ASCII names follows the database collation; these '
+    "fixtures assume PostgreSQL's.",
 )
 
 # A raw `Path` query parameter is adaptable on PostgreSQL (psycopg) and SQLite
@@ -2672,7 +2673,6 @@ class OnDeleteBehaviourTest(TransactionTestCase):
 
     maxDiff = None
 
-    @requires_locale_collation
     def test_set_null_keeps_children(self):
         root = SetNullPlace.objects.create(name='Root')
         child = SetNullPlace.objects.create(name='Child', parent=root)

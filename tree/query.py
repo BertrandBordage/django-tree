@@ -118,6 +118,28 @@ class TreeQuerySetMixin(_QuerySetBase):
         self._reconcile_tree(set(fields))
         return result
 
+    def delete(self) -> Any:
+        result = super().delete()
+        if is_trigger_backend(self.db):
+            return result
+        # When a parent FK is `SET_NULL`/`SET_DEFAULT`/`SET(...)`, Django's
+        # deletion collector re-parents the surviving children with an internal
+        # UPDATE that bypasses the tree maintenance, so re-path those fields. A
+        # `CASCADE`/`PROTECT` parent orphans nobody, so nothing to do.
+        from .maintenance import is_trigger_disabled
+
+        for field in _get_path_fields(self.model):
+            if is_trigger_disabled(field, self.db):
+                continue
+            on_delete = getattr(field.parent_field.remote_field, 'on_delete', None)
+            if getattr(on_delete, '__name__', '') in {
+                'SET_NULL',
+                'SET_DEFAULT',
+                'SET',
+            }:
+                field.rebuild(db_alias=self.db)
+        return result
+
     def filter_roots(self, path_field: str | None = None) -> QuerySet:
         attname = self._get_path_field_attname(path_field)
         return self.filter(**{f'{attname}__level': 1})

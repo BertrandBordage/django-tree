@@ -14,11 +14,10 @@ trigger, nothing observes it. Call :meth:`TreeModelMixin.rebuild_paths` afterwar
 """
 
 from collections import defaultdict, deque
-from functools import cmp_to_key
 from typing import TYPE_CHECKING, Any, cast
 
 from django.db import DEFAULT_DB_ALIAS, ProgrammingError
-from django.db.models import Field, Q
+from django.db.models import F, Field, Q
 
 from .sql.helpers import DELIMITER, seg_width, tree_int_to_seg, tree_mid
 
@@ -76,21 +75,6 @@ def _compare_q(column: str, value: Any, greater: bool | None, strict: bool) -> Q
         return Q(**{f'{column}__isnull': False}) if strict else Q()
     op = 'lt' if strict else 'lte'
     return Q(**{f'{column}__{op}': value})
-
-
-def _sql_cmp(x: Any, y: Any, descending: bool) -> int:
-    # Mirrors a SQL `ORDER BY col ASC/DESC` with PostgreSQL's default NULL
-    # placement (ASC => NULLS LAST, DESC => NULLS FIRST), used by the rebuild.
-    if x is None and y is None:
-        return 0
-    if x is None:
-        return -1 if descending else 1
-    if y is None:
-        return 1 if descending else -1
-    if x == y:
-        return 0
-    result = -1 if x < y else 1
-    return -result if descending else result
 
 
 class PathMaintainer:
@@ -305,17 +289,34 @@ class PathMaintainer:
 
     def rebuild(self) -> None:
         """Recompute every path from the roots down, matching the PL/pgSQL
-        recursive-CTE rebuild (base-254 ranks via ``tree_int_to_seg``)."""
-        columns = self._select_columns()
-        rows = list(self._base.values(self.pk_attname, *columns))
+        recursive-CTE rebuild (base-254 ranks via ``tree_int_to_seg``).
+
+        Children are ordered by the database (not in Python) so the rank order is
+        the same collation the insert-time placement uses -- a rebuild never
+        reorders siblings relative to how they were inserted.
+        """
+        # Order children by the database, with PostgreSQL's default NULL placement
+        # (ASC => NULLS LAST, DESC => NULLS FIRST) made explicit so SQLite/MySQL
+        # rank identically, and a `pk` tie-break to match the trigger.
+        order_by = []
+        for field_name in self.field.order_by:
+            descending = field_name.startswith('-')
+            expression = F(field_name[1:] if descending else field_name)
+            order_by.append(
+                expression.desc(nulls_first=True)
+                if descending
+                else expression.asc(nulls_last=True)
+            )
+        order_by.append(F('pk').asc())
+        rows = list(
+            self._base.order_by(*order_by).values(
+                self.pk_attname, self.parent_attname, self.path_attname
+            )
+        )
 
         children: dict[Any, list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
             children[row[self.parent_attname]].append(row)
-
-        order_key = cmp_to_key(self._compare_rows)
-        for group in children.values():
-            group.sort(key=order_key)
 
         paths: dict[Any, bytes] = {}
 
@@ -345,10 +346,3 @@ class PathMaintainer:
             to_update.append(obj)
         if to_update:
             self._base.bulk_update(to_update, [self.path_attname])
-
-    def _compare_rows(self, a: dict[str, Any], b: dict[str, Any]) -> int:
-        for column, descending in zip(self.columns, self.descending):
-            result = _sql_cmp(a[column], b[column], descending)
-            if result:
-                return result
-        return 0
