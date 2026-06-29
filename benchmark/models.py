@@ -44,6 +44,26 @@ class TreebeardALPlace(AL_Node):
     )
     node_order_by = ('name',)
 
+    # django-treebeard 5.3.0 rewrote AL_Node.get_prev_sibling/get_next_sibling to
+    # filter on `sib_order`, which does not exist when `node_order_by` is set,
+    # raising AttributeError. Restore treebeard 4.7.1's index-based lookup (which
+    # works for `node_order_by` nodes) so the benchmark stays comparable.
+    def get_prev_sibling(self):
+        siblings = self.get_siblings()
+        ids = [obj.pk for obj in siblings]
+        if self.pk in ids:
+            idx = ids.index(self.pk)
+            if idx > 0:
+                return siblings[idx - 1]
+
+    def get_next_sibling(self):
+        siblings = self.get_siblings()
+        ids = [obj.pk for obj in siblings]
+        if self.pk in ids:
+            idx = ids.index(self.pk)
+            if idx < len(siblings) - 1:
+                return siblings[idx + 1]
+
 
 class TreebeardMPPlace(MP_Node):
     name = CharField(max_length=50, unique=True, default=get_random_name)
