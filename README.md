@@ -32,11 +32,16 @@ consistent.
 |---|:---:|:---:|:---:|:---:|
 | **Works on any Django database** | ❌ PostgreSQL only | ✅ | ✅ | ✅ |
 | **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
+| **Build & move with plain `parent` + `save()`** | ✅ | ❌ `add_child()`/`move()` API | ✅ | ✅ |
 | **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python | ❌ in Python | ❌ in Python + cache |
 | **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only | ❌ | ❌ manual resync |
+| **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__level` | 🟡 manager methods | 🟡 manager methods | 🟡 cached properties |
 | **Fast reads** | ✅ [\*](#bench) | ✅ MP fast [\*](#bench) | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
 | **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 MP ok [\*](#bench)<br>_NS slow_ | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
 | **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ❌ MP path strings [\*](#bench)<br>_NS lighter_ | ❌ 4 indexed columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
+| **Admin integration** | ❌ form field only | ✅ drag-and-drop | ✅ drag-and-drop | ✅ |
+| **Template tags to render trees** | ❌ | 🟡 | ✅ `{% recursetree %}` | 🟡 |
+| **Production-ready** | ❌ beta | ✅ | 🟡 works, unmaintained | ✅ |
 | **Actively maintained** | 🟡 beta | ✅ | ❌ unmaintained | ✅ |
 
 ✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
@@ -50,7 +55,8 @@ In short:
 
 - **django-tree** is the only one that keeps the tree correct in the database
   itself, so bulk operations, `update()` and raw SQL stay safe — at the cost of
-  being PostgreSQL-only.
+  being PostgreSQL-only, still beta, and without admin drag-and-drop or
+  tree-rendering template tags yet.
 - **treebeard** in its usual MP form reads fast and is well maintained, but
   enforces no database constraint and only stays correct through its Python API.
 - **MPTT** stores the tree safely but writes get very slow on large or
