@@ -46,20 +46,20 @@ consistent.
 
 ### Performance
 
-Each cell is how many times **faster 🟢⬆ or slower 🔴⬇ than django-tree** the
-implementation is on that category — the geometric mean across every test (`≈` means
-within ±5%). Storage uses *smaller* / *larger* instead of faster / slower.
+Each cell compares an implementation to **django-tree** across a category's tests.
+The **top line** is the typical gap (geometric mean); the **bottom line** is the
+single worst test. Storage says *smaller* / *larger* instead of *faster* / *slower*.
+
+- Top line: 👑 fastest/smallest of all · 🟢 on par (±5%) or faster · 🟠 up to 5× slower · 💩 over 5× slower.
+- Worst test: 🟢 within 10× · ⚠️ within 100× · 💩 beyond.
 
 | | django-tree | treebeard MP | treebeard NS | treebeard AL | django-mptt | django-tree-queries | django-treenode |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Reads** | baseline | 🟢⬆ ×1.8 faster | 🟢⬆ ×1.7 faster | 🔴⬇ ×1.6 slower | 🟢⬆ ×1.7 faster | 🔴⬇ ×2.1 slower | 🔴⬇ ×1.7 slower |
-| **Writes (insert / move)** | baseline | 🔴⬇ ×1.7 slower | 🔴⬇ ×3.0 slower | 🟢⬆ ×2.3 faster | 🔴⬇ ×4.8 slower | 🟢⬆ ×2.3 faster | 🔴⬇ ×182 slower |
-| **Storage on disk** | baseline | ≈ same | 🟢⬆ ×1.1 smaller | 🟢⬆ ×1.6 smaller | ≈ same | 🟢⬆ ×1.6 smaller | ≈ same |
+| **Reads** | baseline | 👑 1.8× faster<br>⚠️ worst 23× | 🟢 1.7× faster<br>⚠️ worst 10× | 🟠 1.6× slower<br>💩 worst 380× | 🟢 1.7× faster<br>🟢 worst 6.9× | 🟠 2.1× slower<br>⚠️ worst 38× | 🟠 1.7× slower<br>💩 worst 1455× |
+| **Writes (insert / move)** | baseline | 🟠 1.7× slower<br>⚠️ worst 47× | 🟠 3.0× slower<br>⚠️ worst 70× | 👑 2.3× faster<br>⚠️ worst 14× | 🟠 4.8× slower<br>⚠️ worst 78× | 🟢 2.3× faster<br>⚠️ worst 14× | 💩 182× slower<br>💩 worst 2003× |
+| **Storage on disk** | baseline | 🟢 ≈ same<br>🟢 worst 1.1× | 🟢 1.1× smaller<br>🟢 worst 1.1× | 👑 1.6× smaller<br>🟢 worst 0.7× | 🟢 ≈ same<br>🟢 worst 1.2× | 👑 1.6× smaller<br>🟢 worst 0.7× | 🟢 ≈ same<br>🟢 worst 1.1× |
 
-These typical figures still hide **deal-breakers on a single test**: relative to
-django-tree, treenode's worst write is ~2000× slower and its worst read ~1500×
-slower, and treebeard AL's worst read ~380× slower — see the per-test detail in
-[our benchmark](benchmark/results/results.md).
+See the [full benchmark](benchmark/results/results.md) for every test.
 
 In short:
 
