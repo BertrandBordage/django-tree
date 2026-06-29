@@ -68,8 +68,6 @@ class PathField(BinaryField):
 
     def deconstruct(self):
         name, path, args, kwargs = super(PathField, self).deconstruct()
-        if not kwargs.get('editable', True):
-            del kwargs['editable']
         del kwargs['default']
         del kwargs['null']
         if self.order_by:

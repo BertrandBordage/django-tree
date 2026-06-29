@@ -2,17 +2,29 @@
 
 from __future__ import unicode_literals
 
+import doctest
 import uuid
+from unittest import mock
 
 from django.apps import apps
-from django.core.exceptions import ValidationError
+from django.core.exceptions import (
+    FieldDoesNotExist,
+    ImproperlyConfigured,
+    ValidationError,
+)
 from django.db import transaction, connection
+from django.db.migrations.recorder import MigrationRecorder
 from django.db.migrations.state import ProjectState
-from django.db.models import ProtectedError
+from django.db.models import ProtectedError, QuerySet
 from django.db.utils import IntegrityError, ProgrammingError
-from django.test import TransactionTestCase
+from django.test import SimpleTestCase, TransactionTestCase
 
-from tree.operations import CreateTreeTrigger
+from tree.fields import PathField
+from tree.forms import TreeChoiceField
+from tree.operations import CreateTreeTrigger, DeleteTreeTrigger, RebuildPaths
+from tree.query import _get_path_field
+from tree.sql import base as sql_base
+from tree.types import Path
 
 from .models import (
     Place,
@@ -2674,3 +2686,227 @@ class UnusualTableNameTest(TransactionTestCase):
         self.assertTrue(root.path.is_root())
         self.assertEqual(child.path.get_level(), 2)
         self.assertTrue(child.path.is_descendant_of(root.path))
+
+
+class PathObjectTest(CommonTest):
+    """`Path` behaviours not exercised through the ORM navigation tests:
+    iteration, an empty/unbound path, NULLS-LAST comparison when the left
+    operand is empty, and the ancestry edge cases."""
+
+    def test_repr_str_and_iteration(self):
+        self.create_all_test_places()
+        france = Place.objects.get(name='France').path
+        self.assertIn('Path', repr(france))
+        self.assertEqual(str(france), str(france.value))
+        self.assertEqual(list(france), france.value.split(b'\x00')[:-1])
+
+        empty = Place().path
+        self.assertEqual(list(empty), [])
+
+        # A `Path` whose field was never bound to a model (no `attname`).
+        unbound = Path(PathField(), b'\x02\x00')
+        self.assertFalse(unbound.field_bound)
+        self.assertIsInstance(unbound.qs, QuerySet)
+        self.assertEqual(repr(unbound), '<Path %s>' % b'\x02\x00')
+
+    def test_comparisons_with_empty_left_operand(self):
+        self.create_all_test_places()
+        france = Place.objects.get(name='France').path
+        empty = Place().path
+        # An empty path sorts last (NULLS LAST), whatever the operator.
+        self.assertFalse(empty < france)
+        self.assertFalse(empty <= france)
+        self.assertTrue(empty > france)
+        self.assertTrue(empty >= france)
+
+    def test_ancestry_edge_cases(self):
+        self.create_all_test_places()
+        france = Place.objects.get(name='France').path
+        empty = Place().path
+        # An empty path is neither an ancestor nor a descendant of anything,
+        # and nothing is an ancestor/descendant of an empty path.
+        self.assertFalse(empty.is_ancestor_of(france))
+        self.assertFalse(empty.is_descendant_of(france))
+        self.assertFalse(france.is_ancestor_of(empty))
+        self.assertFalse(france.is_descendant_of(empty))
+        # A non-`Path`, non-bytes argument is rejected.
+        with self.assertRaises(TypeError):
+            france.is_ancestor_of(42)
+        with self.assertRaises(TypeError):
+            france.is_descendant_of(42)
+
+
+class PathFieldTest(CommonTest):
+    def test_forbidden_kwargs(self):
+        for kwarg in ('default', 'null', 'unique'):
+            with self.assertRaises(ImproperlyConfigured):
+                PathField(**{kwarg: True})
+
+    def test_order_by_cannot_reference_itself(self):
+        field = PathField(order_by=['self_ref'])
+        with self.assertRaises(ImproperlyConfigured):
+            field.contribute_to_class(Place, 'self_ref')
+
+    def test_value_conversions(self):
+        self.create_all_test_places()
+        field = Place._meta.get_field('path')
+        france = Place.objects.get(name='France').path
+        # An already-built `Path` is returned untouched.
+        self.assertIs(field.from_db_value(france, None, connection), france)
+        self.assertIs(field.to_python(france), france)
+        # `memoryview` (psycopg2) and raw `bytes` are both coerced to `bytes`.
+        self.assertEqual(field.to_python(memoryview(b'\x02\x00')).value, b'\x02\x00')
+        self.assertEqual(field.to_python(b'\x03\x00').value, b'\x03\x00')
+        self.assertEqual(field.get_prep_value(memoryview(b'\x04\x00')), b'\x04\x00')
+
+    def test_non_postgresql_backend_raises(self):
+        field = Place._meta.get_field('path')
+        with mock.patch.object(connection, 'vendor', 'sqlite'):
+            with self.assertRaises(NotImplementedError):
+                field._check_database_backend('default')
+
+    def test_disabled_trigger_context_manager(self):
+        field = Place._meta.get_field('path')
+        with field.disabled_trigger():
+            disabled = Place.objects.create(name='disabled')
+        self.assertIsNone(Place.objects.get(pk=disabled.pk).path.value)
+        # The trigger is back on once the context manager exits.
+        enabled = Place.objects.create(name='enabled')
+        self.assertIsNotNone(Place.objects.get(pk=enabled.pk).path.value)
+
+
+class TreeModelMixinExtraTest(CommonTest):
+    def test_clean_with_unresolved_parent_pk(self):
+        self.create_all_test_places()
+        france = Place.objects.get(name='France')
+        # Simulate a deferred parent FK still holding an unresolved (here
+        # missing) pk rather than a model instance.
+        Place._meta.get_field('parent').set_cached_value(france, 10**9)
+        with self.assertRaises(ValidationError):
+            france.clean()
+
+    def test_delete_with_explicit_using(self):
+        self.create_all_test_places()
+        normandie = Place.objects.get(name='Normandie')
+        normandie.delete(using='default')
+        self.assertFalse(Place.objects.filter(name='Normandie').exists())
+        # The whole subtree went with it.
+        self.assertFalse(Place.objects.filter(name='Eure').exists())
+
+
+class OperationsTest(TransactionTestCase):
+    def _drop(self, op, state):
+        with connection.schema_editor(atomic=True) as editor:
+            op.database_forwards('tests', editor, state, state)
+
+    def test_describe_strings(self):
+        self.assertIn('trigger', CreateTreeTrigger('place').describe())
+        self.assertIn('trigger', DeleteTreeTrigger('place').describe())
+        self.assertIn('tree structure', RebuildPaths('place').describe())
+
+    def test_non_postgresql_backend_raises(self):
+        class FakeConnection:
+            vendor = 'sqlite'
+
+        class FakeEditor:
+            connection = FakeConnection()
+
+        editor = FakeEditor()
+        for op in (CreateTreeTrigger('place'), RebuildPaths('place')):
+            with self.assertRaises(NotImplementedError):
+                op.check_database_backend(editor)
+
+    def test_delete_trigger_is_reversible(self):
+        op = DeleteTreeTrigger('tests.WeirdTableNamePlace')
+        state = ProjectState.from_apps(apps)
+        # Reversing a `DeleteTreeTrigger` re-creates the trigger.
+        with connection.schema_editor(atomic=True) as editor:
+            op.database_backwards('tests', editor, state, state)
+        self.addCleanup(self._drop, op, state)
+
+        root = WeirdTableNamePlace.objects.create(name='Root')
+        child = WeirdTableNamePlace.objects.create(name='Child', parent=root)
+        self.assertEqual(
+            WeirdTableNamePlace.objects.get(pk=child.pk).path.get_level(), 2
+        )
+
+    def test_rebuild_paths_backwards_is_noop(self):
+        state = ProjectState.from_apps(apps)
+        with connection.schema_editor(atomic=True) as editor:
+            RebuildPaths('place').database_backwards('tests', editor, state, state)
+
+    def test_get_pre_params_skips_pk_in_order_by(self):
+        # A `pk` entry in `order_by` is the tie-break the trigger applies on its
+        # own, so it contributes no watched update column.
+        field = Place._meta.get_field('path')
+        original_order_by = field.order_by
+        field.order_by = ['pk', 'name']
+        try:
+            params = CreateTreeTrigger('place').get_pre_params(Place)
+        finally:
+            field.order_by = original_order_by
+        self.assertNotIn('pk', params['update_columns'])
+
+
+class QueryHelperTest(SimpleTestCase):
+    def test_get_path_field_requires_a_path_field(self):
+        with self.assertRaises(FieldDoesNotExist):
+            _get_path_field(MigrationRecorder.Migration, None)
+
+
+class TreeChoiceFieldTest(CommonTest):
+    def test_label_from_instance(self):
+        self.create_all_test_places()
+        field = TreeChoiceField(queryset=Place.objects.all())
+        france = Place.objects.get(name='France')
+        normandie = Place.objects.get(name='Normandie')
+        self.assertEqual(field.label_from_instance(france), str(france))
+        self.assertEqual(field.label_from_instance(normandie), '── %s' % normandie)
+
+
+class PsycopgAdapterTest(SimpleTestCase):
+    def test_psycopg3_dumpers(self):
+        from psycopg import pq
+
+        path = Path(None, b'\x02\x00')
+        binary = Path._psycopg3_dumper(pq.Format.BINARY)(Path, None)
+        self.assertEqual(binary.dump(path), b'\x02\x00')
+        self.assertEqual(binary.dump(Path(None, None)), b'')
+        text = Path._psycopg3_dumper(pq.Format.TEXT)(Path, None)
+        self.assertEqual(text.dump(path), b'\\x0200')
+
+    def test_register_psycopg2(self):
+        import sys
+        import types as module_types
+
+        captured = {}
+        fake = module_types.ModuleType('psycopg2')
+        fake.Binary = lambda value: ('Binary', value)
+        extensions = module_types.ModuleType('psycopg2.extensions')
+        extensions.AsIs = lambda value: ('AsIs', value)
+        extensions.register_adapter = lambda cls, fn: captured.__setitem__(cls, fn)
+        fake.extensions = extensions
+        with mock.patch.dict(
+            sys.modules, {'psycopg2': fake, 'psycopg2.extensions': extensions}
+        ):
+            Path.register_psycopg2()
+        adapt = captured[Path]
+        self.assertEqual(adapt(Path(None, None)), ('AsIs', 'NULL'))
+        self.assertEqual(adapt(Path(None, b'\x02\x00')), ('Binary', b'\x02\x00'))
+
+    def test_register_psycopg_falls_back_to_psycopg2(self):
+        def fake_find_spec(name):
+            return None if name == 'psycopg' else object()
+
+        # `find_spec` is imported into `tree.types`, so patch it there.
+        with mock.patch('tree.types.find_spec', side_effect=fake_find_spec):
+            with mock.patch.object(Path, 'register_psycopg2') as register_psycopg2:
+                Path.register_psycopg()
+                register_psycopg2.assert_called_once()
+
+
+def load_tests(loader, tests, pattern):
+    # The SQL-building helpers are specified by doctests (see the module's TODO);
+    # run them as part of the suite so they are covered and verified.
+    tests.addTests(doctest.DocTestSuite(sql_base))
+    return tests
