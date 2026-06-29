@@ -45,21 +45,26 @@ consistent.
 
 ### Performance
 
-Absolute latency and disk usage measured on a tree of **3905 rows** (only tests
-available in every implementation are counted). Each cell shows the measurement;
-below it, the rank in that row and a marker:
-
-- 👑 fastest/smallest of the row · 🟢 fine · 🟠 laggy (read > 10 ms, write > 100 ms) · 🔴 very laggy (read > 100 ms, write > 1 s) · 💩 horrible (read > 200 ms, write > 2 s).
+Absolute latency and disk usage measured on a tree of **3905 rows**. Every test
+runs on every implementation: those lacking a native method use a simple,
+unofficial ORM equivalent, so the whole grid is comparable. Each cell shows the
+measurement; below it, the rank in that row (`#n`) and a marker.
 
 | | django-tree | treebeard MP | treebeard NS | treebeard AL | django-mptt | django-tree-queries | django-treenode |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| **Reads · best** | 63 µs<br>🟢 #6 | 0.2 µs<br>👑 #1 | 0.7 µs<br>🟢 #3 | 10 µs<br>🟢 #5 | 1.7 µs<br>🟢 #4 | 64 µs<br>🟢 #7 | 0.5 µs<br>🟢 #2 |
-| **Reads · typical** | 354 µs<br>🟢 #4 | 153 µs<br>🟢 #2 | 137 µs<br>👑 #1 | 921 µs<br>🟢 #6 | 189 µs<br>🟢 #3 | 840 µs<br>🟢 #5 | 1.5 ms<br>🟢 #7 |
-| **Reads · worst** | 2.8 ms<br>🟢 #2 | 4.7 ms<br>🟢 #4 | 2.4 ms<br>👑 #1 | 246 ms<br>💩 #7 | 3.6 ms<br>🟢 #3 | 9.6 ms<br>🟢 #5 | 131 ms<br>🔴 #6 |
-| **Writes · best** | 259 µs<br>🟢 #6 | 183 µs<br>👑 #1 | 213 µs<br>🟢 #4 | 184 µs<br>🟢 #2 | 243 µs<br>🟢 #5 | 187 µs<br>🟢 #3 | 358 ms<br>🟠 #7 |
-| **Writes · typical** | 2.3 ms<br>🟢 #4 | 1.8 ms<br>🟢 #3 | 6.1 ms<br>🟢 #5 | 671 µs<br>👑 #1 | 10 ms<br>🟢 #6 | 748 µs<br>🟢 #2 | 789 ms<br>🟠 #7 |
-| **Writes · worst** | 1.8 s<br>🔴 #3 | 8.6 s<br>💩 #4 | 20.2 s<br>💩 #5 | 823 ms<br>👑 #1 | 20.6 s<br>💩 #6 | 826 ms<br>🟠 #2 | 25 min<br>💩 #7 |
-| **Storage** | 0.91 MB<br>🟢 #5 | 0.97 MB<br>🟢 #6 | 0.79 MB<br>🟢 #3 | 0.57 MB<br>👑 #1 | 0.85 MB<br>🟢 #4 | 0.57 MB<br>👑 #1 | 0.99 MB<br>🟢 #7 |
+| **Reads · best** | 195 µs<br>🟢 #7 | 0.5 µs<br>👑🟢 #1 | 0.7 µs<br>🟢 #3 | 10 µs<br>🟢 #5 | 1.7 µs<br>🟢 #4 | 75 µs<br>🟢 #6 | 0.5 µs<br>👑🟢 #1 |
+| **Reads · typical** | 501 µs<br>🟢 #4 | 250 µs<br>👑🟢 #1 | 393 µs<br>🟢 #3 | 1.6 ms<br>🟢 #6 | 300 µs<br>🟢 #2 | 1.1 ms<br>🟢 #5 | 1.9 ms<br>🟢 #7 |
+| **Reads · worst** | 71 ms<br>👑🟠 #1 | 344 ms<br>🔴 #3 | 518 ms<br>🔴 #4 | 853 ms<br>🔴 #6 | 118 ms<br>🔴 #2 | 627 ms<br>🔴 #5 | 5 min<br>💩 #7 |
+| **Writes · best** | 418 µs<br>🟢 #6 | 235 µs<br>🟢 #4 | 205 µs<br>🟢 #3 | 193 µs<br>🟢 #2 | 307 µs<br>🟢 #5 | 183 µs<br>👑🟢 #1 | 390 ms<br>🔴 #7 |
+| **Writes · typical** | 2.5 ms<br>🟢 #3 | 5.7 ms<br>🟠 #4 | 6.1 ms<br>🟠 #5 | 969 µs<br>👑🟢 #1 | 13 ms<br>🟠 #6 | 1.0 ms<br>🟢 #2 | 837 ms<br>🔴 #7 |
+| **Writes · worst** | 1.9 s<br>💩 #3 | 9.0 s<br>💩 #4 | 21.8 s<br>💩 #6 | 926 ms<br>🔴 #2 | 19.0 s<br>💩 #5 | 829 ms<br>👑🔴 #1 | 25 min<br>💩 #7 |
+| **Storage** | 0.91 MB<br>🟢 #5 | 0.97 MB<br>🟢 #6 | 0.79 MB<br>🟢 #3 | 0.57 MB<br>👑🟢 #1 | 0.85 MB<br>🟢 #4 | 0.57 MB<br>👑🟢 #1 | 0.98 MB<br>🟢 #6 |
+
+Two results within 5 % share a rank. Markers use the same thresholds for reads
+and writes:
+
+- 👑 best of the row — shown before the severity marker.
+- 🟢 fine · 🟠 laggy (> 3 ms) · 🔴 very laggy (> 100 ms) · 💩 horrible (> 1 s).
 
 See the [full benchmark](benchmark/results/results.md) for every test.
 

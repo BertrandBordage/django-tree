@@ -1,18 +1,22 @@
 # Summary
 
 Take this summary with a mountain of salt. The [table of stats](stats.html) reports
-**absolute** numbers on the largest tree measured (3905 rows), counting only the
-tests every implementation runs (so unsupported tests like *Get descendants from
-queryset* are dropped). For each timing category it gives three figures per
-implementation — the **best**, **typical** (geometric mean) and **worst** single
-test — plus a single storage figure. Each cell carries the rank in its row and a
-severity marker based on absolute latency: laggy above 10 ms read / 100 ms write,
-very laggy above 100 ms / 1 s, horrible above 200 ms / 2 s.
+**absolute** numbers on the largest tree measured (3905 rows). Every test runs on
+every implementation — those without a native method use a simple, unofficial ORM
+equivalent — so the whole grid is comparable. For each timing category it gives
+three figures per implementation — the **best**, **typical** (geometric mean) and
+**worst** single test — plus a single storage figure. Each cell carries the rank in
+its row (two results within 5 % share a rank) and a severity marker based on
+absolute latency, the same for reads and writes: laggy above 3 ms, very laggy above
+100 ms, horrible above 1 s.
 
-The worst-case rows are where deal-breakers show up. treebeard AL's worst read is
-~246 ms (recursive parent walk), and django-treenode's worst write is ~25 minutes
-because every write rebuilds the whole tree in Python. MPTT and treebeard NS also
-reach ~20 s on their worst write.
+The worst-case rows are where deal-breakers show up. django-treenode rebuilds the
+whole tree in Python on every write, so its worst write is ~25 minutes — and its
+worst *read* balloons to ~5 minutes too, since it has no set-level descendants query
+and the unofficial equivalent walks the tree node by node. treebeard NS and MPTT
+reach ~19–22 s on their worst write. The adjacency-based readers (treebeard AL,
+django-tree-queries) climb to ~0.6–0.9 s on the heaviest read traversal, where
+django-tree stays at ~71 ms.
 
 Note as well that despite django-tree being middle-of-the-pack on storage, it is
 absolutely not a deal breaker — and the amount of indexes is a per-field parameter

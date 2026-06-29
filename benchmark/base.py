@@ -50,6 +50,67 @@ CLASSIC_API_MODELS = (
 )
 
 
+# --- Unofficial, simple-ORM equivalents -------------------------------------
+# Some implementations lack a native method for a given test (e.g. treebeard AL
+# has no queryset-level get_descendants(), django-tree-queries has no
+# get_prev_sibling()). Rather than excluding those tests, every implementation
+# runs the same operation through a naive, common-denominator ORM path so the
+# whole grid is comparable. These are deliberately *not* how you would do it on
+# a given library — they only exist to make the comparison exhaustive.
+
+
+def _bfs_descendants(roots):
+    """Walk the whole subtree below ``roots`` via repeated ``get_children()``.
+
+    A queryset-free, one-query-per-node traversal that works on every model
+    (each exposes ``get_children()``), so implementations without a native
+    descendants query can still answer "every descendant of these nodes".
+    """
+    descendants = []
+    frontier = list(roots)
+    while frontier:
+        children = []
+        for node in frontier:
+            children.extend(node.get_children())
+        descendants.extend(children)
+        frontier = children
+    return descendants
+
+
+def _parent_field(model):
+    return 'tn_parent_id' if model is TreeNodePlace else 'parent_id'
+
+
+def _orm_prev_sibling(model, obj):
+    """The sibling just before ``obj`` in name order, found with plain filters."""
+    field = _parent_field(model)
+    return (
+        model._default_manager.filter(**{field: getattr(obj, field)})
+        .filter(name__lt=obj.name)
+        .order_by('-name')
+        .first()
+    )
+
+
+def _orm_next_sibling(model, obj):
+    """The sibling just after ``obj`` in name order, found with plain filters."""
+    field = _parent_field(model)
+    return (
+        model._default_manager.filter(**{field: getattr(obj, field)})
+        .filter(name__gt=obj.name)
+        .order_by('name')
+        .first()
+    )
+
+
+def _roots(model):
+    if model in (TreebeardMPPlace, TreebeardNSPlace):
+        return model._default_manager.filter(depth=1)
+    if model is TreeNodePlace:
+        return model._default_manager.filter(tn_parent__isnull=True)
+    return model._default_manager.filter(parent__isnull=True)
+
+
 def derive_siblings_per_level(max_objects, depth=len(DEFAULT_SIBLINGS_PER_LEVEL)):
     """Derive a `depth`-level branching tuple holding at most `max_objects` nodes.
 
@@ -469,11 +530,16 @@ class Benchmark:
         ('tree-queries', 'django-tree-queries'),
         ('treenode', 'django-treenode'),
     ]
-    # Absolute latency thresholds (milliseconds) for the severity markers.
+    # Absolute latency thresholds (milliseconds) for the severity markers, the
+    # same for reads and writes: 🟠 laggy above 3 ms, 🔴 very laggy above 100 ms,
+    # 💩 horrible above 1 s.
     STATS_THRESHOLDS = {
-        READ_LATENCY: (10, 100, 200),
-        WRITE_LATENCY: (100, 1000, 2000),
+        READ_LATENCY: (3, 100, 1000),
+        WRITE_LATENCY: (3, 100, 1000),
     }
+    # Two results within this relative tolerance share a rank (a near-tie should
+    # not get an arbitrary order).
+    RANK_TOLERANCE = 0.05
 
     @staticmethod
     def _format_ms(ms):
@@ -490,36 +556,47 @@ class Benchmark:
 
     @classmethod
     def _marker(cls, ms, rank, thresholds):
-        if rank == 1:
-            return '👑'
         laggy, very, horrible = thresholds
         if ms > horrible:
-            return '💩'
-        if ms > very:
-            return '🔴'
-        if ms > laggy:
-            return '🟠'
-        return '🟢'
+            dot = '💩'
+        elif ms > very:
+            dot = '🔴'
+        elif ms > laggy:
+            dot = '🟠'
+        else:
+            dot = '🟢'
+        # The crown flags the best of the row; it is prepended to the severity
+        # dot rather than replacing it.
+        return '👑' + dot if rank == 1 else dot
+
+    @classmethod
+    def _ranks_within(cls, series):
+        # Rank ascending (method='min'), but values within RANK_TOLERANCE of the
+        # group's reference (its smallest member) share a rank.
+        ordered = series.dropna().sort_values()
+        ranks = {}
+        reference = None
+        group_rank = 0
+        for position, (impl, value) in enumerate(ordered.items(), start=1):
+            if reference is None or value > reference * (1 + cls.RANK_TOLERANCE):
+                group_rank = position
+                reference = value
+            ranks[impl] = group_rank
+        return pd.Series(ranks, dtype='int').reindex(series.index)
 
     def write_stats(self, df):
-        # Largest tree measured, apples-to-apples: keep only tests every
-        # implementation runs at that size.
+        # Largest tree measured. Every test now runs on every implementation —
+        # the ones without a native method use a simple-ORM equivalent — so there
+        # is no coverage filter: all tests take part in the comparison.
         count = df['Count'].max()
-        # Unsupported tests are present as NaN-valued rows, so drop them before
-        # measuring coverage — otherwise they would count as "available".
         d = df[df['Count'] == count].dropna(subset=['Value'])
-        n_impls = d['Implementation'].nunique()
-        coverage = d.groupby(['Y label', 'Test name'])['Implementation'].nunique()
-        full = coverage[coverage == n_impls].index
-        d = d.set_index(['Y label', 'Test name'])
-        d = d.loc[d.index.isin(full)].reset_index()
 
         labels = [label for _, label in self.STATS_ORDER]
         rows = {}
 
         def add_row(name, series, thresholds):
             series = series.reindex([impl for impl, _ in self.STATS_ORDER])
-            ranks = series.rank(method='min').astype(int)
+            ranks = self._ranks_within(series)
             cells = []
             for impl, _ in self.STATS_ORDER:
                 ms = series[impl] * 1000
@@ -546,12 +623,12 @@ class Benchmark:
             .first()
             .reindex([impl for impl, _ in self.STATS_ORDER])
         )
-        ranks = storage.rank(method='min').astype(int)
+        ranks = self._ranks_within(storage)
         rows['Storage'] = [
             '%.2f MB<br>%s #%d'
             % (
                 storage[impl] / 1e6,
-                '👑' if ranks[impl] == 1 else '🟢',
+                '👑🟢' if ranks[impl] == 1 else '🟢',
                 ranks[impl],
             )
             for impl, _ in self.STATS_ORDER
@@ -800,6 +877,26 @@ class TestGetDescendantsFromQuerySet(BenchmarkTest):
         list(self.qs.get_descendants())
 
 
+@Benchmark.register_test(
+    'Get descendants from queryset',
+    (
+        TreebeardALPlace,
+        TreebeardMPPlace,
+        TreebeardNSPlace,
+        TreeNodePlace,
+        TreeQueriesPlace,
+    ),
+)
+class TestGetDescendantsFromQuerySet(BenchmarkTest):
+    def setup(self):
+        self.qs = self.model._default_manager.annotate(n=F('pk') % 5).filter(n=0)
+        super().setup()
+
+    def run(self):
+        # Unofficial equivalent: BFS down from every queryset node.
+        _bfs_descendants(self.qs)
+
+
 #
 # Descendants count
 #
@@ -875,17 +972,34 @@ class TestGetDescendantsCountLeaf(GetLeafMixin, BenchmarkTest):
 #
 
 
+# treebeard AL has no queryset-level get_descendants() to filter, so it gets the
+# simple-ORM equivalent below; the others use their native filtered count.
+_FILTERED_DESCENDANTS_NATIVE = (
+    MPTTPlace,
+    TreePlace,
+    TreebeardMPPlace,
+    TreebeardNSPlace,
+    TreeQueriesPlace,
+)
+
+
+def _bfs_filtered_descendants_count(roots):
+    # Unofficial equivalent of get_descendants().filter(pk__contains='1').count().
+    return sum(1 for d in _bfs_descendants(roots) if '1' in str(d.pk))
+
+
 @Benchmark.register_test(
-    'Get filtered descendants count [root]', (*CLASSIC_API_MODELS, TreeQueriesPlace)
+    'Get filtered descendants count [root]', _FILTERED_DESCENDANTS_NATIVE
 )
 class TestGetFilteredDescendantsCountRoot(GetRootMixin, BenchmarkTest):
-    def setup(self):
-        if self.model is TreebeardALPlace:
-            raise SkipTest
-        super().setup()
-
     def run(self):
         self.root.get_descendants().filter(pk__contains='1').count()
+
+
+@Benchmark.register_test('Get filtered descendants count [root]', TreebeardALPlace)
+class TestGetFilteredDescendantsCountRootAL(GetRootMixin, BenchmarkTest):
+    def run(self):
+        _bfs_filtered_descendants_count([self.root])
 
 
 @Benchmark.register_test('Get filtered descendants count [root]', TreeNodePlace)
@@ -895,16 +1009,17 @@ class TestGetFilteredDescendantsCountRoot(GetRootMixin, BenchmarkTest):
 
 
 @Benchmark.register_test(
-    'Get filtered descendants count [branch]', (*CLASSIC_API_MODELS, TreeQueriesPlace)
+    'Get filtered descendants count [branch]', _FILTERED_DESCENDANTS_NATIVE
 )
 class TestGetFilteredDescendantsCountBranch(GetBranchMixin, BenchmarkTest):
-    def setup(self):
-        if self.model is TreebeardALPlace:
-            raise SkipTest
-        super().setup()
-
     def run(self):
         self.branch.get_descendants().filter(pk__contains='1').count()
+
+
+@Benchmark.register_test('Get filtered descendants count [branch]', TreebeardALPlace)
+class TestGetFilteredDescendantsCountBranchAL(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        _bfs_filtered_descendants_count([self.branch])
 
 
 @Benchmark.register_test('Get filtered descendants count [branch]', TreeNodePlace)
@@ -914,16 +1029,17 @@ class TestGetFilteredDescendantsCountBranch(GetBranchMixin, BenchmarkTest):
 
 
 @Benchmark.register_test(
-    'Get filtered descendants count [leaf]', (*CLASSIC_API_MODELS, TreeQueriesPlace)
+    'Get filtered descendants count [leaf]', _FILTERED_DESCENDANTS_NATIVE
 )
 class TestGetFilteredDescendantsCountLeaf(GetLeafMixin, BenchmarkTest):
-    def setup(self):
-        if self.model is TreebeardALPlace:
-            raise SkipTest
-        super().setup()
-
     def run(self):
         self.leaf.get_descendants().filter(pk__contains='1').count()
+
+
+@Benchmark.register_test('Get filtered descendants count [leaf]', TreebeardALPlace)
+class TestGetFilteredDescendantsCountLeafAL(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        _bfs_filtered_descendants_count([self.leaf])
 
 
 @Benchmark.register_test('Get filtered descendants count [leaf]', TreeNodePlace)
@@ -1050,6 +1166,32 @@ class TestGetPrevSiblingLeaf(GetLeafMixin, BenchmarkTest):
         self.leaf.get_prev_sibling()
 
 
+# django-treenode and django-tree-queries expose no sibling navigation, so they
+# get the simple-ORM equivalent (the sibling just before/after in name order).
+@Benchmark.register_test(
+    'Get previous sibling [root]', (TreeNodePlace, TreeQueriesPlace)
+)
+class TestGetPrevSiblingRootORM(GetRootMixin, BenchmarkTest):
+    def run(self):
+        _orm_prev_sibling(self.model, self.root)
+
+
+@Benchmark.register_test(
+    'Get previous sibling [branch]', (TreeNodePlace, TreeQueriesPlace)
+)
+class TestGetPrevSiblingBranchORM(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        _orm_prev_sibling(self.model, self.branch)
+
+
+@Benchmark.register_test(
+    'Get previous sibling [leaf]', (TreeNodePlace, TreeQueriesPlace)
+)
+class TestGetPrevSiblingLeafORM(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        _orm_prev_sibling(self.model, self.leaf)
+
+
 #
 # Next sibling
 #
@@ -1071,6 +1213,24 @@ class TestGetNextSiblingBranch(GetBranchMixin, BenchmarkTest):
 class TestGetNextSiblingLeaf(GetLeafMixin, BenchmarkTest):
     def run(self):
         self.leaf.get_next_sibling()
+
+
+@Benchmark.register_test('Get next sibling [root]', (TreeNodePlace, TreeQueriesPlace))
+class TestGetNextSiblingRootORM(GetRootMixin, BenchmarkTest):
+    def run(self):
+        _orm_next_sibling(self.model, self.root)
+
+
+@Benchmark.register_test('Get next sibling [branch]', (TreeNodePlace, TreeQueriesPlace))
+class TestGetNextSiblingBranchORM(GetBranchMixin, BenchmarkTest):
+    def run(self):
+        _orm_next_sibling(self.model, self.branch)
+
+
+@Benchmark.register_test('Get next sibling [leaf]', (TreeNodePlace, TreeQueriesPlace))
+class TestGetNextSiblingLeafORM(GetLeafMixin, BenchmarkTest):
+    def run(self):
+        _orm_next_sibling(self.model, self.leaf)
 
 
 #
@@ -1133,8 +1293,10 @@ class TestRebuildPaths(BenchmarkWriteTest):
     y_label=WRITE_LATENCY,
 )
 class TestRebuildPaths(BenchmarkWriteTest):
-    def setup(self):
-        raise SkipTest
+    def run(self):
+        # These keep no denormalized tree data to rebuild; the comparable cost is
+        # walking the whole tree from its roots to reconstruct the ordering.
+        _bfs_descendants(list(_roots(self.model)))
 
 
 @Benchmark.register_test('Rebuild paths', TreebeardMPPlace, y_label=WRITE_LATENCY)
