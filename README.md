@@ -36,6 +36,7 @@ consistent.
 | **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python | ❌ in Python + cache |
 | **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only | ✅ | ❌ | ❌ manual resync |
 | **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__level` | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 manager methods | 🟡 cached properties |
+| **Several independent trees per model** | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
 | **Fast reads** | ✅ [\*](#bench) | ✅ MP fast [\*](#bench) | 🟡 recursive CTE [\*](#bench) | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
 | **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 MP ok [\*](#bench)<br>_NS slow_ | ✅ FK update [\*](#bench) | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
 | **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ❌ MP path strings [\*](#bench)<br>_NS lighter_ | ✅ just a FK [\*](#bench) | ❌ 4 indexed columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
