@@ -1,19 +1,21 @@
 # Summary
 
-Take this summary with a mountain of salt. For every individual measurement, each
-implementation's result is expressed as a **slowdown ratio** against the best
-(fastest/smallest) implementation on that measurement, so the winner scores `1.0`
-and the others are "× slower/larger". The table then shows two numbers per category:
+Take this summary with a mountain of salt. Everything is measured **relative to
+django-tree**, the baseline. For every individual measurement, each implementation's
+result is divided by django-tree's on that same test, so the factor says how many
+times slower (`> 1`) or faster (`< 1`) than django-tree it is. The table then shows
+two numbers per category:
 
-- **Typical (× best)**: the geometric mean of those ratios — how many times slower
-  the implementation usually is. Lower is better, `1.0` being always-first.
-- **Worst (× best)**: the single worst ratio — the test where it falls furthest
-  behind. This is what flags deal-breakers a typical figure would otherwise dilute.
+- **Typical (× django-tree)**: the geometric mean of those factors — the usual gap.
+  `1.0` is on par with django-tree, above is slower/larger, below is faster/smaller.
+- **Worst (× django-tree)**: the single worst factor — the test where the
+  implementation falls furthest behind django-tree. This is what flags deal-breakers
+  a typical figure would otherwise dilute.
 
 Unlike a plain average rank, this keeps the magnitude of each gap: a test where an
 implementation is 1000× slower stays 1000× slower instead of merely ranking "last".
 
-For example, most reads are too slow with treebeard AL to make it a serious choice for anything other than a toy project — its worst read is ~200000× the fastest.
+For example, most reads are too slow with treebeard AL to make it a serious choice for anything other than a toy project — its worst read is ~380× slower than django-tree.
 
 In the same way, MPTT can be extremely slow at writing data, making it unusable on a wide range of projects.
 

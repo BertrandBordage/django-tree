@@ -436,24 +436,33 @@ class Benchmark:
         )
         df.to_csv(csv_path, index=False, compression={'method': 'gzip', 'mtime': 0})
 
-        # For every individual measurement (a Database/Test/Count group), express
-        # each implementation's result as a slowdown ratio against the best
-        # (fastest/smallest) in that group: the winner scores 1.0, the others are
-        # "× slower/larger". Unlike a plain rank, this keeps the magnitude — a result
-        # 1000× worse stays 1000× worse instead of merely ranking "last" — so a single
+        # Express every result relative to django-tree, our baseline: for each
+        # measurement (a Database/Test/Count group) divide each implementation's value
+        # by django-tree's on that same test, so the factor says how many times slower
+        # (> 1) or faster (< 1) than django-tree it is. Keeping the raw magnitude — a
+        # test 1000× slower stays 1000×, not merely "last" — means a single
         # catastrophic test is no longer diluted by the many ordinary ones. Skipped or
-        # unsupported measurements are NaN and stay out. Per category we report the
-        # geometric mean of those ratios (the typical slowdown) and the worst single
-        # ratio, which exposes deal-breaker tests an average would otherwise hide.
+        # unsupported measurements (and tests django-tree itself does not run) are NaN
+        # and stay out. Per category we report the geometric mean of those factors (the
+        # typical gap) and the worst single factor, which exposes deal-breaker tests an
+        # average would otherwise hide.
+        baseline = self.models[TreePlace]
         stats_df = df.set_index(['Database', 'Test name', 'Count'])
         stats_df.sort_index(inplace=True)
-        best = stats_df.groupby(level=[0, 1, 2])['Value'].transform('min')
-        stats_df['Slowdown'] = stats_df['Value'] / best
-        grouped = stats_df.groupby(['Y label', 'Implementation'])['Slowdown']
+        base_value = (
+            stats_df['Value']
+            .where(stats_df['Implementation'] == baseline)
+            .groupby(level=[0, 1, 2])
+            .transform('first')
+        )
+        stats_df['Factor'] = stats_df['Value'] / base_value
+        grouped = stats_df.groupby(['Y label', 'Implementation'])['Factor']
         stats_df = pd.DataFrame(
             {
-                'Typical (× best)': grouped.apply(lambda s: np.exp(np.log(s).mean())),
-                'Worst (× best)': grouped.max(),
+                'Typical (× django-tree)': grouped.apply(
+                    lambda s: np.exp(np.log(s).mean())
+                ),
+                'Worst (× django-tree)': grouped.max(),
             }
         )
         for column in stats_df.columns:
