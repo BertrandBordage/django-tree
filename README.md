@@ -50,8 +50,8 @@ Python on the ORM save cycle (`save()`, `delete()`, `QuerySet.update()`,
 | **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `NS_Node` | ❌ subclass `AL_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNode` | ❌ subclass `TreeNodeModel` |
 | **Build & move with plain `parent` + `save()`** | ✅ | ❌ API | ❌ API | ❌ API | ✅ | ✅ | ✅ |
 | **Several independent trees per model** | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
-| **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python | ❌ in Python | ❌ in Python | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python + cache |
-| **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only | ❌ Python API only | ❌ Python API only | ❌ | ✅ | ❌ manual resync |
+| **Tree kept correct by the database** | 🟡 SQL trigger on PostgreSQL; in Python elsewhere | ❌ in Python | ❌ in Python | ❌ in Python | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python + cache |
+| **Survives bulk writes / `update()` / raw SQL** | 🟡 all on PostgreSQL; ORM only on SQLite/MySQL | ❌ Python API only | ❌ Python API only | ❌ Python API only | ❌ | ✅ | ❌ manual resync |
 | **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__level` | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 cached properties |
 | **Admin integration** | ❌ form field only | ✅ drag-and-drop | ✅ drag-and-drop | ✅ drag-and-drop | ✅ drag-and-drop | ✅ cut/paste | ✅ |
 | **Template tags to render trees** | ❌ | 🟡 | 🟡 | 🟡 | ✅ `{% recursetree %}` | ✅ `{% recursetree %}` | 🟡 |
@@ -235,6 +235,14 @@ with YourModel.disabled_tree_trigger():
     # The trigger is restored after that, even if an error occurred.
     pass
 ```
+
+> [!NOTE]
+> On **SQLite** and **MySQL** there is no SQL trigger: `disable_tree_trigger()`
+> / `enable_tree_trigger()` toggle the Python maintenance instead, and
+> `rebuild_paths()` is also how you resync the tree after a write that bypasses
+> the ORM (raw SQL, `cursor.execute`, …), which those backends cannot intercept.
+> On **PostgreSQL** the trigger keeps everything consistent on its own, so you
+> never need `rebuild_paths()` in normal use.
 
 There is also a bunch of less useful lookups and transforms
 available. They will be documented with examples in the future.
