@@ -22,50 +22,51 @@ consistent.
 ## Comparison
 
 > [!NOTE]
-> django-treebeard ships three algorithms. The column shows **MP**
-> (materialized path), by far the most used; **NS** (nested sets) is noted
-> underneath only where it differs. The third, **AL** (adjacency list), is left
-> out: its reads are slow enough to rule it out for most projects (see the
-> [detailed benchmark](benchmark/results/results.md)).
+> django-treebeard ships three interchangeable algorithms — **MP** (materialized
+> path), **NS** (nested sets) and **AL** (adjacency list) — shown as separate
+> columns. Columns are ordered left-to-right from best to worst **overall
+> performance** (the total-points row in [Performance](#performance) below).
 
 ### Features
 
-| | django-tree | [django-treebeard](https://github.com/django-treebeard/django-treebeard) | [django-tree-queries](https://github.com/feincms/django-tree-queries) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **Works on any Django database** | ❌ PostgreSQL only | ✅ | ✅ | ✅ | ✅ |
-| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `TreeNode` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
-| **Build & move with plain `parent` + `save()`** | ✅ | ❌ `add_child()`/`move()` API | ✅ | ✅ | ✅ |
-| **Several independent trees per model** | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
-| **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python | ❌ in Python + cache |
-| **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only | ✅ | ❌ | ❌ manual resync |
-| **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__level` | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 manager methods | 🟡 cached properties |
-| **Admin integration** | ❌ form field only | ✅ drag-and-drop | ✅ cut/paste | ✅ drag-and-drop | ✅ |
-| **Template tags to render trees** | ❌ | 🟡 | ✅ `{% recursetree %}` | ✅ `{% recursetree %}` | 🟡 |
-| **Production-ready** | ❌ beta | ✅ | ✅ | 🟡 works, unmaintained | ✅ |
+| | [treebeard AL](https://github.com/django-treebeard/django-treebeard) | [django-tree-queries](https://github.com/feincms/django-tree-queries) | [treebeard NS](https://github.com/django-treebeard/django-treebeard) | django-tree | [treebeard MP](https://github.com/django-treebeard/django-treebeard) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Works on any Django database** | ✅ | ✅ | ✅ | ❌ PostgreSQL only | ✅ | ✅ | ✅ |
+| **Drop-in (no model/manager subclassing)** | ❌ subclass `AL_Node` | ❌ subclass `TreeNode` | ❌ subclass `NS_Node` | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
+| **Build & move with plain `parent` + `save()`** | ❌ API | ✅ | ❌ API | ✅ | ❌ API | ✅ | ✅ |
+| **Several independent trees per model** | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
+| **Tree kept correct by the database** | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python | ✅ SQL trigger | ❌ in Python | ❌ in Python | ❌ in Python + cache |
+| **Survives bulk writes / `update()` / raw SQL** | ❌ Python API only | ✅ | ❌ Python API only | ✅ | ❌ Python API only | ❌ | ❌ manual resync |
+| **Tree filters as composable ORM lookups** | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 manager methods | ✅ `__descendant_of`, `__level` | 🟡 manager methods | 🟡 manager methods | 🟡 cached properties |
+| **Admin integration** | ✅ drag-and-drop | ✅ cut/paste | ✅ drag-and-drop | ❌ form field only | ✅ drag-and-drop | ✅ drag-and-drop | ✅ |
+| **Template tags to render trees** | 🟡 | ✅ `{% recursetree %}` | 🟡 | ❌ | 🟡 | ✅ `{% recursetree %}` | 🟡 |
+| **Production-ready** | ✅ | ✅ | ✅ | ❌ beta | ✅ | 🟡 works, unmaintained | ✅ |
 
 ✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
 
 ### Performance
 
-| | django-tree | django-treebeard | django-tree-queries | django-mptt | django-treenode |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **Reads** | 🥉 | 🥇 MP<br>_NS slower_ | #4 | 🥈 | #5 |
-| **Writes (insert / move)** | 🥈 | 🥉 MP<br>_NS slower_ | 🥇 | #4 | #5 |
-| **Storage on disk** | 🥈 | #4 MP<br>_NS lighter_ | 🥇 | 🥉 | #5 |
+| | treebeard AL | django-tree-queries | treebeard NS | django-tree | treebeard MP | django-mptt | django-treenode |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Reads** | #5 | #6 | 🥉 #3 | #4 | 🥇 #1 | 🥈 #2 | #7 |
+| **Writes (insert / move)** | 🥈 #2 | 🥇 #1 | #5 | 🥉 #3 | #4 | #6 | #7 |
+| **Storage on disk** | 🥇 #1 | 🥇 #1 | 🥉 #3 | #4 | #6 | #5 | #7 |
+| **Total points** | **10** | **10** | **7** | **7** | **7** | **5** | **0** |
 
-🥇 best, then 🥈 🥉 #4 #5 — by **average rank in [our benchmark](benchmark/results/results.md)** (lower is better; equal ranks share a medal). treebeard is ranked on its MP variant.
+Ranks come from the per-category **average rank in [our benchmark](benchmark/results/results.md)** (lower is better; tied ranks share a medal). 🥇 #1 = 5 pts, 🥈 #2 = 4, 🥉 #3 = 3, #4 = 2, #5 = 1, lower = 0; columns are ordered by total points (ties broken by overall average rank). Note that treebeard AL’s high total comes from writes and storage — its slow reads can still be a deal-breaker.
 
 In short:
 
+- **treebeard** offers three algorithms with the same brittle Python API and no
+  database constraint: **MP** reads fastest, **AL** writes fast and is tiny on
+  disk but reads poorly, **NS** lands between MPTT and MP.
+- **tree-queries** derives the hierarchy from a plain `parent` FK with recursive
+  CTEs, so nothing can get out of sync, writes and storage are the cheapest and
+  it runs on most databases — at the cost of a recursive query on every read.
 - **django-tree** is the only one that keeps the tree correct in the database
   itself, so bulk operations, `update()` and raw SQL stay safe — at the cost of
   being PostgreSQL-only, still beta, and without admin drag-and-drop or
   tree-rendering template tags yet.
-- **treebeard** in its usual MP form reads fastest and is well maintained, but
-  enforces no database constraint and only stays correct through its Python API.
-- **tree-queries** derives the hierarchy from a plain `parent` FK with recursive
-  CTEs, so nothing can get out of sync, writes and storage are the cheapest and
-  it runs on most databases — at the cost of a recursive query on every read.
 - **MPTT** stores the tree safely but writes get very slow on large or
   write-heavy tables and need periodic rebuilds. No longer maintained.
 - **treenode** keeps denormalized caches of the whole tree, but every write
