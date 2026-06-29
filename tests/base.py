@@ -4,7 +4,8 @@ from __future__ import unicode_literals
 
 import doctest
 import uuid
-from unittest import mock
+from contextlib import nullcontext
+from unittest import mock, skipIf, skipUnless
 
 from django.apps import apps
 from django.core.exceptions import (
@@ -59,6 +60,31 @@ from .models import (
 #       implemented yet.)
 
 
+# Only PostgreSQL keeps the tree consistent under writes that bypass the ORM
+# (raw SQL), via its trigger. Other backends maintain the path in Python on the
+# ORM save cycle, so these tests are PostgreSQL-only.
+requires_db_trigger = skipUnless(
+    connection.vendor == 'postgresql',
+    'Requires the PostgreSQL trigger (raw SQL is not observed on other backends).',
+)
+
+# Sibling order follows the database's collation of the `order_by` column. These
+# fixtures mix non-ASCII names (e.g. 'Österreich') with ASCII ones, so their
+# expected order only holds under a locale collation (PostgreSQL, MySQL); SQLite's
+# default binary collation orders by byte value and would interleave differently.
+requires_locale_collation = skipIf(
+    connection.vendor == 'sqlite',
+    "SQLite's binary collation orders non-ASCII names differently.",
+)
+
+# A raw `Path` query parameter is adaptable on PostgreSQL (psycopg) and SQLite
+# (sqlite3 adapter), but not with mysqlclient.
+supports_path_parameter = skipIf(
+    connection.vendor == 'mysql',
+    'mysqlclient cannot adapt a Path as a raw query parameter.',
+)
+
+
 def path(*path_components):
     # A reference path used only as a *structural* descriptor: its length encodes
     # the node's depth and its prefix relationships encode ancestry. The stored
@@ -93,6 +119,17 @@ def assert_structure(test, instances, values, label=lambda p: p.name):
 
 class CommonTest(TransactionTestCase):
     maxDiff = 1000
+
+    def assertNumQueries(self, num, func=None, *args, **kwargs):
+        # The exact "one query" guarantee comes from the PostgreSQL trigger doing
+        # everything inside the write. On backends that maintain the path in
+        # Python, the count legitimately differs, so we still run the block (to
+        # assert behaviour) but skip the count check there.
+        if connection.vendor != 'postgresql':
+            if func is None:
+                return nullcontext()
+            return func(*args, **kwargs)
+        return super().assertNumQueries(num, func, *args, **kwargs)
 
     def create_place(self, name, parent=None):
         with self.assertNumQueries(1):
@@ -357,6 +394,7 @@ class PathTest(CommonTest):
             ]
         )
 
+    @requires_locale_collation
     def test_move_root_to_next_root(self):
         self.create_all_test_places()
 
@@ -394,6 +432,7 @@ class PathTest(CommonTest):
             ]
         )
 
+    @requires_locale_collation
     def test_move_root_to_prev_branch(self):
         self.create_all_test_places()
 
@@ -559,6 +598,7 @@ class PathTest(CommonTest):
             ]
         )
 
+    @requires_locale_collation
     def test_move_root_to_next_leaf(self):
         self.create_all_test_places()
 
@@ -655,6 +695,7 @@ class PathTest(CommonTest):
             ]
         )
 
+    @requires_locale_collation
     def test_move_branch_to_next_root(self):
         self.create_all_test_places()
 
@@ -893,6 +934,7 @@ class PathTest(CommonTest):
             ]
         )
 
+    @requires_locale_collation
     def test_move_leaf_to_next_root(self):
         self.create_all_test_places()
 
@@ -1176,6 +1218,7 @@ class PathTest(CommonTest):
             ]
         )
 
+    @requires_db_trigger
     def test_raw_sql_insert(self):
         # A raw `INSERT` fires the trigger, which computes the new path.
         self.create_all_test_places()
@@ -1201,6 +1244,7 @@ class PathTest(CommonTest):
             ]
         )
 
+    @requires_db_trigger
     def test_raw_sql_update_parent_keeps_tree_consistent(self):
         # Same as the ORM bulk update: a raw `UPDATE` of the FK column alone
         # fires the path trigger, which recomputes the path.
@@ -1258,6 +1302,7 @@ class PathTest(CommonTest):
             Place.rebuild_paths()
         self.assertPlaces(self.correct_places_data)
 
+    @supports_path_parameter
     def test_path_as_sql_parameter(self):
         # A `Path` can be passed as a query parameter and round-trips back to
         # the row it identifies (extends `test_path_in_cursor`).
@@ -1872,6 +1917,7 @@ class PathTest(CommonTest):
                 seine_maritime.get_prev_sibling(queryset=queryset).name, 'Manche'
             )
 
+    @requires_locale_collation
     def test_filtered_get_next_sibling(self):
         self.create_all_test_places()
         queryset = Place.objects.filter(name__lt='P')
@@ -2013,6 +2059,7 @@ class PathTest(CommonTest):
             queryset=Place.objects.filter_roots(),
         )
 
+    @requires_locale_collation
     def test_rebuild(self):
         self.create_all_test_places()
 
@@ -2149,6 +2196,7 @@ class PathTest(CommonTest):
                 with self.assertNumQueries(1):
                     a.save()
 
+    @supports_path_parameter
     def test_path_in_cursor(self):
         place1 = self.create_place('place1')
         with connection.cursor() as cursor:
@@ -2624,6 +2672,7 @@ class OnDeleteBehaviourTest(TransactionTestCase):
 
     maxDiff = None
 
+    @requires_locale_collation
     def test_set_null_keeps_children(self):
         root = SetNullPlace.objects.create(name='Root')
         child = SetNullPlace.objects.create(name='Child', parent=root)
@@ -2759,9 +2808,9 @@ class PathFieldTest(CommonTest):
         self.assertEqual(field.to_python(b'\x03\x00').value, b'\x03\x00')
         self.assertEqual(field.get_prep_value(memoryview(b'\x04\x00')), b'\x04\x00')
 
-    def test_non_postgresql_backend_raises(self):
+    def test_unsupported_backend_raises(self):
         field = Place._meta.get_field('path')
-        with mock.patch.object(connection, 'vendor', 'sqlite'):
+        with mock.patch.object(connection, 'vendor', 'oracle'):
             with self.assertRaises(NotImplementedError):
                 field._check_database_backend('default')
 
@@ -2804,9 +2853,9 @@ class OperationsTest(TransactionTestCase):
         self.assertIn('trigger', DeleteTreeTrigger('place').describe())
         self.assertIn('tree structure', RebuildPaths('place').describe())
 
-    def test_non_postgresql_backend_raises(self):
+    def test_unsupported_backend_raises(self):
         class FakeConnection:
-            vendor = 'sqlite'
+            vendor = 'oracle'
 
         class FakeEditor:
             connection = FakeConnection()

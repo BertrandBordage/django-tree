@@ -14,8 +14,18 @@ if TYPE_CHECKING:
 
 class CheckDatabaseMixin:
     def check_database_backend(self, schema_editor: BaseDatabaseSchemaEditor) -> None:
-        if schema_editor.connection.vendor != 'postgresql':
-            raise NotImplementedError('django-tree is only for PostgreSQL for now.')
+        from .fields import SUPPORTED_VENDORS
+
+        vendor = schema_editor.connection.vendor
+        if vendor not in SUPPORTED_VENDORS:
+            raise NotImplementedError(
+                'django-tree does not support the %r database backend.' % vendor
+            )
+
+    def uses_trigger(self, schema_editor: BaseDatabaseSchemaEditor) -> bool:
+        # Only PostgreSQL installs a database-side trigger; the other backends
+        # maintain the path in Python (see `tree.maintenance`).
+        return schema_editor.connection.vendor == 'postgresql'
 
 
 class GetModelMixin:
@@ -87,6 +97,8 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
         to_state: ProjectState,
     ) -> None:
         self.check_database_backend(schema_editor)
+        if not self.uses_trigger(schema_editor):
+            return
         model = self.get_model(app_label, to_state)
         # `params=None` runs the SQL without parameter interpolation, so a literal
         # `%` (e.g. the modulo operator) is sent verbatim instead of being read as
@@ -112,6 +124,8 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
         to_state: ProjectState,
     ) -> None:
         self.check_database_backend(schema_editor)
+        if not self.uses_trigger(schema_editor):
+            return
         for sql_query in postgresql.DROP_TRIGGER_QUERIES:
             schema_editor.execute(
                 sql_query.format(
@@ -155,10 +169,11 @@ class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):
         to_state: ProjectState,
     ) -> None:
         self.check_database_backend(schema_editor)
+        from . import sql
+
         model = self.get_model(app_label, to_state)
-        postgresql.rebuild(
-            model._meta.db_table,
-            self.path_field,
+        sql.rebuild(
+            model._meta.get_field(self.path_field),
             db_alias=schema_editor.connection.alias,
         )
 

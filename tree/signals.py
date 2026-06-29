@@ -5,38 +5,68 @@ from django.db import connections
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
 from django.db.models import Model
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
 from tree.fields import PathField
 
 
 @lru_cache(maxsize=None)
-def _path_attnames(sender: type[Model]) -> tuple[str, ...]:
-    # `defer_paths` runs on *every* model's save, so resolve (and cache) which
-    # attributes are `PathField`s once per model class instead of scanning
-    # `concrete_fields` and running `isinstance` on every single save.
+def _path_fields(sender: type[Model]) -> tuple[PathField, ...]:
+    # The save signals run on *every* model, so resolve (and cache) the
+    # `PathField`s once per model class instead of scanning on every save.
     return tuple(
-        field.attname
-        for field in sender._meta.concrete_fields
-        if isinstance(field, PathField)
+        field for field in sender._meta.concrete_fields if isinstance(field, PathField)
     )
 
 
-@receiver(post_save)
-def defer_paths(sender: type[Model], **kwargs: Any) -> None:
-    attnames = _path_attnames(sender)
-    if not attnames:
+def _maintains_in_python(using: str) -> bool:
+    # PostgreSQL maintains the tree with a database trigger; every other backend
+    # computes the path in Python on the save cycle.
+    return connections[using].vendor != 'postgresql'
+
+
+@receiver(pre_save)
+def capture_old_tree_state(
+    sender: type[Model], instance: Model, using: str, **kwargs: Any
+) -> None:
+    if not _maintains_in_python(using):
         return
-    instance_dict = kwargs['instance'].__dict__
-    for attname in attnames:
-        # Removes the cached value for the field, making it deferred.
-        # That way, Django will run a new query to know what is
-        # the new path, only if it is used.
-        # I wish we could make Django receive paths from SQL
-        # through `RETURNING`, but unfortunately the ORM
-        # only uses `RETURNING pk`.
-        instance_dict.pop(attname, None)
+    fields = _path_fields(sender)
+    if not fields:
+        return
+    from tree.maintenance import PathMaintainer, is_trigger_disabled
+
+    for field in fields:
+        if is_trigger_disabled(field, using):
+            continue
+        PathMaintainer(field, using).capture_old(instance)
+
+
+@receiver(post_save)
+def maintain_paths(
+    sender: type[Model],
+    instance: Model,
+    using: str,
+    created: bool = False,
+    **kwargs: Any,
+) -> None:
+    fields = _path_fields(sender)
+    if not fields:
+        return
+    if _maintains_in_python(using):
+        from tree.maintenance import PathMaintainer
+
+        for field in fields:
+            PathMaintainer(field, using).on_save(instance, created)
+        instance.__dict__.pop('_tree_old', None)
+
+    # Drop the cached path so the next access re-reads the canonical value (the
+    # trigger-computed one on PostgreSQL, the just-written one elsewhere). Django
+    # only exposes `RETURNING pk`, so we cannot get the path back from the write.
+    instance_dict = instance.__dict__
+    for field in fields:
+        instance_dict.pop(field.attname, None)
 
 
 def _register_tree_path_dumper(connection: BaseDatabaseWrapper) -> None:
@@ -61,17 +91,41 @@ def _register_tree_path_dumper(connection: BaseDatabaseWrapper) -> None:
         adapters.register_dumper(Path, Path._psycopg3_dumper(fmt))
 
 
+def _register_sqlite_functions(connection: BaseDatabaseWrapper) -> None:
+    """Register the ``tree_*`` helpers as SQLite UDFs on a connection.
+
+    Without a trigger SQLite still needs ``tree_level`` for the ``__level``
+    lookup and the functional ``(level, path)`` index; ``tree_upper`` /
+    ``tree_parent_prefix`` back the rare column-operand lookup paths. They are the
+    same pure-Python helpers used to maintain the path, registered as
+    deterministic so they may appear in an index expression.
+    """
+    if connection.vendor != 'sqlite' or connection.connection is None:
+        return
+    from tree.sql.helpers import tree_level, tree_parent_prefix, tree_upper
+
+    raw = connection.connection
+    raw.create_function('tree_level', 1, tree_level, deterministic=True)
+    raw.create_function('tree_upper', 1, tree_upper, deterministic=True)
+    raw.create_function('tree_parent_prefix', 1, tree_parent_prefix, deterministic=True)
+
+
+def _setup_connection(connection: BaseDatabaseWrapper) -> None:
+    _register_tree_path_dumper(connection)
+    _register_sqlite_functions(connection)
+
+
 @receiver(connection_created)
-def register_tree_path_psycopg_dumper(
+def setup_tree_connection(
     sender: Any, connection: BaseDatabaseWrapper, **kwargs: Any
 ) -> None:
-    # Register on every newly-opened connection (the idiomatic place for
-    # custom psycopg types).
-    _register_tree_path_dumper(connection)
+    # Register on every newly-opened connection (the idiomatic place for custom
+    # psycopg types and SQLite functions).
+    _setup_connection(connection)
 
 
 # Also cover any connection already open before this receiver was connected
 # (persistent connections — ``CONN_MAX_AGE`` is unset — would otherwise never
-# pick up the dumper, since ``connection_created`` only fires on new ones).
+# pick up the registration, since ``connection_created`` only fires on new ones).
 for _conn in connections.all():
-    _register_tree_path_dumper(_conn)
+    _setup_connection(_conn)

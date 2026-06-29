@@ -7,12 +7,21 @@ from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import BinaryField, Field, F, Index, Model
 from django.utils.translation import gettext_lazy as _
 
-from .sql import postgresql
+from . import sql
 from .types import Path
 
 
 # TODO: Handle ManyToManyField('self') instead of ForeignKey('self').
-# TODO: Implement an alternative for other db backends.
+
+# Backends django-tree knows how to maintain a tree on. PostgreSQL uses a
+# database trigger; the others compute the path in Python (see `tree.sql` and
+# `tree.maintenance`).
+SUPPORTED_VENDORS = frozenset({'postgresql', 'sqlite', 'mysql'})
+
+# MySQL cannot fully index a `BLOB` without a prefix length, so the path is a
+# bounded `VARBINARY` there -- byte-comparable and fully indexable. 768 bytes is
+# hundreds of levels deep; deeper trees would need a wider column.
+MYSQL_PATH_BYTES = 768
 
 
 class PathField(BinaryField):
@@ -100,32 +109,38 @@ class PathField(BinaryField):
             value = bytes(value)
         return Path(self, value)
 
-    def get_prep_value(self, value: 'Path | bytes | memoryview | None') -> bytes | None:
+    def get_prep_value(
+        self, value: 'Path | bytes | bytearray | memoryview | None'
+    ) -> bytes | None:
         if isinstance(value, Path):
             return value.value
-        if isinstance(value, memoryview):
+        if isinstance(value, (memoryview, bytearray)):
             return bytes(value)
         return value
 
+    def db_type(self, connection: Any) -> str | None:
+        if connection.vendor == 'mysql':
+            return 'varbinary(%d)' % MYSQL_PATH_BYTES
+        return super().db_type(connection)
+
     def _check_database_backend(self, db_alias: str) -> None:
-        if connections[db_alias].vendor != 'postgresql':
-            raise NotImplementedError('django-tree is only for PostgreSQL for now.')
+        if connections[db_alias].vendor not in SUPPORTED_VENDORS:
+            raise NotImplementedError(
+                'django-tree does not support the %r database backend.'
+                % connections[db_alias].vendor
+            )
 
     def rebuild(self, db_alias: str = DEFAULT_DB_ALIAS) -> None:
         self._check_database_backend(db_alias)
-        postgresql.rebuild(self.model._meta.db_table, self.attname, db_alias=db_alias)
+        sql.rebuild(self, db_alias=db_alias)
 
     def disable_trigger(self, db_alias: str = DEFAULT_DB_ALIAS) -> None:
         self._check_database_backend(db_alias)
-        postgresql.disable_trigger(
-            self.model._meta.db_table, self.attname, db_alias=db_alias
-        )
+        sql.disable_trigger(self, db_alias=db_alias)
 
     def enable_trigger(self, db_alias: str = DEFAULT_DB_ALIAS) -> None:
         self._check_database_backend(db_alias)
-        postgresql.enable_trigger(
-            self.model._meta.db_table, self.attname, db_alias=db_alias
-        )
+        sql.enable_trigger(self, db_alias=db_alias)
 
     @contextmanager
     @transaction.atomic
