@@ -326,11 +326,19 @@ class Benchmark:
         # the plot's y-limits blow up), while staying identical to the previous
         # df.index.max() // 20 at the default step (781 points -> window 195).
         means = df.rolling(max(len(df) // 4, 1)).mean()
+        # Logarithmic y axis: the implementations differ by orders of magnitude (a
+        # whole tree rebuild on every treenode write dwarfs everything else), and a
+        # linear axis squashes all the fast contenders into a flat line near zero. A
+        # log axis can show neither zero nor negatives, so the limits come from the
+        # positive values only.
+        positive = means[means > 0]
+        y_min, y_max = positive.min().min(), positive.max().max()
         ax = means.plot(
             title=test_name,
             alpha=0.8,
+            logy=True,
             xlim=(0, means.index.max() * 1.05),
-            ylim=(0, means.max().max() * 1.05),
+            ylim=(y_min / 1.5, y_max * 1.5) if pd.notna(y_min) else None,
         )
         ax.set(xlabel='Amount of objects in table', ylabel=y_label)
 
