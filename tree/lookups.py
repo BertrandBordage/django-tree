@@ -130,6 +130,8 @@ class ChildOf(Lookup):
             )
         path = _as_bytes(self.rhs)
         upper = tree_upper(path)
+        level = tree_level(path)
+        assert level is not None
         level_sql, repeats = path_level_sql(connection, lhs)
         sql = '%s > %%s' % lhs
         params = [*lhs_params, path]
@@ -137,7 +139,7 @@ class ChildOf(Lookup):
             sql += ' AND %s < %%s' % lhs
             params += [*lhs_params, upper]
         sql += ' AND %s = %%s' % level_sql
-        params += [*(lhs_params * repeats), tree_level(path) + 1]
+        params += [*(lhs_params * repeats), level + 1]
         return sql, params
 
 
@@ -175,14 +177,15 @@ class SiblingOf(Lookup):
                 'The `sibling_of` lookup only supports a constant path off PostgreSQL.'
             )
         path = _as_bytes(self.rhs)
-        parent = tree_parent_prefix(path)
-        upper = tree_upper(parent)
+        parent_path = tree_parent_prefix(path)
+        upper = tree_upper(parent_path)
+        level = tree_level(path)
         level_sql, repeats = path_level_sql(connection, lhs)
         sql = '%s > %%s' % lhs
-        params = [*lhs_params, parent]
+        params = [*lhs_params, parent_path]
         if upper is not None:
             sql += ' AND %s < %%s' % lhs
             params += [*lhs_params, upper]
         sql += ' AND %s = %%s' % level_sql
-        params += [*(lhs_params * repeats), tree_level(path)]
+        params += [*(lhs_params * repeats), level]
         return sql, params

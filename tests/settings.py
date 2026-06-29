@@ -1,8 +1,11 @@
 import os
+from typing import Any
 
 # Pick the database backend from `TREE_DB_ENGINE` (postgresql by default) so the
 # same test suite runs against PostgreSQL, SQLite and MySQL.
 _ENGINE = os.environ.get('TREE_DB_ENGINE', 'postgresql')
+
+DATABASES: dict[str, dict[str, Any]]
 
 if _ENGINE == 'sqlite':
     DATABASES = {

@@ -170,10 +170,11 @@ class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):
     ) -> None:
         self.check_database_backend(schema_editor)
         from . import sql
+        from .fields import PathField
 
         model = self.get_model(app_label, to_state)
         sql.rebuild(
-            model._meta.get_field(self.path_field),
+            cast(PathField, model._meta.get_field(self.path_field)),
             db_alias=schema_editor.connection.alias,
         )
 

@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Any, cast
 
 from django.core.exceptions import FieldDoesNotExist
-from django.db.models import Exists, Model, OuterRef, QuerySet
+from django.db.models import Exists, Field, Model, OuterRef, QuerySet
 from django.db.models.manager import Manager
 
 from .fields import PathField
@@ -32,7 +32,7 @@ def _watched_names(field: PathField) -> set[str]:
         name = order_by[1:] if order_by.startswith('-') else order_by
         if name == 'pk':
             continue
-        order_field = field.model._meta.get_field(name)
+        order_field = cast('Field', field.model._meta.get_field(name))
         names.update({order_field.name, order_field.attname})
     return names
 

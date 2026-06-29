@@ -15,10 +15,10 @@ trigger, nothing observes it. Call :meth:`TreeModelMixin.rebuild_paths` afterwar
 
 from collections import defaultdict, deque
 from functools import cmp_to_key
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from django.db import DEFAULT_DB_ALIAS, ProgrammingError
-from django.db.models import Q
+from django.db.models import Field, Q
 
 from .sql.helpers import DELIMITER, seg_width, tree_int_to_seg, tree_mid
 
@@ -115,7 +115,7 @@ class PathMaintainer:
             attname = (
                 self.pk_attname
                 if field_name == 'pk'
-                else meta.get_field(field_name).attname
+                else cast(Field, meta.get_field(field_name)).attname
             )
             self.columns.append(attname)
             self.descending.append(descending)
@@ -313,9 +313,7 @@ class PathMaintainer:
         for row in rows:
             children[row[self.parent_attname]].append(row)
 
-        order_key = cmp_to_key(
-            lambda a, b: self._compare_rows(a, b)  # noqa: B023
-        )
+        order_key = cmp_to_key(self._compare_rows)
         for group in children.values():
             group.sort(key=order_key)
 

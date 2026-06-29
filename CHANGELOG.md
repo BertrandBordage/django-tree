@@ -1,5 +1,15 @@
 # Unreleased
 
+- Adds **SQLite and MySQL** support. PostgreSQL keeps its PL/pgSQL trigger (and
+  stays consistent under raw SQL); on the other backends, where no portable
+  trigger is possible, the path is computed in Python on the ORM save cycle
+  (`save()`, `delete()`, `QuerySet.update()`, `bulk_create`/`bulk_update`) by a
+  faithful port of the trigger, producing an identical tree. The ORM lookups
+  (`descendant_of`, `child_of`, `sibling_of`, `__level`, …) precompute the path
+  helpers in Python and run as plain index-friendly comparisons everywhere.
+  Limitations off PostgreSQL: raw-SQL writes are not observed and need a manual
+  `Model.rebuild_paths()`; sibling order follows the database's collation; MySQL
+  stores the path as `VARBINARY(768)`, capping tree depth. Oracle is unsupported.
 - Stores each path as a single `bytea` column instead of a `double precision[]`
   (array of float8). A path is the per-level concatenation of an order-preserving
   byte *segment* followed by a `0x00` delimiter, so the whole path is one compact

@@ -19,10 +19,23 @@ class Level(Transform):
         return IntegerField()
 
     def as_sql(
-        self, compiler: SQLCompiler, connection: BaseDatabaseWrapper
-    ) -> tuple[str, list[Any]]:
+        self,
+        compiler: SQLCompiler,
+        connection: BaseDatabaseWrapper,
+        function: str | None = None,
+        template: str | None = None,
+        arg_joiner: str | None = None,
+        **extra_context: Any,
+    ) -> tuple[str, Any]:
         if connection.vendor == 'postgresql':
-            return super().as_sql(compiler, connection)
+            return super().as_sql(
+                compiler,
+                connection,
+                function=function,
+                template=template,
+                arg_joiner=arg_joiner,
+                **extra_context,
+            )
         # SQLite reuses the `tree_level` name (a per-connection Python UDF); MySQL
         # counts the 0x00 bytes inline. Both back the functional `(level, path)`
         # index used by the same `Index` definition.

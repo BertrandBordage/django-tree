@@ -1,24 +1,26 @@
 # Django-tree
 
-Fast and easy tree structures for Django, maintained inside PostgreSQL.
+Fast and easy tree structures for Django, maintained inside the database.
 
 [![](https://img.shields.io/pypi/v/django-tree.svg?style=flat-square)](https://pypi.python.org/pypi/django-tree) [![](https://img.shields.io/github/actions/workflow/status/BertrandBordage/django-tree/ci.yml?branch=master&style=flat-square)](https://github.com/BertrandBordage/django-tree/actions/workflows/ci.yml) [![](https://img.shields.io/codecov/c/github/BertrandBordage/django-tree/master.svg?style=flat-square)](https://codecov.io/gh/BertrandBordage/django-tree)
 
 > [!WARNING]
 > In beta — not production-ready yet.
 
-> [!NOTE]
-> Open to financing MySQL & SQLite compatibility (PostgreSQL only today).
-
 django-tree solves the same problem as **django-treebeard**,
 **django-tree-queries**, **django-mptt** and **django-treenode**: storing and
 querying tree (hierarchy) structures with Django. It does it differently: you add a `PathField` to an ordinary model
 with a self-referencing `ForeignKey`, and the hierarchy is maintained
-**inside PostgreSQL by a trigger** — not in Python. There is no model, manager
+**by the database** — not in your Python code. There is no model, manager
 or queryset to subclass; an optional `TreeModelMixin` only adds convenience
-methods (`get_descendants()`, `get_ancestors()`, …). Because the logic lives in
-the database, bulk operations, `QuerySet.update()` and raw SQL all keep the tree
-consistent.
+methods (`get_descendants()`, `get_ancestors()`, …).
+
+On **PostgreSQL** the path is maintained by a PL/pgSQL trigger, so bulk
+operations, `QuerySet.update()` and raw SQL all keep the tree consistent. On
+**SQLite** and **MySQL** there is no such trigger, so the path is computed in
+Python on the ORM save cycle (`save()`, `delete()`, `QuerySet.update()`,
+`bulk_create`/`bulk_update`); writes that bypass the ORM (raw SQL) need a manual
+`Model.rebuild_paths()`.
 
 
 ## Table of contents
@@ -44,7 +46,7 @@ consistent.
 
 | | django-tree | [treebeard MP](https://github.com/django-treebeard/django-treebeard) | [treebeard NS](https://github.com/django-treebeard/django-treebeard) | [treebeard AL](https://github.com/django-treebeard/django-treebeard) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-tree-queries](https://github.com/feincms/django-tree-queries) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Works on any Django database** | ❌ PostgreSQL only | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Works on any Django database** | ✅ PostgreSQL, SQLite, MySQL | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `NS_Node` | ❌ subclass `AL_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNode` | ❌ subclass `TreeNodeModel` |
 | **Build & move with plain `parent` + `save()`** | ✅ | ❌ API | ❌ API | ❌ API | ✅ | ✅ | ✅ |
 | **Several independent trees per model** | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
@@ -84,10 +86,12 @@ See the [full benchmark](benchmark/results/results.md) for every test.
 
 In short:
 
-- **django-tree** keeps the tree correct in the database itself, so bulk
-  operations, `update()` and raw SQL stay safe, with balanced reads and writes —
-  at the cost of being PostgreSQL-only, still beta, and without admin
-  drag-and-drop or tree-rendering template tags yet.
+- **django-tree** keeps the tree correct in the database itself, so on
+  PostgreSQL bulk operations, `update()` and raw SQL stay safe, with balanced
+  reads and writes — at the cost of being still beta and without admin
+  drag-and-drop or tree-rendering template tags yet. On SQLite and MySQL the
+  path is maintained in Python on the ORM save cycle instead (raw SQL then needs
+  a manual rebuild).
 - **treebeard** offers three algorithms with the same brittle Python API and no
   database constraint: **MP** reads fast, **NS** writes slowly like MPTT, **AL**
   writes fast and is tiny on disk but some reads are catastrophic.
@@ -103,8 +107,11 @@ In short:
 
 ## Requirements
 
-- **PostgreSQL** — the hierarchy is maintained by a PL/pgSQL trigger; other
-  databases are open work (see the note at the top).
+- **PostgreSQL**, **SQLite** or **MySQL**. On PostgreSQL the hierarchy is
+  maintained by a PL/pgSQL trigger (also under raw SQL); on SQLite and MySQL it
+  is maintained in Python on the ORM save cycle, so raw-SQL writes need a manual
+  `Model.rebuild_paths()`. MySQL stores the path as `VARBINARY(768)`, capping
+  tree depth.
 - **Django** 4.2+
 - **Python** 3.10+
 
