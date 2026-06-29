@@ -9,6 +9,7 @@ from django.db import connections, router, transaction
 from django.db.models import Max, F, Model
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -435,18 +436,29 @@ class Benchmark:
         )
         df.to_csv(csv_path, index=False, compression={'method': 'gzip', 'mtime': 0})
 
-        # For every individual measurement (a Database/Test/Count group), rank the
-        # competing implementations from fastest/smallest (1) to slowest/largest;
-        # lower is always better here, whether it's latency or disk usage. Skipped
-        # or unsupported measurements are NaN and stay out of the ranking. Averaging
-        # those ranks per implementation answers "on average, which comes first,
-        # second, third, …" across all the tests of each category.
+        # For every individual measurement (a Database/Test/Count group), express
+        # each implementation's result as a slowdown ratio against the best
+        # (fastest/smallest) in that group: the winner scores 1.0, the others are
+        # "× slower/larger". Unlike a plain rank, this keeps the magnitude — a result
+        # 1000× worse stays 1000× worse instead of merely ranking "last" — so a single
+        # catastrophic test is no longer diluted by the many ordinary ones. Skipped or
+        # unsupported measurements are NaN and stay out. Per category we report the
+        # geometric mean of those ratios (the typical slowdown) and the worst single
+        # ratio, which exposes deal-breaker tests an average would otherwise hide.
         stats_df = df.set_index(['Database', 'Test name', 'Count'])
         stats_df.sort_index(inplace=True)
-        stats_df['Rank'] = stats_df.groupby(level=[0, 1, 2])['Value'].rank()
-        stats_df = stats_df.groupby(['Y label', 'Implementation'])[['Rank']].mean()
-        stats_df['Rank'] = stats_df['Rank'].apply(lambda r: '%.2f' % r)
-        stats_df.to_html(os.path.join(self.results_path, 'stats.html'), header=False)
+        best = stats_df.groupby(level=[0, 1, 2])['Value'].transform('min')
+        stats_df['Slowdown'] = stats_df['Value'] / best
+        grouped = stats_df.groupby(['Y label', 'Implementation'])['Slowdown']
+        stats_df = pd.DataFrame(
+            {
+                'Typical (× best)': grouped.apply(lambda s: np.exp(np.log(s).mean())),
+                'Worst (× best)': grouped.max(),
+            }
+        )
+        for column in stats_df.columns:
+            stats_df[column] = stats_df[column].map(lambda r: '%.2f' % r)
+        stats_df.to_html(os.path.join(self.results_path, 'stats.html'))
 
         df.set_index('Count', inplace=True)
         for database_name in df['Database'].unique():

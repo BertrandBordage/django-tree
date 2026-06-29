@@ -1,12 +1,19 @@
 # Summary
 
-Take this summary with a mountain of salt. For every individual measurement, the
-competing implementations are ranked from fastest/smallest (1st) to slowest/largest,
-and the table shows each implementation's **average rank** within a category (so a
-lower number is better, 1 being always-first). It does not take into account that
-some implementations have deal-breaker performance.
+Take this summary with a mountain of salt. For every individual measurement, each
+implementation's result is expressed as a **slowdown ratio** against the best
+(fastest/smallest) implementation on that measurement, so the winner scores `1.0`
+and the others are "× slower/larger". The table then shows two numbers per category:
 
-For example, most reads are too slow with treebeard AL to make it a serious choice for anything other than a toy project.
+- **Typical (× best)**: the geometric mean of those ratios — how many times slower
+  the implementation usually is. Lower is better, `1.0` being always-first.
+- **Worst (× best)**: the single worst ratio — the test where it falls furthest
+  behind. This is what flags deal-breakers a typical figure would otherwise dilute.
+
+Unlike a plain average rank, this keeps the magnitude of each gap: a test where an
+implementation is 1000× slower stays 1000× slower instead of merely ranking "last".
+
+For example, most reads are too slow with treebeard AL to make it a serious choice for anything other than a toy project — its worst read is ~200000× the fastest.
 
 In the same way, MPTT can be extremely slow at writing data, making it unusable on a wide range of projects.
 
