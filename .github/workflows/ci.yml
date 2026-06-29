@@ -38,6 +38,9 @@ jobs:
       - name: Ruff format
         run: uvx ruff format --check .
 
+      - name: Mypy
+        run: uv run python -m mypy
+
       - name: Django system check
         run: uv run python -m django check --settings=tests.settings
 

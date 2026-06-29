@@ -1,17 +1,27 @@
+from typing import TYPE_CHECKING, Any, cast
+
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.operations.base import Operation
+from django.db.migrations.state import ProjectState
+from django.db.models import Field, Model
 
 from .sql import postgresql
 from .sql.base import quote_ident
 
+if TYPE_CHECKING:
+    from .fields import PathField
+
 
 class CheckDatabaseMixin:
-    def check_database_backend(self, schema_editor):
+    def check_database_backend(self, schema_editor: BaseDatabaseSchemaEditor) -> None:
         if schema_editor.connection.vendor != 'postgresql':
             raise NotImplementedError('django-tree is only for PostgreSQL for now.')
 
 
 class GetModelMixin:
-    def get_model(self, app_label, state):
+    model_lookup: str
+
+    def get_model(self, app_label: str, state: ProjectState) -> type[Model]:
         get_model = state.apps.get_model
         return (
             get_model(self.model_lookup)
@@ -24,13 +34,13 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
     reversible = True
     atomic = True
 
-    def __init__(self, model_lookup, path_field='path'):
+    def __init__(self, model_lookup: str, path_field: str = 'path') -> None:
         self.model_lookup = model_lookup
         self.path_field_lookup = path_field
 
-    def get_pre_params(self, model):
+    def get_pre_params(self, model: type[Model]) -> dict[str, str]:
         meta = model._meta
-        path_field = meta.get_field(self.path_field_lookup)
+        path_field = cast('PathField', meta.get_field(self.path_field_lookup))
         parent_field = path_field.parent_field
         order_by = path_field.order_by
 
@@ -48,7 +58,8 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
             if field_name == 'pk':
                 continue
 
-            quoted_field_name = quote_ident(meta.get_field(field_name).attname)
+            field = cast(Field, meta.get_field(field_name))
+            quoted_field_name = quote_ident(field.attname)
             update_columns.append(quoted_field_name)
 
         return dict(
@@ -64,10 +75,16 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
             constraint=quote_ident(f'{meta.db_table}_{path_field.attname}_unique'),
         )
 
-    def state_forwards(self, app_label, state):
+    def state_forwards(self, app_label: str, state: ProjectState) -> None:
         pass
 
-    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+    def database_forwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
         self.check_database_backend(schema_editor)
         model = self.get_model(app_label, to_state)
         # `params=None` runs the SQL without parameter interpolation, so a literal
@@ -86,7 +103,13 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
                 sql_query.format(**self.get_pre_params(model=model)), params=None
             )
 
-    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+    def database_backwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
         self.check_database_backend(schema_editor)
         for sql_query in postgresql.DROP_TRIGGER_QUERIES:
             schema_editor.execute(
@@ -96,18 +119,18 @@ class CreateTreeTrigger(Operation, GetModelMixin, CheckDatabaseMixin):
                 params=None,
             )
 
-    def describe(self):
+    def describe(self) -> str:
         return 'Creates a trigger that automatically updates a `PathField`'
 
 
 class DeleteTreeTrigger(CreateTreeTrigger):
-    def database_forwards(self, *args, **kwargs):
+    def database_forwards(self, *args: Any, **kwargs: Any) -> None:
         super(DeleteTreeTrigger, self).database_backwards(*args, **kwargs)
 
-    def database_backwards(self, *args, **kwargs):
+    def database_backwards(self, *args: Any, **kwargs: Any) -> None:
         super(DeleteTreeTrigger, self).database_forwards(*args, **kwargs)
 
-    def describe(self):
+    def describe(self) -> str:
         return 'Deletes the trigger that automatically updates a `PathField`'
 
 
@@ -115,15 +138,21 @@ class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):
     reversible = True
     atomic = True
 
-    def __init__(self, model_lookup, path_field='path'):
+    def __init__(self, model_lookup: str, path_field: str = 'path') -> None:
         self.model_lookup = model_lookup
         self.path_field = path_field
         super(RebuildPaths, self).__init__()
 
-    def state_forwards(self, app_label, state):
+    def state_forwards(self, app_label: str, state: ProjectState) -> None:
         pass
 
-    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+    def database_forwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
         self.check_database_backend(schema_editor)
         model = self.get_model(app_label, to_state)
         postgresql.rebuild(
@@ -132,8 +161,14 @@ class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):
             db_alias=schema_editor.connection.alias,
         )
 
-    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+    def database_backwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
         self.check_database_backend(schema_editor)
 
-    def describe(self):
+    def describe(self) -> str:
         return 'Rebuilds all the tree structure of a given django-tree field'

@@ -1,7 +1,7 @@
-from typing import Type
+from typing import TYPE_CHECKING, cast
 
 from django.db import DEFAULT_DB_ALIAS, connections
-from django.db.models import Model
+from django.db.models import Field, Model
 
 from .base import (
     quote_ident,
@@ -10,6 +10,9 @@ from .base import (
     compare_columns,
     join_and,
 )
+
+if TYPE_CHECKING:
+    from ..fields import PathField
 
 
 # Table-independent helper functions backing the `bytea` path encoding. A path is
@@ -130,15 +133,17 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 
 def get_update_paths_function_creation(
-    model: Type[Model],
+    model: type[Model],
     path_field_lookup: str,
-):
+) -> str:
     meta = model._meta
-    pk = meta.pk
-    path_field = meta.get_field(path_field_lookup)
+    pk_field = cast(Field, meta.pk)
+    path_field = cast('PathField', meta.get_field(path_field_lookup))
     parent_field = path_field.parent_field
     order_by = path_field.order_by
-    if not (pk.attname in order_by or pk.name in order_by or 'pk' in order_by):
+    if not (
+        pk_field.attname in order_by or pk_field.name in order_by or 'pk' in order_by
+    ):
         order_by = [*order_by, 'pk']
 
     # TODO: Handle related lookups in `order_by`.
@@ -149,7 +154,9 @@ def get_update_paths_function_creation(
         descending = field_name[0] == '-'
         if descending:
             field_name = field_name[1:]
-        field = meta.pk if field_name == 'pk' else meta.get_field(field_name)
+        field = cast(
+            Field, meta.pk if field_name == 'pk' else meta.get_field(field_name)
+        )
         quoted_field_name = quote_ident(field.attname)
         where_columns.append(quoted_field_name)
         descending_flags.append(descending)
@@ -157,7 +164,7 @@ def get_update_paths_function_creation(
 
     function = quote_ident(f'update_{meta.db_table}_{path_field.attname}_paths')
     table = quote_ident(meta.db_table)
-    pk = quote_ident(meta.pk.attname)
+    pk = quote_ident(pk_field.attname)
     parent = quote_ident(parent_field.attname)
     path = quote_ident(path_field.attname)
     # Both the rebuild's recursive CTE and the sibling lookups order by the path;
@@ -380,20 +387,24 @@ DROP_TRIGGER_QUERIES = (
 )
 
 
-def rebuild(table, path_field, db_alias=DEFAULT_DB_ALIAS):
+def rebuild(table: str, path_field: str, db_alias: str = DEFAULT_DB_ALIAS) -> None:
     rebuild_function = quote_ident(f'rebuild_{table}_{path_field}')
     with connections[db_alias].cursor() as cursor:
         cursor.execute(f'SELECT {rebuild_function}();')
 
 
-def disable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
+def disable_trigger(
+    table: str, path_field: str, db_alias: str = DEFAULT_DB_ALIAS
+) -> None:
     with connections[db_alias].cursor() as cursor:
         cursor.execute(
             f'ALTER TABLE "{table}" DISABLE TRIGGER "update_{path_field}_before";'
         )
 
 
-def enable_trigger(table, path_field, db_alias=DEFAULT_DB_ALIAS):
+def enable_trigger(
+    table: str, path_field: str, db_alias: str = DEFAULT_DB_ALIAS
+) -> None:
     with connections[db_alias].cursor() as cursor:
         cursor.execute(
             f'ALTER TABLE "{table}" ENABLE TRIGGER "update_{path_field}_before";'

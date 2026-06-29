@@ -16,7 +16,7 @@ class TreeAppConfig(AppConfig):
     name = 'tree'
     verbose_name = 'Tree'
 
-    def ready(self):
+    def ready(self) -> None:
         Path.register_psycopg()
 
         PathField.register_lookup(AncestorOf)

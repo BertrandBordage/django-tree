@@ -1,8 +1,15 @@
+from typing import cast
+
+from django.db.models import Model
 from django.forms import ModelChoiceField
+
+from .models import TreeModelMixin
 
 
 class TreeChoiceField(ModelChoiceField):
-    def label_from_instance(self, obj):
-        if obj.is_root():
+    def label_from_instance(self, obj: Model) -> str:
+        node = cast(TreeModelMixin, obj)
+        if node.is_root():
             return str(obj)
-        return '%s %s' % ('──' * (obj.get_level() - 1), obj)
+        level = node.get_level() or 0
+        return '%s %s' % ('──' * (level - 1), obj)

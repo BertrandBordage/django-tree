@@ -9,5 +9,5 @@ class Level(Transform):
     template = 'tree_level(%(expressions)s)'
 
     @property
-    def output_field(self):
+    def output_field(self) -> IntegerField:
         return IntegerField()
