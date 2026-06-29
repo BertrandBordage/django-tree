@@ -33,9 +33,9 @@ consistent.
 | **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node`<br>_NS/AL: same_ | ❌ subclass `MPTTModel` | ❌ subclass `TreeNodeModel` |
 | **Tree kept correct by the database** | ✅ SQL trigger | ❌ in Python<br>_AL: only a `parent` FK_ | ❌ in Python | ❌ in Python + cache |
 | **Survives bulk writes / `update()` / raw SQL** | ✅ | ❌ Python API only<br>_AL: structure only_ | ❌ | ❌ manual resync |
-| **Fast reads** | ✅ [\*](#bench) | ✅ MP fast [\*](#bench)<br>_NS ok, AL slow_ | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
+| **Fast reads** | ✅ [\*](#bench) | ✅ MP fast [\*](#bench)<br>_NS, AL slower_ | 🟡 ok [\*](#bench) | ✅ cached [\*](#bench) |
 | **Fast writes (insert / move)** | ✅ [\*](#bench) | 🟡 MP ok [\*](#bench)<br>_AL fast, NS slow_ | ❌ slow [\*](#bench) | ❌ recomputes cache [\*](#bench) |
-| **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ❌ MP path strings [\*](#bench)<br>_AL tiny, NS medium_ | 🟡 4 columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
+| **Low storage overhead** | 🟡 tunable indexes [\*](#bench) | ❌ MP path strings [\*](#bench)<br>_AL tiny, NS medium_ | ❌ 4 indexed columns [\*](#bench) | ❌ many cached fields [\*](#bench) |
 | **Actively maintained** | 🟡 beta | ✅ | ❌ unmaintained | ✅ |
 
 ✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
