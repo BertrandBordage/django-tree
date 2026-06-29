@@ -107,9 +107,10 @@ In short:
 
 ## Requirements
 
-- **PostgreSQL**, **SQLite** or **MySQL**. On PostgreSQL the hierarchy is
-  maintained by a PL/pgSQL trigger (also under raw SQL); on SQLite and MySQL it
-  is maintained in Python on the ORM save cycle, so raw-SQL writes need a manual
+- **PostgreSQL** 12+, **SQLite** or **MySQL**. On PostgreSQL the hierarchy is
+  maintained by a PL/pgSQL trigger using only standard, long-standing features
+  (also under raw SQL; CI runs on PostgreSQL 16); on SQLite and MySQL it is
+  maintained in Python on the ORM save cycle, so raw-SQL writes need a manual
   `Model.rebuild_paths()`. MySQL stores the path as `VARBINARY(768)`, capping
   tree depth.
 - **Django** 4.2+
@@ -147,6 +148,8 @@ class YourModel(Model, TreeModelMixin):
 
     class Meta:
         ordering = ['path']
+        # Recommended: speeds up child/sibling/level queries.
+        indexes = [*PathField.get_indexes('yourmodel', 'path')]
 ```
 
 Then create a migration that depends on the latest django-tree migration and
@@ -159,7 +162,7 @@ from tree.operations import CreateTreeTrigger
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('tree', '0001_initial'),
+        ('tree', '0003_tree_functions'),
     ]
 
     operations = [
@@ -257,6 +260,7 @@ class YourModel(Model, TreeModelMixin):
 
     class Meta:
         ordering = ['path']
+        indexes = [*PathField.get_indexes('yourmodel', 'path')]
 ```
 
 And the corresponding migration:
@@ -267,7 +271,7 @@ from tree.operations import CreateTreeTrigger
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('tree', '0001_initial'),
+        ('tree', '0003_tree_functions'),
     ]
 
     operations = [
@@ -279,24 +283,21 @@ class Migration(migrations.Migration):
 
 ### Adding the trigger to a table that already has data
 
-If `YourModel` already holds rows, allow SQL `NULL` on `path` before creating
-the trigger, rebuild the paths, then revert the `NULL` allowance:
+`PathField` is always nullable, so existing rows simply start with a `NULL`
+path. Create the trigger, then rebuild the paths from the `parent` FKs:
 
 ```python
 from django.db import migrations
-from tree.fields import PathField
 from tree.operations import CreateTreeTrigger, RebuildPaths
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('tree', '0001_initial'),
+        ('tree', '0003_tree_functions'),
     ]
 
     operations = [
-        migrations.AlterField('YourModel', 'path', PathField(null=True)),
         CreateTreeTrigger('YourModel'),
         RebuildPaths('YourModel', 'path'),
-        migrations.AlterField('YourModel', 'path', PathField()),
     ]
 ```
 
