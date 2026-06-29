@@ -1,9 +1,6 @@
 import re
 
 
-# TODO: Integrate the doctests to the test runner.
-
-
 UNNECESSARY_QUOTE_RE = re.compile(r'^[a-z_]+$')
 
 

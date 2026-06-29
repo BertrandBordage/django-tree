@@ -2906,7 +2906,7 @@ class PsycopgAdapterTest(SimpleTestCase):
 
 
 def load_tests(loader, tests, pattern):
-    # The SQL-building helpers are specified by doctests (see the module's TODO);
-    # run them as part of the suite so they are covered and verified.
+    # The SQL-building helpers in `tree.sql.base` are specified by doctests; run
+    # them as part of the suite so they are covered and verified.
     tests.addTests(doctest.DocTestSuite(sql_base))
     return tests
