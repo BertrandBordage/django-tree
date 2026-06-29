@@ -367,7 +367,9 @@ dependencies = [
 [package.dev-dependencies]
 benchmark = [
     { name = "django-mptt" },
+    { name = "django-tree-queries" },
     { name = "django-treebeard" },
+    { name = "django-treenode" },
     { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "matplotlib", version = "3.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -386,7 +388,9 @@ requires-dist = [{ name = "django", specifier = ">=4.2" }]
 [package.metadata.requires-dev]
 benchmark = [
     { name = "django-mptt", specifier = ">=0.16.0" },
+    { name = "django-tree-queries", specifier = ">=0.24.0" },
     { name = "django-treebeard", specifier = ">=5.3.0" },
+    { name = "django-treenode", specifier = ">=0.24.0" },
     { name = "matplotlib", specifier = ">=3.9.0" },
     { name = "pandas", specifier = ">=2.2.0" },
     { name = "tqdm", specifier = ">=4.66.0" },
@@ -395,6 +399,15 @@ dev = [
     { name = "django-stubs", specifier = ">=4.2" },
     { name = "mypy", specifier = ">=1.8" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.0.18" },
+]
+
+[[package]]
+name = "django-tree-queries"
+version = "0.24.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e3/6d/eaee27d299a5a8874205a783632a9383c16e9a2e73e8a98f0f19f921a2e2/django_tree_queries-0.24.0.tar.gz", hash = "sha256:8971da3fd15a1e6a52a5a2af76c086aa460e6974a130d9ec90ca0d0588baf848", size = 41134, upload-time = "2026-03-25T14:49:46.289Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/33/f5/85030fa7c200847f413d3ddba348fe450194e2520d893b12e92f690996c9/django_tree_queries-0.24.0-py3-none-any.whl", hash = "sha256:568adb664cd9dab55c0e39ab44bb7c0931854cdea1463beb16a89228f9d99ec7", size = 35631, upload-time = "2026-03-25T14:49:44.452Z" },
 ]
 
 [[package]]
@@ -408,6 +421,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cc/b4/d63da0e36e42fa0cf355d5692ee70066922ff9e8f54b30f69605d43cc9c5/django_treebeard-5.3.0.tar.gz", hash = "sha256:8606cefd3a65689e99d2a493e5af8a8ece450b96915c949b5c72f6f302cfbe19", size = 312630, upload-time = "2026-06-24T05:34:50.545Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/50/5a/7b9fa8374e3da778109d1135c6d0131cc3ad27ba3d5436ef3a3ae3f55e7d/django_treebeard-5.3.0-py3-none-any.whl", hash = "sha256:ae9e570fa74b4c882bc08def1f0c97d27f163b6285a19f3383027d074882e9f4", size = 82023, upload-time = "2026-06-24T05:34:49.133Z" },
+]
+
+[[package]]
+name = "django-treenode"
+version = "0.24.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/71/8b/ff8bca02000c1d211e8eb29111fe45fd725992fc53511384b57824225333/django_treenode-0.24.0.tar.gz", hash = "sha256:7ad2198620c285ebaa9a75d0bdcb9164c5e88c084f4c3e8f765ed0fa44cbd0d6", size = 28447, upload-time = "2026-04-15T19:52:28.502Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/5a/c0a6c96d33bc86827ef13397fb4d4d83a49d067961a4225702148b20ced9/django_treenode-0.24.0-py3-none-any.whl", hash = "sha256:ed9c14fb3eac31e8279f11debc3d024e82e570be6624b3d99dbd94459b6278b5", size = 22089, upload-time = "2026-04-15T19:52:27.208Z" },
 ]
 
 [[package]]
