@@ -28,6 +28,7 @@ is based on a parameter that can be customized field by field.
   an annoying Python API and enforces no database constraint.
 - **treebeard NS**: Nested Sets. Equivalent to MPTT, but without a parent foreign key. As slow as MPTT and as brittle as treebeard MP.
 - **treenode**: stores a `tn_parent` foreign key plus denormalized columns (ancestors, descendants, children & siblings pks/counts, level, order, …) that are recomputed in Python for the whole table on every write. Extremely fast to read since everything is precomputed, but writes get slower as the table grows because each one rebuilds the entire tree.
+- **tree-queries**: stores nothing but a `parent` foreign key (a plain adjacency list, like treebeard AL) and resolves the hierarchy on demand with a recursive SQL CTE. Tiny on disk and very fast to write, with no Python tree API to maintain; reads pay the cost of the recursive query.
 
 # Table disk usage
 
