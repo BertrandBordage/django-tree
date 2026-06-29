@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 import doctest
 import uuid
 from contextlib import nullcontext
+from importlib import import_module
 from unittest import mock, skipIf, skipUnless
 
 from django.apps import apps
@@ -3002,6 +3003,38 @@ class TreeHelpersTest(SimpleTestCase):
             [seg_width(n) for n in (254, 255, 64516, 64517, 16387064, 16387065)],
             [1, 2, 2, 3, 3, 4],
         )
+
+
+class TreeFunctionsMigrationTest(SimpleTestCase):
+    """The `0003_tree_functions` create/drop helpers install the PL/pgSQL helper
+    functions on PostgreSQL only; on every other backend they are a no-op. The
+    drop (reverse) path is never reached by a normal test migration, and running
+    it against the live test database would cascade-drop the helpers every other
+    test relies on, so both branches are exercised here with a recording stub."""
+
+    migration = import_module('tree.migrations.0003_tree_functions')
+
+    class _RecordingEditor:
+        def __init__(self, vendor):
+            self.connection = mock.Mock(vendor=vendor)
+            self.executed = []
+
+        def execute(self, sql, params=None):
+            self.executed.append(sql)
+
+    def test_postgresql_creates_and_drops_functions(self):
+        editor = self._RecordingEditor('postgresql')
+        self.migration.create_functions(apps, editor)
+        self.migration.drop_functions(apps, editor)
+        self.assertEqual(len(editor.executed), 2)
+        self.assertIn('CREATE', editor.executed[0].upper())
+        self.assertIn('DROP FUNCTION', editor.executed[1])
+
+    def test_runs_only_on_postgresql(self):
+        editor = self._RecordingEditor('sqlite')
+        self.migration.create_functions(apps, editor)
+        self.migration.drop_functions(apps, editor)
+        self.assertEqual(editor.executed, [])
 
 
 @skipUnless(
