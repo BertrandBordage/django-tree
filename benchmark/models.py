@@ -5,6 +5,7 @@ from django.db.models import CharField, ForeignKey, CASCADE
 from treebeard.mp_tree import MP_Node
 from treebeard.ns_tree import NS_Node
 from treebeard.al_tree import AL_Node
+from treenode.models import TreeNodeModel
 from tree.fields import PathField
 from tree.models import TreeModel
 from mptt.models import MPTTModel, TreeForeignKey
@@ -73,3 +74,11 @@ class TreebeardMPPlace(MP_Node):
 class TreebeardNSPlace(NS_Node):
     name = CharField(max_length=50, unique=True, default=get_random_name)
     node_order_by = ('name',)
+
+
+class TreeNodePlace(TreeNodeModel):
+    treenode_display_field = 'name'
+    name = CharField(max_length=50, unique=True, default=get_random_name)
+
+    class Meta(TreeNodeModel.Meta):
+        pass

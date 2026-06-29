@@ -13,6 +13,7 @@ INSTALLED_APPS = (
     'tree',
     'mptt',
     'treebeard',
+    'treenode',
     'benchmark',
 )
 

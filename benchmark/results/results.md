@@ -1,8 +1,10 @@
 # Summary
 
-Take this summary with a mountain of salt, the grades are based on
-how each implementation is performing relative to the others, test by test.
-It does not take into account that some implementations have deal-breaker performance.
+Take this summary with a mountain of salt. For every individual measurement, the
+competing implementations are ranked from fastest/smallest (1st) to slowest/largest,
+and the table shows each implementation's **average rank** within a category (so a
+lower number is better, 1 being always-first). It does not take into account that
+some implementations have deal-breaker performance.
 
 For example, most reads are too slow with treebeard AL to make it a serious choice for anything other than a toy project.
 
@@ -25,6 +27,7 @@ is based on a parameter that can be customized field by field.
   in django-tree. Very fast for reading, good at writing, but very brittle: works only using
   an annoying Python API and enforces no database constraint.
 - **treebeard NS**: Nested Sets. Equivalent to MPTT, but without a parent foreign key. As slow as MPTT and as brittle as treebeard MP.
+- **treenode**: stores a `tn_parent` foreign key plus denormalized columns (ancestors, descendants, children & siblings pks/counts, level, order, …) that are recomputed in Python for the whole table on every write. Extremely fast to read since everything is precomputed, but writes get slower as the table grows because each one rebuilds the entire tree.
 
 # Table disk usage
 
