@@ -103,7 +103,8 @@ In short:
 
 ## Requirements
 
-- **PostgreSQL** — the hierarchy is maintained by a PL/pgSQL trigger; other
+- **PostgreSQL** 12+ — the hierarchy is maintained by a PL/pgSQL trigger using
+  only standard, long-standing features (CI runs on PostgreSQL 16); other
   databases are open work (see the note at the top).
 - **Django** 4.2+
 - **Python** 3.10+
@@ -140,6 +141,8 @@ class YourModel(Model, TreeModelMixin):
 
     class Meta:
         ordering = ['path']
+        # Recommended: speeds up child/sibling/level queries.
+        indexes = [*PathField.get_indexes('yourmodel', 'path')]
 ```
 
 Then create a migration that depends on the latest django-tree migration and
@@ -152,7 +155,7 @@ from tree.operations import CreateTreeTrigger
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('tree', '0001_initial'),
+        ('tree', '0003_tree_functions'),
     ]
 
     operations = [
@@ -250,6 +253,7 @@ class YourModel(Model, TreeModelMixin):
 
     class Meta:
         ordering = ['path']
+        indexes = [*PathField.get_indexes('yourmodel', 'path')]
 ```
 
 And the corresponding migration:
@@ -260,7 +264,7 @@ from tree.operations import CreateTreeTrigger
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('tree', '0001_initial'),
+        ('tree', '0003_tree_functions'),
     ]
 
     operations = [
@@ -272,24 +276,21 @@ class Migration(migrations.Migration):
 
 ### Adding the trigger to a table that already has data
 
-If `YourModel` already holds rows, allow SQL `NULL` on `path` before creating
-the trigger, rebuild the paths, then revert the `NULL` allowance:
+`PathField` is always nullable, so existing rows simply start with a `NULL`
+path. Create the trigger, then rebuild the paths from the `parent` FKs:
 
 ```python
 from django.db import migrations
-from tree.fields import PathField
 from tree.operations import CreateTreeTrigger, RebuildPaths
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('tree', '0001_initial'),
+        ('tree', '0003_tree_functions'),
     ]
 
     operations = [
-        migrations.AlterField('YourModel', 'path', PathField(null=True)),
         CreateTreeTrigger('YourModel'),
         RebuildPaths('YourModel', 'path'),
-        migrations.AlterField('YourModel', 'path', PathField()),
     ]
 ```
 
