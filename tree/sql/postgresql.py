@@ -199,7 +199,17 @@ def get_update_paths_function_creation(
                     t1.path || tree_int_to_seg(
                         (row_number() OVER (
                             PARTITION BY t1.pk ORDER BY {sql_t2_order_by}
-                        ) - 1)::integer, 4
+                        ) - 1)::integer,
+                        -- Minimal segment width (base-254 digits) for this
+                        -- parent's child count, so rebuilt paths stay as compact
+                        -- as inserted ones instead of a fixed 4 bytes.
+                        CASE
+                            WHEN count(*) OVER (PARTITION BY t1.pk) <= 254 THEN 1
+                            WHEN count(*) OVER (PARTITION BY t1.pk) <= 64516 THEN 2
+                            WHEN count(*) OVER (PARTITION BY t1.pk) <= 16387064
+                                THEN 3
+                            ELSE 4
+                        END
                     ) || '\\x00'::bytea
                 FROM generate_paths AS t1
                 INNER JOIN {table} AS t2 ON (
@@ -220,22 +230,16 @@ def get_update_paths_function_creation(
         into=[f'NEW.{path}'],
     )
 
-    get_new_parent_path = execute_format(
-        f"""
-        SELECT {path} FROM {table} WHERE {pk} = $1.{parent}
-    """,
-        using=['NEW'],
-        into=['new_parent_path'],
-    )
-
-    # A single scan over the sibling set yields the neighbouring siblings' full
-    # paths. A path's own segment is strictly monotonic with `order_by` among
-    # siblings (the same invariant the read side relies on, e.g. `get_prev_sibling`
-    # ordering by `path`), and siblings share the parent prefix, so the previous
-    # sibling is the greatest path among those ordered before us and the next is
-    # the smallest among those ordered after. `max(bytea)`/`min(bytea)` aggregates
-    # only exist on PostgreSQL 18+, so we take the first element of an ordered
-    # `array_agg` instead, which works on every supported version.
+    # A single scan over the sibling set yields the parent's path (a correlated
+    # scalar subquery, evaluated once even when there are no siblings) and both
+    # neighbouring siblings' full paths. A path's own segment is strictly
+    # monotonic with `order_by` among siblings (the same invariant the read side
+    # relies on, e.g. `get_prev_sibling` ordering by `path`), and siblings share
+    # the parent prefix, so the previous sibling is the greatest path among those
+    # ordered before us and the next is the smallest among those ordered after.
+    # `max(bytea)`/`min(bytea)` aggregates only exist on PostgreSQL 18+, so we
+    # take the first element of an ordered `array_agg` instead, which works on
+    # every supported version.
     prev_sibling_where = get_prev_sibling_where_clause(
         where_columns, '$1', descending_flags
     )
@@ -245,6 +249,7 @@ def get_update_paths_function_creation(
     get_sibling_values = execute_format(
         f"""
         SELECT
+            (SELECT {path} FROM {table} WHERE {pk} = $1.{parent}),
             (array_agg({path} ORDER BY {path} DESC)
                 FILTER (WHERE {prev_sibling_where}))[1],
             (array_agg({path} ORDER BY {path} ASC)
@@ -255,7 +260,7 @@ def get_update_paths_function_creation(
             AND {pk} != $1.{pk}
     """,
         using=['NEW'],
-        into=['prev_sibling_path', 'next_sibling_path'],
+        into=['new_parent_path', 'prev_sibling_path', 'next_sibling_path'],
     )
 
     # When a node moves, rewrite every descendant's stored prefix (the moved node's
@@ -301,11 +306,9 @@ def get_update_paths_function_creation(
                 END IF;
             END IF;
 
-            {get_new_parent_path}
+            {get_sibling_values}
             new_parent_path := coalesce(new_parent_path, ''::bytea);
             parent_len := octet_length(new_parent_path);
-
-            {get_sibling_values}
 
             IF prev_sibling_path IS NOT NULL THEN
                 prev_sibling_seg := substr(
