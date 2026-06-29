@@ -436,38 +436,15 @@ class Benchmark:
         )
         df.to_csv(csv_path, index=False, compression={'method': 'gzip', 'mtime': 0})
 
-        # Express every result relative to django-tree, our baseline: for each
-        # measurement (a Database/Test/Count group) divide each implementation's value
-        # by django-tree's on that same test, so the factor says how many times slower
-        # (> 1) or faster (< 1) than django-tree it is. Keeping the raw magnitude — a
-        # test 1000× slower stays 1000×, not merely "last" — means a single
-        # catastrophic test is no longer diluted by the many ordinary ones. Skipped or
-        # unsupported measurements (and tests django-tree itself does not run) are NaN
-        # and stay out. Per category we report the geometric mean of those factors (the
-        # typical gap) and the worst single factor, which exposes deal-breaker tests an
-        # average would otherwise hide.
-        baseline = self.models[TreePlace]
-        stats_df = df.set_index(['Database', 'Test name', 'Count'])
-        stats_df.sort_index(inplace=True)
-        base_value = (
-            stats_df['Value']
-            .where(stats_df['Implementation'] == baseline)
-            .groupby(level=[0, 1, 2])
-            .transform('first')
-        )
-        stats_df['Factor'] = stats_df['Value'] / base_value
-        grouped = stats_df.groupby(['Y label', 'Implementation'])['Factor']
-        stats_df = pd.DataFrame(
-            {
-                'Typical (× django-tree)': grouped.apply(
-                    lambda s: np.exp(np.log(s).mean())
-                ),
-                'Worst (× django-tree)': grouped.max(),
-            }
-        )
-        for column in stats_df.columns:
-            stats_df[column] = stats_df[column].map(lambda r: '%.2f' % r)
-        stats_df.to_html(os.path.join(self.results_path, 'stats.html'))
+        # Report absolute numbers on the largest tree measured, keeping only the tests
+        # every implementation runs (so the comparison is apples-to-apples — tests like
+        # "Get descendants from queryset" that some libraries lack are dropped). For each
+        # timing category we give the best, typical (geometric mean) and worst single
+        # test per implementation; storage is a single figure. Each cell carries the
+        # implementation's rank in its row and a severity marker derived from absolute
+        # latency thresholds, so a fast-on-average library with one catastrophic test is
+        # still flagged.
+        self.write_stats(df)
 
         df.set_index('Count', inplace=True)
         for database_name in df['Database'].unique():
@@ -481,6 +458,107 @@ class Benchmark:
                 assert len(y_labels) == 1
                 sub_df = sub_df.pivot(columns='Implementation', values='Value')
                 self.plot(sub_df, database_name, test_name, y_labels[0])
+
+    # Fixed display order and labels for the stats table, matching the README.
+    STATS_ORDER = [
+        ('tree', 'django-tree'),
+        ('treebeard MP', 'treebeard MP'),
+        ('treebeard NS', 'treebeard NS'),
+        ('treebeard AL', 'treebeard AL'),
+        ('MPTT', 'django-mptt'),
+        ('tree-queries', 'django-tree-queries'),
+        ('treenode', 'django-treenode'),
+    ]
+    # Absolute latency thresholds (milliseconds) for the severity markers.
+    STATS_THRESHOLDS = {
+        READ_LATENCY: (10, 100, 200),
+        WRITE_LATENCY: (100, 1000, 2000),
+    }
+
+    @staticmethod
+    def _format_ms(ms):
+        if ms >= 60000:
+            return '%.0f min' % (ms / 60000)
+        if ms >= 1000:
+            return '%.1f s' % (ms / 1000)
+        if ms >= 10:
+            return '%.0f ms' % ms
+        if ms >= 1:
+            return '%.1f ms' % ms
+        us = ms * 1000
+        return ('%.1f µs' if us < 10 else '%.0f µs') % us
+
+    @classmethod
+    def _marker(cls, ms, rank, thresholds):
+        if rank == 1:
+            return '👑'
+        laggy, very, horrible = thresholds
+        if ms > horrible:
+            return '💩'
+        if ms > very:
+            return '🔴'
+        if ms > laggy:
+            return '🟠'
+        return '🟢'
+
+    def write_stats(self, df):
+        # Largest tree measured, apples-to-apples: keep only tests every
+        # implementation runs at that size.
+        count = df['Count'].max()
+        # Unsupported tests are present as NaN-valued rows, so drop them before
+        # measuring coverage — otherwise they would count as "available".
+        d = df[df['Count'] == count].dropna(subset=['Value'])
+        n_impls = d['Implementation'].nunique()
+        coverage = d.groupby(['Y label', 'Test name'])['Implementation'].nunique()
+        full = coverage[coverage == n_impls].index
+        d = d.set_index(['Y label', 'Test name'])
+        d = d.loc[d.index.isin(full)].reset_index()
+
+        labels = [label for _, label in self.STATS_ORDER]
+        rows = {}
+
+        def add_row(name, series, thresholds):
+            series = series.reindex([impl for impl, _ in self.STATS_ORDER])
+            ranks = series.rank(method='min').astype(int)
+            cells = []
+            for impl, _ in self.STATS_ORDER:
+                ms = series[impl] * 1000
+                marker = self._marker(ms, int(ranks[impl]), thresholds)
+                cells.append(
+                    '%s<br>%s #%d' % (self._format_ms(ms), marker, ranks[impl])
+                )
+            rows[name] = cells
+
+        for y_label, prefix in ((READ_LATENCY, 'Reads'), (WRITE_LATENCY, 'Writes')):
+            thresholds = self.STATS_THRESHOLDS[y_label]
+            grouped = d[d['Y label'] == y_label].groupby('Implementation')['Value']
+            add_row('%s · best' % prefix, grouped.min(), thresholds)
+            add_row(
+                '%s · typical' % prefix,
+                grouped.apply(lambda s: np.exp(np.log(s).mean())),
+                thresholds,
+            )
+            add_row('%s · worst' % prefix, grouped.max(), thresholds)
+
+        storage = (
+            d[d['Y label'] == DISK_USAGE]
+            .groupby('Implementation')['Value']
+            .first()
+            .reindex([impl for impl, _ in self.STATS_ORDER])
+        )
+        ranks = storage.rank(method='min').astype(int)
+        rows['Storage'] = [
+            '%.2f MB<br>%s #%d'
+            % (
+                storage[impl] / 1e6,
+                '👑' if ranks[impl] == 1 else '🟢',
+                ranks[impl],
+            )
+            for impl, _ in self.STATS_ORDER
+        ]
+
+        stats_df = pd.DataFrame.from_dict(rows, orient='index', columns=labels)
+        stats_df.to_html(os.path.join(self.results_path, 'stats.html'), escape=False)
 
 
 class BenchmarkTest:

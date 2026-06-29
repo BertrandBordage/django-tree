@@ -1,27 +1,22 @@
 # Summary
 
-Take this summary with a mountain of salt. Everything is measured **relative to
-django-tree**, the baseline. For every individual measurement, each implementation's
-result is divided by django-tree's on that same test, so the factor says how many
-times slower (`> 1`) or faster (`< 1`) than django-tree it is. The table then shows
-two numbers per category:
+Take this summary with a mountain of salt. The [table of stats](stats.html) reports
+**absolute** numbers on the largest tree measured (3905 rows), counting only the
+tests every implementation runs (so unsupported tests like *Get descendants from
+queryset* are dropped). For each timing category it gives three figures per
+implementation — the **best**, **typical** (geometric mean) and **worst** single
+test — plus a single storage figure. Each cell carries the rank in its row and a
+severity marker based on absolute latency: laggy above 10 ms read / 100 ms write,
+very laggy above 100 ms / 1 s, horrible above 200 ms / 2 s.
 
-- **Typical (× django-tree)**: the geometric mean of those factors — the usual gap.
-  `1.0` is on par with django-tree, above is slower/larger, below is faster/smaller.
-- **Worst (× django-tree)**: the single worst factor — the test where the
-  implementation falls furthest behind django-tree. This is what flags deal-breakers
-  a typical figure would otherwise dilute.
+The worst-case rows are where deal-breakers show up. treebeard AL's worst read is
+~246 ms (recursive parent walk), and django-treenode's worst write is ~25 minutes
+because every write rebuilds the whole tree in Python. MPTT and treebeard NS also
+reach ~20 s on their worst write.
 
-Unlike a plain average rank, this keeps the magnitude of each gap: a test where an
-implementation is 1000× slower stays 1000× slower instead of merely ranking "last".
-
-For example, most reads are too slow with treebeard AL to make it a serious choice for anything other than a toy project — its worst read is ~380× slower than django-tree.
-
-In the same way, MPTT can be extremely slow at writing data, making it unusable on a wide range of projects.
-
-Note as well that despite the extremely low grade of django-tree in terms of storage,
-it is absolutely not a deal breaker. By the way, the amount of indexes from django-tree
-is based on a parameter that can be customized field by field.
+Note as well that despite django-tree being middle-of-the-pack on storage, it is
+absolutely not a deal breaker — and the amount of indexes is a per-field parameter
+that can be tuned down.
 
 [Table of stats](stats.html)
 

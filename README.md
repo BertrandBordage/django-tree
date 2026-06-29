@@ -22,7 +22,6 @@ consistent.
 ## Comparison
 
 > [!NOTE]
-> Everything is measured **relative to django-tree**, the first column.
 > django-treebeard ships three interchangeable algorithms — **MP** (materialized
 > path), **NS** (nested sets) and **AL** (adjacency list) — shown as separate
 > columns.
@@ -46,18 +45,21 @@ consistent.
 
 ### Performance
 
-Each cell compares an implementation to **django-tree** across a category's tests.
-The **top line** is the typical gap (geometric mean); the **bottom line** is the
-single worst test. Storage says *smaller* / *larger* instead of *faster* / *slower*.
+Absolute latency and disk usage measured on a tree of **3905 rows** (only tests
+available in every implementation are counted). Each cell shows the measurement;
+below it, the rank in that row and a marker:
 
-- Top line: 👑 fastest/smallest of all · 🟢 on par (±5%) or faster · 🟠 up to 5× slower · 💩 over 5× slower.
-- Worst test: 🟢 within 10× · ⚠️ within 100× · 💩 beyond.
+- 👑 fastest/smallest of the row · 🟢 fine · 🟠 laggy (read > 10 ms, write > 100 ms) · 🔴 very laggy (read > 100 ms, write > 1 s) · 💩 horrible (read > 200 ms, write > 2 s).
 
 | | django-tree | treebeard MP | treebeard NS | treebeard AL | django-mptt | django-tree-queries | django-treenode |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Reads** | baseline | 👑 1.8× faster<br>⚠️ worst 23× | 🟢 1.7× faster<br>⚠️ worst 10× | 🟠 1.6× slower<br>💩 worst 380× | 🟢 1.7× faster<br>🟢 worst 6.9× | 🟠 2.1× slower<br>⚠️ worst 38× | 🟠 1.7× slower<br>💩 worst 1455× |
-| **Writes (insert / move)** | baseline | 🟠 1.7× slower<br>⚠️ worst 47× | 🟠 3.0× slower<br>⚠️ worst 70× | 👑 2.3× faster<br>⚠️ worst 14× | 🟠 4.8× slower<br>⚠️ worst 78× | 🟢 2.3× faster<br>⚠️ worst 14× | 💩 182× slower<br>💩 worst 2003× |
-| **Storage on disk** | baseline | 🟢 ≈ same<br>🟢 worst 1.1× | 🟢 1.1× smaller<br>🟢 worst 1.1× | 👑 1.6× smaller<br>🟢 worst 0.7× | 🟢 ≈ same<br>🟢 worst 1.2× | 👑 1.6× smaller<br>🟢 worst 0.7× | 🟢 ≈ same<br>🟢 worst 1.1× |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| **Reads · best** | 63 µs<br>🟢 #6 | 0.2 µs<br>👑 #1 | 0.7 µs<br>🟢 #3 | 10 µs<br>🟢 #5 | 1.7 µs<br>🟢 #4 | 64 µs<br>🟢 #7 | 0.5 µs<br>🟢 #2 |
+| **Reads · typical** | 354 µs<br>🟢 #4 | 153 µs<br>🟢 #2 | 137 µs<br>👑 #1 | 921 µs<br>🟢 #6 | 189 µs<br>🟢 #3 | 840 µs<br>🟢 #5 | 1.5 ms<br>🟢 #7 |
+| **Reads · worst** | 2.8 ms<br>🟢 #2 | 4.7 ms<br>🟢 #4 | 2.4 ms<br>👑 #1 | 246 ms<br>💩 #7 | 3.6 ms<br>🟢 #3 | 9.6 ms<br>🟢 #5 | 131 ms<br>🔴 #6 |
+| **Writes · best** | 259 µs<br>🟢 #6 | 183 µs<br>👑 #1 | 213 µs<br>🟢 #4 | 184 µs<br>🟢 #2 | 243 µs<br>🟢 #5 | 187 µs<br>🟢 #3 | 358 ms<br>🟠 #7 |
+| **Writes · typical** | 2.3 ms<br>🟢 #4 | 1.8 ms<br>🟢 #3 | 6.1 ms<br>🟢 #5 | 671 µs<br>👑 #1 | 10 ms<br>🟢 #6 | 748 µs<br>🟢 #2 | 789 ms<br>🟠 #7 |
+| **Writes · worst** | 1.8 s<br>🔴 #3 | 8.6 s<br>💩 #4 | 20.2 s<br>💩 #5 | 823 ms<br>👑 #1 | 20.6 s<br>💩 #6 | 826 ms<br>🟠 #2 | 25 min<br>💩 #7 |
+| **Storage** | 0.91 MB<br>🟢 #5 | 0.97 MB<br>🟢 #6 | 0.79 MB<br>🟢 #3 | 0.57 MB<br>👑 #1 | 0.85 MB<br>🟢 #4 | 0.57 MB<br>👑 #1 | 0.99 MB<br>🟢 #7 |
 
 See the [full benchmark](benchmark/results/results.md) for every test.
 
