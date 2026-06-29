@@ -28,7 +28,8 @@ faster, removes a long-standing scaling limit, and changes the type of
 - Uses noticeably less disk space overall: the column is a compact key per level
   instead of a decimal array, and the per-level slice indexes and the
   parent-slice index are gone — a model now needs just two path indexes (the
-  unique path index and a `(level, path)` index) instead of eight.
+  unique path index and a `(level, path)` index) instead of eight. A ~3900-node
+  tree drops from about 1.5 MB to 0.9 MB.
 
 ## Upgrading
 
