@@ -19,3 +19,7 @@ INSTALLED_APPS = (
 SECRET_KEY = 'not important here'
 
 DATABASE_ROUTERS = ('benchmark.router.AutoRouter',)
+
+# Keep the historical `AutoField` ids: Django 6.0 changed the implicit default
+# to `BigAutoField`, which would otherwise diverge from the existing migrations.
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
