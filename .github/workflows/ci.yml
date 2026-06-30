@@ -244,7 +244,14 @@ jobs:
       - name: Start Oracle Database Free
         uses: gvenzl/setup-oracle-free@v1
         with:
+          # Docker rather than the default podman (the 23ai Free image is known to
+          # fail under podman on GitHub Actions). Tests connect as SYSTEM to create
+          # the test user/tablespace; the app user is required by the action but
+          # unused here.
+          container-runtime: docker
           oracle-password: test-only
+          app-user: tree
+          app-user-password: test-only
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
