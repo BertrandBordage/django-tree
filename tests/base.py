@@ -2831,7 +2831,9 @@ class PathFieldTest(CommonTest):
         self.assertIsInstance(serialized, str)
         # Round-trips back to the original path through `to_python`, as
         # Django's deserializers do.
-        self.assertEqual(field.to_python(json.loads(serialized)).value, france.path.value)
+        self.assertEqual(
+            field.to_python(json.loads(serialized)).value, france.path.value
+        )
 
     def test_value_to_string_unsaved(self):
         field = Place._meta.get_field('path')
