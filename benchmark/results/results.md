@@ -16,7 +16,7 @@ worst *read* balloons to ~5 minutes too, since it has no set-level descendants q
 and the unofficial equivalent walks the tree node by node. treebeard NS and MPTT
 reach ~19–22 s on their worst write. The adjacency-based readers (treebeard AL,
 django-tree-queries) climb to ~0.6–0.9 s on the heaviest read traversal, where
-django-tree stays at ~71 ms.
+django-tree stays at ~62 ms.
 
 Note as well that despite django-tree being middle-of-the-pack on storage, it is
 absolutely not a deal breaker — and the amount of indexes is a per-field parameter

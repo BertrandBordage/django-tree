@@ -6,11 +6,9 @@ from django.db.models import (
     PositiveIntegerField,
     Manager,
     CASCADE,
-    Index,
-    F,
 )
 from mptt.fields import TreeForeignKey
-from tree.fields import PathField
+from tree.fields import PathField, PathIndex
 from tree.operations import CreateTreeTrigger
 
 from ..models import get_random_name
@@ -75,9 +73,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'indexes': [
-                    Index(
-                        F('path__level'), F('path'), name='treeplace_path_level_index'
-                    ),
+                    PathIndex('path', name='treeplace_path_level_index'),
                 ],
             },
         ),

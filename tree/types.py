@@ -6,14 +6,14 @@ from collections.abc import Iterator
 from django.db.models import Model, QuerySet
 from django.utils.functional import cached_property
 
+# The level delimiter separating path segments (see `tree.sql.postgresql`). Kept
+# in `tree.sql.helpers` so the pure-Python path helpers and this wrapper agree.
+from .sql.helpers import DELIMITER
+
 if TYPE_CHECKING:
     from psycopg import pq
 
     from .fields import PathField
-
-
-# The level delimiter separating path segments (see `tree.sql.postgresql`).
-DELIMITER = b'\x00'
 
 
 class Path:
@@ -327,3 +327,11 @@ class Path:
             return cls.register_psycopg3()
         if find_spec('psycopg2') is not None:
             return cls.register_psycopg2()
+
+    @staticmethod
+    def register_sqlite() -> None:
+        # Let a raw `Path` be bound as a SQLite parameter (outside the ORM), the
+        # same convenience the psycopg dumper gives on PostgreSQL.
+        import sqlite3
+
+        sqlite3.register_adapter(Path, lambda path: path.value)

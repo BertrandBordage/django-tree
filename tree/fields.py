@@ -7,12 +7,58 @@ from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import BinaryField, Field, F, Index, Model
 from django.utils.translation import gettext_lazy as _
 
-from .sql import postgresql
+from .sql import is_trigger_backend
 from .types import Path
 
 
 # TODO: Handle ManyToManyField('self') instead of ForeignKey('self').
-# TODO: Implement an alternative for other db backends.
+
+# Backends django-tree knows how to maintain a tree on. PostgreSQL uses a
+# database trigger; the others compute the path in Python (see `tree.sql` and
+# `tree.maintenance`).
+SUPPORTED_VENDORS = frozenset({'postgresql', 'sqlite', 'mysql'})
+
+# MySQL cannot fully index a `BLOB` without a prefix length, so the path is a
+# bounded `VARBINARY` there -- byte-comparable and fully indexable. 768 bytes is
+# hundreds of levels deep; deeper trees would need a wider column.
+MYSQL_PATH_BYTES = 768
+
+
+class PathIndex(Index):
+    """Indexes a `PathField`: a functional ``(level, path)`` index on PostgreSQL,
+    a plain ``(path)`` index on every other backend.
+
+    PostgreSQL's depth-aware lookups (`child_of`/`sibling_of`/`__level`) seek
+    ``tree_level(path)``, an IMMUTABLE helper, so leading with ``level`` turns them
+    into index scans over just the matching rows. The other backends have no such
+    function -- a functional index could not even be rendered -- and their
+    lookups only need the path range, which a plain column index serves.
+    """
+
+    def __init__(self, path_field_name: str, *, name: str) -> None:
+        self.path_field_name = path_field_name
+        super().__init__(
+            F(f'{path_field_name}__level'),
+            F(path_field_name),
+            name=name,
+        )
+
+    def deconstruct(self) -> tuple[str, Sequence[Any], dict[str, Any]]:
+        # Stable across backends (the per-vendor choice happens at DDL time, in
+        # `create_sql`), so the same migration is correct everywhere.
+        return (
+            f'{self.__class__.__module__}.{self.__class__.__qualname__}',
+            (self.path_field_name,),
+            {'name': self.name},
+        )
+
+    def create_sql(
+        self, model: type[Model], schema_editor: Any, using: str = '', **kwargs: Any
+    ) -> Any:
+        if schema_editor.connection.vendor == 'postgresql':
+            return super().create_sql(model, schema_editor, using=using, **kwargs)
+        plain = Index(fields=[self.path_field_name], name=self.name)
+        return plain.create_sql(model, schema_editor, using=using, **kwargs)
 
 
 class PathField(BinaryField):
@@ -21,20 +67,14 @@ class PathField(BinaryField):
     @classmethod
     def get_indexes(cls, table_name: str, path_field_name: str) -> list[Index]:
         # Ancestor/descendant lookups are whole-path range comparisons, served by
-        # the btree index backing the path itself (the `UNIQUE` constraint added by
-        # `CreateTreeTrigger`). The `child_of`/`sibling_of` lookups add a depth
-        # equality (`tree_level(path) = N`) on top of a path range; a composite
-        # `(level, path)` index makes that depth + range seekable, so those lookups
-        # become index scans over just the matching rows instead of scanning the
-        # whole subtree and filtering by depth. Keeping `level` as the leading
-        # column means level-only filters (e.g. roots, `__level=1`) still use this
-        # same index. `level` resolves to `tree_level(path)`, an IMMUTABLE helper
-        # that must already exist (created by the `tree` migration) when this index
-        # is built.
+        # the btree index backing the path itself. `child_of`/`sibling_of` add a
+        # depth restriction on top of that range; on PostgreSQL `PathIndex` makes
+        # depth + range seekable with a functional `(level, path)` index, while the
+        # other backends fall back to a plain `(path)` range index (see
+        # `PathIndex`).
         return [
-            Index(
-                F(f'{path_field_name}__level'),
-                F(path_field_name),
+            PathIndex(
+                path_field_name,
                 name=f'{table_name}_{path_field_name}_level_index',
             ),
         ]
@@ -100,32 +140,59 @@ class PathField(BinaryField):
             value = bytes(value)
         return Path(self, value)
 
-    def get_prep_value(self, value: 'Path | bytes | memoryview | None') -> bytes | None:
+    def get_prep_value(
+        self, value: 'Path | bytes | bytearray | memoryview | None'
+    ) -> bytes | None:
         if isinstance(value, Path):
             return value.value
-        if isinstance(value, memoryview):
+        if isinstance(value, (memoryview, bytearray)):
             return bytes(value)
         return value
 
+    def db_type(self, connection: Any) -> str | None:
+        if connection.vendor == 'mysql':
+            return 'varbinary(%d)' % MYSQL_PATH_BYTES
+        return super().db_type(connection)
+
     def _check_database_backend(self, db_alias: str) -> None:
-        if connections[db_alias].vendor != 'postgresql':
-            raise NotImplementedError('django-tree is only for PostgreSQL for now.')
+        if connections[db_alias].vendor not in SUPPORTED_VENDORS:
+            raise NotImplementedError(
+                'django-tree does not support the %r database backend.'
+                % connections[db_alias].vendor
+            )
 
     def rebuild(self, db_alias: str = DEFAULT_DB_ALIAS) -> None:
         self._check_database_backend(db_alias)
-        postgresql.rebuild(self.model._meta.db_table, self.attname, db_alias=db_alias)
+        if is_trigger_backend(db_alias):
+            from .sql import postgresql
+
+            postgresql.rebuild(
+                self.model._meta.db_table, self.attname, db_alias=db_alias
+            )
+        else:
+            from .maintenance import PathMaintainer
+
+            PathMaintainer(self, db_alias).rebuild()
 
     def disable_trigger(self, db_alias: str = DEFAULT_DB_ALIAS) -> None:
-        self._check_database_backend(db_alias)
-        postgresql.disable_trigger(
-            self.model._meta.db_table, self.attname, db_alias=db_alias
-        )
+        self._set_trigger_enabled(db_alias, False)
 
     def enable_trigger(self, db_alias: str = DEFAULT_DB_ALIAS) -> None:
+        self._set_trigger_enabled(db_alias, True)
+
+    def _set_trigger_enabled(self, db_alias: str, enabled: bool) -> None:
         self._check_database_backend(db_alias)
-        postgresql.enable_trigger(
-            self.model._meta.db_table, self.attname, db_alias=db_alias
-        )
+        if is_trigger_backend(db_alias):
+            from .sql import postgresql
+
+            toggle = (
+                postgresql.enable_trigger if enabled else postgresql.disable_trigger
+            )
+            toggle(self.model._meta.db_table, self.attname, db_alias=db_alias)
+        else:
+            from .maintenance import set_trigger_disabled
+
+            set_trigger_disabled(self, db_alias, not enabled)
 
     @contextmanager
     @transaction.atomic

@@ -18,6 +18,7 @@ class TreeAppConfig(AppConfig):
 
     def ready(self) -> None:
         Path.register_psycopg()
+        Path.register_sqlite()
 
         PathField.register_lookup(AncestorOf)
         PathField.register_lookup(SiblingOf)

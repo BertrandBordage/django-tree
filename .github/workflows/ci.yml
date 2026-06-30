@@ -115,3 +115,110 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           fail_ci_if_error: false
+
+  test-sqlite:
+    name: SQLite / Django ${{ matrix.django.name }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        django:
+          - name: '4.2'
+            spec: 'Django>=4.2,<5.0'
+          - name: '5.2'
+            spec: 'Django>=5.2,<6.0'
+          - name: '6.0'
+            spec: 'Django>=6.0,<6.1'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+
+      - name: Run tests with coverage
+        env:
+          TREE_DB_ENGINE: sqlite
+        run: >-
+          uv run --with "${{ matrix.django.spec }}" --with coverage
+          coverage run --source=tree run_tests.py
+
+      - name: Generate coverage report
+        run: uv run --with coverage coverage xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  test-mysql:
+    name: MySQL / Django ${{ matrix.django.name }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        django:
+          - name: '4.2'
+            spec: 'Django>=4.2,<5.0'
+          - name: '5.2'
+            spec: 'Django>=5.2,<6.0'
+          - name: '6.0'
+            spec: 'Django>=6.0,<6.1'
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_DATABASE: tree
+          MYSQL_USER: tree
+          MYSQL_PASSWORD: test-only
+          MYSQL_ROOT_PASSWORD: root-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot-only"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install MySQL client build dependencies
+        run: >-
+          sudo apt-get update
+          && sudo apt-get install -y pkg-config default-libmysqlclient-dev
+
+      - name: Run tests
+        env:
+          TREE_DB_ENGINE: mysql
+          TREE_DB_HOST: 127.0.0.1
+          TREE_DB_PORT: '3306'
+          TREE_DB_NAME: tree
+          # The test runner creates `test_tree`, which needs CREATE privileges.
+          TREE_DB_USER: root
+          TREE_DB_PASSWORD: root-only
+        run: >-
+          uv run --with "${{ matrix.django.spec }}" --with mysqlclient
+          --with coverage coverage run --source=tree run_tests.py
+
+      - name: Generate coverage report
+        run: uv run --with coverage coverage xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
