@@ -1,3 +1,7 @@
+# 1.0.1 (2026-07-01)
+
+Fixes `PathField.value_to_string()` for serializers like django-reversion.
+
 # 1.0.0 (2026-06-30)
 
 Adds **SQLite, MySQL and Oracle** support, and rewrites how a path is stored:
