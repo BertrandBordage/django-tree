@@ -1,4 +1,4 @@
-# Unreleased
+# 1.0.0 (2026-06-30)
 
 Adds **SQLite, MySQL and Oracle** support, and rewrites how a path is stored:
 each path is now a single compact `bytea` key instead of an array of decimals
