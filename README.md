@@ -50,9 +50,9 @@ Python on the ORM save cycle (`save()`, `delete()`, `QuerySet.update()`,
 | **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `NS_Node` | ❌ subclass `AL_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNode` | ❌ subclass `TreeNodeModel` |
 | **Build & move with plain `parent` + `save()`** | ✅ | ❌ API | ❌ API | ❌ API | ✅ | ✅ | ✅ |
 | **Several independent trees per model** | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
-| **Tree kept correct by the database** | 🟡 SQL trigger on PostgreSQL; in Python elsewhere | ❌ in Python | ❌ in Python | ❌ in Python | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python + cache |
-| **Survives bulk writes / `update()` / raw SQL** | 🟡 all on PostgreSQL; ORM only on SQLite/MySQL | ❌ Python API only | ❌ Python API only | ❌ Python API only | ❌ | ✅ | ❌ manual resync |
-| **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__level` | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 cached properties |
+| **Tree kept correct by the database** | ✅ PostgreSQL: SQL trigger<br>❌ SQLite, MySQL: in Python | ❌ in Python | ❌ in Python | ❌ in Python | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python + cache |
+| **Survives bulk writes / `update()` / raw SQL** | ✅ PostgreSQL<br>❌ SQLite, MySQL: ORM only | ❌ Python API only | ❌ Python API only | ❌ Python API only | ❌ | ✅ | ❌ manual resync |
+| **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__child_of` | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 cached properties |
 | **Admin integration** | ❌ form field only | ✅ drag-and-drop | ✅ drag-and-drop | ✅ drag-and-drop | ✅ drag-and-drop | ✅ cut/paste | ✅ |
 | **Template tags to render trees** | ❌ | 🟡 | 🟡 | 🟡 | ✅ `{% recursetree %}` | ✅ `{% recursetree %}` | 🟡 |
 | **Production-ready** | ❌ beta | ✅ | ✅ | ✅ | 🟡 works, unmaintained | ✅ | ✅ |

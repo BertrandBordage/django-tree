@@ -3078,6 +3078,23 @@ class GenericMaintenanceTest(CommonTest):
         self.assertTrue(ccc.path.is_descendant_of(Place.objects.get(name='Bbb').path))
         self.assertTrue(ccc.path.is_descendant_of(Place.objects.get(name='Ddd').path))
 
+    def test_loaded_path_is_a_path_object(self):
+        # The driver hands back the raw column bytes (BLOB on SQLite, VARBINARY
+        # on MySQL); `from_db_value` must wrap them back into a `Path` (so MySQL
+        # is not left with bare `bytes`).
+        self.create_all_test_places()
+        france = Place.objects.get(name='France')
+        self.assertIsInstance(france.path, Path)
+        self.assertIsInstance(france.path.value, bytes)
+        self.assertEqual(france.path.get_level(), 1)
+
+    def test_level_lookup_is_postgresql_only(self):
+        # `__level` as a query filter needs a NUL-safe delimiter count, which has
+        # no portable SQL form; `get_level()` / `is_root()` cover it in Python.
+        self.create_all_test_places()
+        with self.assertRaises(NotImplementedError):
+            list(Place.objects.filter(path__level=1))
+
     def test_lookups_require_a_constant_path(self):
         # A column/expression right-hand operand is only supported on PostgreSQL.
         for lookup in ('descendant_of', 'child_of', 'sibling_of'):
