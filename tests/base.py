@@ -80,10 +80,19 @@ requires_locale_collation = skipUnless(
 )
 
 # A raw `Path` query parameter is adaptable on PostgreSQL (psycopg) and SQLite
-# (sqlite3 adapter), but not with mysqlclient.
+# (sqlite3 adapter), but not with mysqlclient or oracledb (Django's Oracle param
+# unification additionally requires bound values to be hashable).
 supports_path_parameter = skipIf(
-    connection.vendor == 'mysql',
-    'mysqlclient cannot adapt a Path as a raw query parameter.',
+    connection.vendor in ('mysql', 'oracle'),
+    'mysqlclient/oracledb cannot adapt a Path as a raw query parameter.',
+)
+
+# Oracle stores '' as NULL, so ordering siblings by a text column that holds empty
+# strings places those rows where NULLs sort rather than where '' would. Fixtures
+# with an empty `order_by` value therefore get an Oracle-specific tree order.
+requires_empty_string_not_null = skipIf(
+    connection.vendor == 'oracle',
+    "Oracle stores '' as NULL, so order_by on an empty-string column differs.",
 )
 
 
@@ -2296,6 +2305,7 @@ class MultipleOrderByFieldsTest(TransactionTestCase):
             label=lambda p: (p.century, p.first_name, p.last_name),
         )
 
+    @requires_empty_string_not_null
     def test_rebuild(self):
         self.assertPersons(self.correct_raw_persons_data)
         with Person.disabled_tree_trigger():
@@ -2811,7 +2821,7 @@ class PathFieldTest(CommonTest):
 
     def test_unsupported_backend_raises(self):
         field = Place._meta.get_field('path')
-        with mock.patch.object(connection, 'vendor', 'oracle'):
+        with mock.patch.object(connection, 'vendor', 'cockroachdb'):
             with self.assertRaises(NotImplementedError):
                 field._check_database_backend('default')
 
@@ -2856,7 +2866,7 @@ class OperationsTest(TransactionTestCase):
 
     def test_unsupported_backend_raises(self):
         class FakeConnection:
-            vendor = 'oracle'
+            vendor = 'cockroachdb'
 
         class FakeEditor:
             connection = FakeConnection()
@@ -3030,11 +3040,20 @@ class TreeFunctionsMigrationTest(SimpleTestCase):
         self.assertIn('CREATE', editor.executed[0].upper())
         self.assertIn('DROP FUNCTION', editor.executed[1])
 
-    def test_runs_only_on_postgresql(self):
-        editor = self._RecordingEditor('sqlite')
+    def test_oracle_creates_and_drops_tree_level(self):
+        editor = self._RecordingEditor('oracle')
         self.migration.create_functions(apps, editor)
         self.migration.drop_functions(apps, editor)
-        self.assertEqual(editor.executed, [])
+        self.assertEqual(len(editor.executed), 2)
+        self.assertIn('CREATE OR REPLACE FUNCTION tree_level', editor.executed[0])
+        self.assertIn('DROP FUNCTION', editor.executed[1])
+
+    def test_no_functions_on_sqlite_or_mysql(self):
+        for vendor in ('sqlite', 'mysql'):
+            editor = self._RecordingEditor(vendor)
+            self.migration.create_functions(apps, editor)
+            self.migration.drop_functions(apps, editor)
+            self.assertEqual(editor.executed, [])
 
 
 @skipUnless(

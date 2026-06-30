@@ -26,6 +26,24 @@ elif _ENGINE == 'mysql':
             'OPTIONS': {'charset': 'utf8mb4'},
         },
     }
+elif _ENGINE == 'oracle':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.oracle',
+            # `NAME` is an Easy Connect DSN (`host:port/service`); leaving `PORT`
+            # empty makes Django use it verbatim, so a PDB *service* name works
+            # (`makedsn` would treat `NAME` as a SID and fail against the gvenzl
+            # `FREEPDB1` service). Connect as a DBA so the test runner can create
+            # the test user/tablespace.
+            'NAME': os.environ.get('TREE_DB_NAME', 'localhost:1521/FREEPDB1'),
+            'USER': os.environ.get('TREE_DB_USER', 'system'),
+            'PASSWORD': os.environ.get('TREE_DB_PASSWORD', 'test-only'),
+            'TEST': {
+                'USER': os.environ.get('TREE_TEST_DB_USER', 'tree'),
+                'PASSWORD': os.environ.get('TREE_TEST_DB_PASSWORD', 'test-only'),
+            },
+        },
+    }
 else:
     DATABASES = {
         'default': {

@@ -1,24 +1,27 @@
 # Unreleased
 
-Adds **SQLite and MySQL** support, and rewrites how a path is stored: each path
-is now a single compact `bytea` key instead of an array of decimals
+Adds **SQLite, MySQL and Oracle** support, and rewrites how a path is stored:
+each path is now a single compact `bytea` key instead of an array of decimals
 (`numeric[]`). This makes most reads and writes faster, removes a long-standing
 scaling limit, and changes the type of `path.value` (see Upgrading below).
 
 ## What changed
 
-- Adds **SQLite and MySQL** support. PostgreSQL keeps its PL/pgSQL trigger (and
-  stays consistent even under raw SQL); on the other backends, where no portable
-  trigger is possible, the path is computed in Python on the ORM save cycle
-  (`save()`, `delete()`, `QuerySet.update()`, `bulk_create`/`bulk_update`),
-  producing an identical tree. Off PostgreSQL the navigation is fully portable
-  with no per-connection UDFs (the lookups use only `length`/`substr`/`instr` and
-  path ranges). Limitations off PostgreSQL: raw-SQL writes are not observed and
-  need a manual `Model.rebuild_paths()`; sibling order follows the database's
-  collation; MySQL stores the path as `VARBINARY(768)`, capping tree depth; the
-  `__level` query filter and the functional `(level, path)` index are
-  PostgreSQL-only (other backends use a plain path index, and `get_level()` /
-  `is_root()` still work everywhere). Oracle is unsupported.
+- Adds **SQLite, MySQL and Oracle** support. PostgreSQL keeps its PL/pgSQL
+  trigger (and stays consistent even under raw SQL); on the other backends, where
+  no portable trigger is possible, the path is computed in Python on the ORM save
+  cycle (`save()`, `delete()`, `QuerySet.update()`, `bulk_create`/`bulk_update`),
+  producing an identical tree. SQLite and MySQL navigation is fully portable with
+  no database functions (the lookups use only `length`/`substr`/`instr` and path
+  ranges); Oracle stores the path as `RAW` and installs one small deterministic
+  `tree_level` helper (its `child_of`/`sibling_of` need it). Limitations off
+  PostgreSQL: raw-SQL writes are not observed and need a manual
+  `Model.rebuild_paths()`; sibling order follows the database's collation (and on
+  Oracle an empty `order_by` string sorts as NULL); MySQL stores the path as
+  `VARBINARY(768)` and Oracle as `RAW(2000)`, capping tree depth; the `__level`
+  query filter and the functional `(level, path)` index are PostgreSQL-only (other
+  backends use a plain path index, and `get_level()` / `is_root()` still work
+  everywhere).
 - `PathField` is now a `BinaryField` subclass, and `path.value` is raw `bytes`
   instead of a list of `Decimal`s. If you read `path.value` directly, update your
   code; the `TreeModelMixin`/`Path` helpers (`get_ancestors`, `get_descendants`,

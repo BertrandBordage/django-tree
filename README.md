@@ -14,9 +14,10 @@ methods (`get_descendants()`, `get_ancestors()`, …).
 
 On **PostgreSQL** the path is maintained by a PL/pgSQL trigger, so bulk
 operations, `QuerySet.update()` and raw SQL all keep the tree consistent. On
-**SQLite** and **MySQL** there is no such trigger, so the path is computed in
-Python on the ORM save cycle (`save()`, `delete()`, `QuerySet.update()`,
-`bulk_create`/`bulk_update`); writes that bypass the ORM (raw SQL) need a manual
+**SQLite**, **MySQL** and **Oracle** there is no such trigger, so the path is
+computed in Python on the ORM save cycle (`save()`, `delete()`,
+`QuerySet.update()`, `bulk_create`/`bulk_update`); writes that bypass the ORM
+(raw SQL) need a manual
 `Model.rebuild_paths()`.
 
 
@@ -43,18 +44,26 @@ Python on the ORM save cycle (`save()`, `delete()`, `QuerySet.update()`,
 
 | | django-tree | [treebeard MP](https://github.com/django-treebeard/django-treebeard) | [treebeard NS](https://github.com/django-treebeard/django-treebeard) | [treebeard AL](https://github.com/django-treebeard/django-treebeard) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-tree-queries](https://github.com/feincms/django-tree-queries) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Works on any Django database** | ✅ PostgreSQL, SQLite, MySQL | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `NS_Node` | ❌ subclass `AL_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNode` | ❌ subclass `TreeNodeModel` |
-| **Build & move with plain `parent` + `save()`** | ✅ | ❌ API | ❌ API | ❌ API | ✅ | ✅ | ✅ |
-| **Several independent trees per model** | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
-| **Tree kept correct by the database** | ✅ PostgreSQL: SQL trigger<br>❌ SQLite, MySQL: in Python | ❌ in Python | ❌ in Python | ❌ in Python | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python + cache |
-| **Survives bulk writes / `update()` / raw SQL** | ✅ PostgreSQL<br>🟡 SQLite, MySQL: bulk/`update()` yes, raw SQL no | ❌ Python API only | ❌ Python API only | ❌ Python API only | ❌ | ✅ | ❌ manual resync |
-| **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__child_of` | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 cached properties |
-| **Admin integration** | ❌ form field only | ✅ drag-and-drop | ✅ drag-and-drop | ✅ drag-and-drop | ✅ drag-and-drop | ✅ cut/paste | ✅ |
-| **Template tags to render trees** | ❌ | 🟡 | 🟡 | 🟡 | ✅ `{% recursetree %}` | ✅ `{% recursetree %}` | 🟡 |
-| **Production-ready** | ✅ | ✅ | ✅ | ✅ | 🟡 works, unmaintained | ✅ | ✅ |
+| **Works on any Django database** | 🟢 PostgreSQL, SQLite, MySQL, Oracle | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+| **Drop-in (no model/manager subclassing)** | 🟢 add one field | 🔴 subclass `MP_Node` | 🔴 subclass `NS_Node` | 🔴 subclass `AL_Node` | 🔴 subclass `MPTTModel` | 🔴 subclass `TreeNode` | 🔴 subclass `TreeNodeModel` |
+| **Build & move with plain `parent` + `save()`** | 🟢 | 🔴 API | 🔴 API | 🔴 API | 🟢 | 🟢 | 🟢 |
+| **Several independent trees per model** | 🟢 multiple `PathField`s | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy |
+| **Maximum number of siblings** | 🟢 unlimited | 🟠 1.7 M | 🟢 1 B | 🟢 unlimited | 🟢 1 B | 🟢 unlimited | 🟢 2.1 B |
+| **Tree kept correct by the database** | 🟢 PostgreSQL: SQL trigger<br>🔴 SQLite, MySQL, Oracle: in Python | 🔴 in Python | 🔴 in Python | 🔴 in Python | 🔴 in Python | 🟢 FK only, nothing denormalized | 🔴 in Python + cache |
+| **Survives bulk writes / `update()` / raw SQL** | 🟢 PostgreSQL<br>🟡 SQLite, MySQL, Oracle: bulk/`update()` yes, raw SQL no | 🔴 Python API only | 🔴 Python API only | 🔴 Python API only | 🔴 | 🟢 | 🔴 manual resync |
+| **Tree filters as composable ORM lookups** | 🟢 `__descendant_of`, `__child_of` | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 cached properties |
+| **Admin integration** | 🔴 form field only | 🟢 drag-and-drop | 🟢 drag-and-drop | 🟢 drag-and-drop | 🟢 drag-and-drop | 🟢 cut/paste | 🟢 |
+| **Template tags to render trees** | 🔴 | 🟡 | 🟡 | 🟡 | 🟢 `{% recursetree %}` | 🟢 `{% recursetree %}` | 🟡 |
+| **Production-ready** | 🟢 | 🟢 | 🟢 | 🟢 | 🟡 works, unmaintained | 🟢 | 🟢 |
 
-✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
+🟢 yes / good · 🟡 partial or depends on the variant · 🔴 no / poor.
+
+**Maximum number of siblings** counts how many children a single parent can
+hold before the encoding runs out (django-tree uses fractional indexing, so it
+never does; treebeard MP caps at `alphabet`<sup>`steplen`</sup> = 36⁴; the
+nested-set ones at the `lft`/`rgt` `PositiveIntegerField` span, ≈1 B;
+django-treenode at its `PositiveIntegerField` order, ≈2.1 B): 🟢 over 100 M · 🟠
+over 1 M · 🔴 otherwise.
 
 ### Performance
 
@@ -65,12 +74,12 @@ measurement; below it, the rank in that row (`#n`) and a marker.
 
 | | django-tree | treebeard MP | treebeard NS | treebeard AL | django-mptt | django-tree-queries | django-treenode |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| **Reads · best** | 83 µs<br>🟢 #7 | 0.5 µs<br>🟢 #1 👑 | 0.7 µs<br>🟢 #3 | 10 µs<br>🟢 #5 | 1.7 µs<br>🟢 #4 | 75 µs<br>🟢 #6 | 0.5 µs<br>🟢 #1 👑 |
-| **Reads · typical** | 410 µs<br>🟢 #3 | 250 µs<br>🟢 #1 👑 | 393 µs<br>🟢 #3 | 1.6 ms<br>🟢 #6 | 300 µs<br>🟢 #2 | 1.1 ms<br>🟢 #5 | 1.9 ms<br>🟢 #7 |
-| **Reads · worst** | 62 ms<br>🟠 #1 👑 | 344 ms<br>🔴 #3 | 518 ms<br>🔴 #4 | 853 ms<br>🔴 #6 | 118 ms<br>🔴 #2 | 627 ms<br>🔴 #5 | 5 min<br>💩 #7 |
-| **Writes · best** | 223 µs<br>🟢 #4 | 235 µs<br>🟢 #5 | 205 µs<br>🟢 #3 | 193 µs<br>🟢 #2 | 307 µs<br>🟢 #6 | 183 µs<br>🟢 #1 👑 | 390 ms<br>🔴 #7 |
-| **Writes · typical** | 2.2 ms<br>🟢 #3 | 5.7 ms<br>🟠 #4 | 6.1 ms<br>🟠 #5 | 969 µs<br>🟢 #1 👑 | 13 ms<br>🟠 #6 | 1.0 ms<br>🟢 #2 | 837 ms<br>🔴 #7 |
-| **Writes · worst** | 2.1 s<br>💩 #3 | 9.0 s<br>💩 #4 | 21.8 s<br>💩 #6 | 926 ms<br>🔴 #2 | 19.0 s<br>💩 #5 | 829 ms<br>🔴 #1 👑 | 25 min<br>💩 #7 |
+| **Reads · best** | 77 µs<br>🟢 #6 | 0.5 µs<br>🟢 #1 👑 | 0.7 µs<br>🟢 #3 | 10 µs<br>🟢 #5 | 1.7 µs<br>🟢 #4 | 75 µs<br>🟢 #6 | 0.5 µs<br>🟢 #1 👑 |
+| **Reads · typical** | 511 µs<br>🟢 #4 | 250 µs<br>🟢 #1 👑 | 393 µs<br>🟢 #3 | 1.6 ms<br>🟢 #6 | 300 µs<br>🟢 #2 | 1.1 ms<br>🟢 #5 | 1.9 ms<br>🟢 #7 |
+| **Reads · worst** | 72 ms<br>🟠 #1 👑 | 344 ms<br>🔴 #3 | 518 ms<br>🔴 #4 | 853 ms<br>🔴 #6 | 118 ms<br>🔴 #2 | 627 ms<br>🔴 #5 | 5 min<br>💩 #7 |
+| **Writes · best** | 441 µs<br>🟢 #6 | 235 µs<br>🟢 #4 | 205 µs<br>🟢 #3 | 193 µs<br>🟢 #2 | 307 µs<br>🟢 #5 | 183 µs<br>🟢 #1 👑 | 390 ms<br>🔴 #7 |
+| **Writes · typical** | 2.8 ms<br>🟢 #3 | 5.7 ms<br>🟠 #4 | 6.1 ms<br>🟠 #5 | 969 µs<br>🟢 #1 👑 | 13 ms<br>🟠 #6 | 1.0 ms<br>🟢 #2 | 837 ms<br>🔴 #7 |
+| **Writes · worst** | 2.4 s<br>💩 #3 | 9.0 s<br>💩 #4 | 21.8 s<br>💩 #6 | 926 ms<br>🔴 #2 | 19.0 s<br>💩 #5 | 829 ms<br>🔴 #1 👑 | 25 min<br>💩 #7 |
 | **Storage** | 0.91 MB<br>🟢 #5 | 0.97 MB<br>🟢 #6 | 0.79 MB<br>🟢 #3 | 0.57 MB<br>🟢 #1 👑 | 0.85 MB<br>🟢 #4 | 0.57 MB<br>🟢 #1 👑 | 0.98 MB<br>🟢 #6 |
 
 Two results within 5 % share a rank. Markers use the same thresholds for reads
@@ -86,9 +95,9 @@ In short:
 - **django-tree** keeps the tree correct in the database itself, so on
   PostgreSQL bulk operations, `update()` and raw SQL stay safe, with balanced
   reads and writes — at the cost of being without admin
-  drag-and-drop or tree-rendering template tags yet. On SQLite and MySQL the
-  path is maintained in Python on the ORM save cycle instead (raw SQL then needs
-  a manual rebuild).
+  drag-and-drop or tree-rendering template tags yet. On SQLite, MySQL and Oracle
+  the path is maintained in Python on the ORM save cycle instead (raw SQL then
+  needs a manual rebuild).
 - **treebeard** offers three algorithms with the same brittle Python API and no
   database constraint: **MP** reads fast, **NS** writes slowly like MPTT, **AL**
   writes fast and is tiny on disk but some reads are catastrophic.
@@ -104,12 +113,12 @@ In short:
 
 ## Requirements
 
-- **PostgreSQL** 12+, **SQLite** or **MySQL**. On PostgreSQL the hierarchy is
-  maintained by a PL/pgSQL trigger using only standard, long-standing features
-  (also under raw SQL; CI runs on PostgreSQL 16); on SQLite and MySQL it is
-  maintained in Python on the ORM save cycle, so raw-SQL writes need a manual
-  `Model.rebuild_paths()`. MySQL stores the path as `VARBINARY(768)`, capping
-  tree depth.
+- **PostgreSQL** 12+, **SQLite**, **MySQL** or **Oracle** 19c+. On PostgreSQL the
+  hierarchy is maintained by a PL/pgSQL trigger using only standard, long-standing
+  features (also under raw SQL; CI runs on PostgreSQL 16); on SQLite, MySQL and
+  Oracle it is maintained in Python on the ORM save cycle, so raw-SQL writes need
+  a manual `Model.rebuild_paths()`. MySQL stores the path as `VARBINARY(768)` and
+  Oracle as `RAW(2000)`, capping tree depth.
 - **Django** 4.2+
 - **Python** 3.10+
 
@@ -234,8 +243,9 @@ with YourModel.disabled_tree_trigger():
 ```
 
 > [!NOTE]
-> On **SQLite** and **MySQL** there is no SQL trigger: `disable_tree_trigger()`
-> / `enable_tree_trigger()` toggle the Python maintenance instead, and
+> On **SQLite**, **MySQL** and **Oracle** there is no SQL trigger:
+> `disable_tree_trigger()` / `enable_tree_trigger()` toggle the Python
+> maintenance instead, and
 > `rebuild_paths()` is also how you resync the tree after a write that bypasses
 > the ORM (raw SQL, `cursor.execute`, …), which those backends cannot intercept.
 > On **PostgreSQL** the trigger keeps everything consistent on its own, so you
