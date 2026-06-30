@@ -168,7 +168,7 @@ class PathField(BinaryField):
             return 'RAW(%d)' % ORACLE_PATH_BYTES
         return super().db_type(connection)
 
-    def value_to_string(self, obj: Model) -> str | None:
+    def value_to_string(self, obj: Model) -> str | None:  # type: ignore[override]
         # Django's base `BinaryField.value_to_string` assumes the stored value
         # is already `bytes` and feeds it straight to `b64encode`, but
         # `value_from_object` returns the `Path` wrapper here -- crashing
@@ -177,7 +177,7 @@ class PathField(BinaryField):
         # first, then hex-encode (rather than relying on base64) since `None`
         # also has to round-trip cleanly for paths that haven't been
         # assigned/saved yet.
-        value = self.value_from_object(obj)
+        value = cast('Path | bytes | None', self.value_from_object(obj))
         if isinstance(value, Path):
             value = value.value
         if value is None:
