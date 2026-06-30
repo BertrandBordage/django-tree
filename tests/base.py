@@ -3040,11 +3040,20 @@ class TreeFunctionsMigrationTest(SimpleTestCase):
         self.assertIn('CREATE', editor.executed[0].upper())
         self.assertIn('DROP FUNCTION', editor.executed[1])
 
-    def test_runs_only_on_postgresql(self):
-        editor = self._RecordingEditor('sqlite')
+    def test_oracle_creates_and_drops_tree_level(self):
+        editor = self._RecordingEditor('oracle')
         self.migration.create_functions(apps, editor)
         self.migration.drop_functions(apps, editor)
-        self.assertEqual(editor.executed, [])
+        self.assertEqual(len(editor.executed), 2)
+        self.assertIn('CREATE OR REPLACE FUNCTION tree_level', editor.executed[0])
+        self.assertIn('DROP FUNCTION', editor.executed[1])
+
+    def test_no_functions_on_sqlite_or_mysql(self):
+        for vendor in ('sqlite', 'mysql'):
+            editor = self._RecordingEditor(vendor)
+            self.migration.create_functions(apps, editor)
+            self.migration.drop_functions(apps, editor)
+            self.assertEqual(editor.executed, [])
 
 
 @skipUnless(
