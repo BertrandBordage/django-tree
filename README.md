@@ -48,7 +48,7 @@ computed in Python on the ORM save cycle (`save()`, `delete()`,
 | **Drop-in (no model/manager subclassing)** | 🟢 add one field | 🔴 subclass `MP_Node` | 🔴 subclass `NS_Node` | 🔴 subclass `AL_Node` | 🔴 subclass `MPTTModel` | 🔴 subclass `TreeNode` | 🔴 subclass `TreeNodeModel` |
 | **Build & move with plain `parent` + `save()`** | 🟢 | 🔴 API | 🔴 API | 🔴 API | 🟢 | 🟢 | 🟢 |
 | **Several independent trees per model** | 🟢 multiple `PathField`s | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy |
-| **Maximum number of root nodes** | 🟢 unlimited | 🟠 1.7 M | 🟢 2.1 B | 🟢 unlimited | 🟢 2.1 B | 🟢 unlimited | 🟢 2.1 B |
+| **Maximum number of siblings** | 🟢 unlimited | 🟠 1.7 M | 🟢 1 B | 🟢 unlimited | 🟢 1 B | 🟢 unlimited | 🟢 2.1 B |
 | **Tree kept correct by the database** | 🟢 PostgreSQL: SQL trigger<br>🔴 SQLite, MySQL, Oracle: in Python | 🔴 in Python | 🔴 in Python | 🔴 in Python | 🔴 in Python | 🟢 FK only, nothing denormalized | 🔴 in Python + cache |
 | **Survives bulk writes / `update()` / raw SQL** | 🟢 PostgreSQL<br>🟡 SQLite, MySQL, Oracle: bulk/`update()` yes, raw SQL no | 🔴 Python API only | 🔴 Python API only | 🔴 Python API only | 🔴 | 🟢 | 🔴 manual resync |
 | **Tree filters as composable ORM lookups** | 🟢 `__descendant_of`, `__child_of` | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 cached properties |
@@ -58,10 +58,11 @@ computed in Python on the ORM save cycle (`save()`, `delete()`,
 
 🟢 yes / good · 🟡 partial or depends on the variant · 🔴 no / poor.
 
-**Maximum number of root nodes** counts how many siblings a single level can
+**Maximum number of siblings** counts how many children a single parent can
 hold before the encoding runs out (django-tree uses fractional indexing, so it
-never does; the `tree_id`-based ones cap at a `PositiveIntegerField`, ≈2.1 B;
-treebeard MP caps at `alphabet`<sup>`steplen`</sup> = 36⁴): 🟢 over 100 M · 🟠
+never does; treebeard MP caps at `alphabet`<sup>`steplen`</sup> = 36⁴; the
+nested-set ones at the `lft`/`rgt` `PositiveIntegerField` span, ≈1 B;
+django-treenode at its `PositiveIntegerField` order, ≈2.1 B): 🟢 over 100 M · 🟠
 over 1 M · 🔴 otherwise.
 
 ### Performance
