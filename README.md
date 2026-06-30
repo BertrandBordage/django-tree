@@ -4,9 +4,6 @@ Fast and easy tree structures for Django, maintained inside the database.
 
 [![](https://img.shields.io/pypi/v/django-tree.svg?style=flat-square)](https://pypi.python.org/pypi/django-tree) [![](https://img.shields.io/github/actions/workflow/status/BertrandBordage/django-tree/ci.yml?branch=master&style=flat-square)](https://github.com/BertrandBordage/django-tree/actions/workflows/ci.yml) [![](https://img.shields.io/codecov/c/github/BertrandBordage/django-tree/master.svg?style=flat-square)](https://codecov.io/gh/BertrandBordage/django-tree)
 
-> [!WARNING]
-> In beta — not production-ready yet.
-
 django-tree solves the same problem as **django-treebeard**,
 **django-tree-queries**, **django-mptt** and **django-treenode**: storing and
 querying tree (hierarchy) structures with Django. It does it differently: you add a `PathField` to an ordinary model
@@ -55,7 +52,7 @@ Python on the ORM save cycle (`save()`, `delete()`, `QuerySet.update()`,
 | **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__child_of` | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 cached properties |
 | **Admin integration** | ❌ form field only | ✅ drag-and-drop | ✅ drag-and-drop | ✅ drag-and-drop | ✅ drag-and-drop | ✅ cut/paste | ✅ |
 | **Template tags to render trees** | ❌ | 🟡 | 🟡 | 🟡 | ✅ `{% recursetree %}` | ✅ `{% recursetree %}` | 🟡 |
-| **Production-ready** | ❌ beta | ✅ | ✅ | ✅ | 🟡 works, unmaintained | ✅ | ✅ |
+| **Production-ready** | ✅ | ✅ | ✅ | ✅ | 🟡 works, unmaintained | ✅ | ✅ |
 
 ✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
 
@@ -88,7 +85,7 @@ In short:
 
 - **django-tree** keeps the tree correct in the database itself, so on
   PostgreSQL bulk operations, `update()` and raw SQL stay safe, with balanced
-  reads and writes — at the cost of being still beta and without admin
+  reads and writes — at the cost of being without admin
   drag-and-drop or tree-rendering template tags yet. On SQLite and MySQL the
   path is maintained in Python on the ORM save cycle instead (raw SQL then needs
   a manual rebuild).
