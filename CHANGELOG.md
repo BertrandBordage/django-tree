@@ -27,6 +27,7 @@ scaling limit, and changes the type of `path.value` (see Upgrading below).
   key strictly between its two neighbours. There is no longer a periodic
   full-renumber of siblings (the old `#17` gap-exhaustion rebuild is gone), so
   inserts stay cheap no matter how many siblings already exist.
+- No longer beta: django-tree is now considered production-ready.
 
 ## Performance
 
