@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Any
 
 from django.db.backends.base.base import BaseDatabaseWrapper
@@ -46,7 +47,7 @@ def _as_bytes(value: Any) -> bytes:
 
 
 def _children_of_prefix(
-    lhs: str, lhs_params: list[Any], prefix: bytes
+    lhs: str, lhs_params: Sequence[Any], prefix: bytes
 ) -> tuple[str, list[Any]]:
     """Portable SQL selecting the direct children of the constant ``prefix``.
 
