@@ -3,6 +3,7 @@
 from __future__ import unicode_literals
 
 import doctest
+import json
 import uuid
 from contextlib import nullcontext
 from importlib import import_module
@@ -2818,6 +2819,25 @@ class PathFieldTest(CommonTest):
         self.assertEqual(field.to_python(memoryview(b'\x02\x00')).value, b'\x02\x00')
         self.assertEqual(field.to_python(b'\x03\x00').value, b'\x03\x00')
         self.assertEqual(field.get_prep_value(memoryview(b'\x04\x00')), b'\x04\x00')
+
+    def test_value_to_string(self):
+        # Serializers (e.g. django-reversion) call `value_to_string` on every
+        # field; the base `BinaryField` implementation chokes on the `Path`
+        # wrapper instead of raw `bytes` (#39).
+        self.create_all_test_places()
+        field = Place._meta.get_field('path')
+        france = Place.objects.get(name='France')
+        serialized = field.value_to_string(france)
+        self.assertIsInstance(serialized, str)
+        # Round-trips back to the original path through `to_python`, as
+        # Django's deserializers do.
+        self.assertEqual(
+            field.to_python(json.loads(serialized)).value, france.path.value
+        )
+
+    def test_value_to_string_unsaved(self):
+        field = Place._meta.get_field('path')
+        self.assertIsNone(field.value_to_string(Place(name='unsaved')))
 
     def test_unsupported_backend_raises(self):
         field = Place._meta.get_field('path')

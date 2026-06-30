@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any, cast
@@ -139,12 +140,16 @@ class PathField(BinaryField):
         value = bytes(value) if value else None
         return Path(self, value)
 
-    def to_python(self, value: 'bytes | memoryview | Path | None') -> Path:
+    def to_python(self, value: 'bytes | memoryview | str | Path | None') -> Path:
         # https://docs.djangoproject.com/en/dev/howto/custom-model-fields/#converting-values-to-python-objects
         if isinstance(value, Path):
             return value
         if isinstance(value, memoryview):
             value = bytes(value)
+        elif isinstance(value, str):
+            # The hex string produced by `value_to_string`, fed back in by
+            # deserializers (e.g. django-reversion, `loaddata`).
+            value = bytes.fromhex(value)
         return Path(self, value)
 
     def get_prep_value(
@@ -162,6 +167,22 @@ class PathField(BinaryField):
         if connection.vendor == 'oracle':
             return 'RAW(%d)' % ORACLE_PATH_BYTES
         return super().db_type(connection)
+
+    def value_to_string(self, obj: Model) -> str | None:  # type: ignore[override]
+        # Django's base `BinaryField.value_to_string` assumes the stored value
+        # is already `bytes` and feeds it straight to `b64encode`, but
+        # `value_from_object` returns the `Path` wrapper here -- crashing
+        # serializers (e.g. django-reversion) with `TypeError: a bytes-like
+        # object is required, not 'Path'`. Unwrap to the underlying `bytes`
+        # first, then hex-encode (rather than relying on base64) since `None`
+        # also has to round-trip cleanly for paths that haven't been
+        # assigned/saved yet.
+        value = cast('Path | bytes | None', self.value_from_object(obj))
+        if isinstance(value, Path):
+            value = value.value
+        if value is None:
+            return None
+        return json.dumps(value.hex())
 
     def _check_database_backend(self, db_alias: str) -> None:
         if connections[db_alias].vendor not in SUPPORTED_VENDORS:
