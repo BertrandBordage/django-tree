@@ -44,19 +44,19 @@ computed in Python on the ORM save cycle (`save()`, `delete()`,
 
 | | django-tree | [treebeard MP](https://github.com/django-treebeard/django-treebeard) | [treebeard NS](https://github.com/django-treebeard/django-treebeard) | [treebeard AL](https://github.com/django-treebeard/django-treebeard) | [django-mptt](https://github.com/django-mptt/django-mptt) | [django-tree-queries](https://github.com/feincms/django-tree-queries) | [django-treenode](https://github.com/fabiocaccamo/django-treenode) |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Works on any Django database** | ✅ PostgreSQL, SQLite, MySQL, Oracle | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `NS_Node` | ❌ subclass `AL_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNode` | ❌ subclass `TreeNodeModel` |
-| **Build & move with plain `parent` + `save()`** | ✅ | ❌ API | ❌ API | ❌ API | ✅ | ✅ | ✅ |
-| **Several independent trees per model** | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
+| **Works on any Django database** | 🟢 PostgreSQL, SQLite, MySQL, Oracle | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 | 🟢 |
+| **Drop-in (no model/manager subclassing)** | 🟢 add one field | 🔴 subclass `MP_Node` | 🔴 subclass `NS_Node` | 🔴 subclass `AL_Node` | 🔴 subclass `MPTTModel` | 🔴 subclass `TreeNode` | 🔴 subclass `TreeNodeModel` |
+| **Build & move with plain `parent` + `save()`** | 🟢 | 🔴 API | 🔴 API | 🔴 API | 🟢 | 🟢 | 🟢 |
+| **Several independent trees per model** | 🟢 multiple `PathField`s | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy | 🔴 one hierarchy |
 | **Maximum number of root nodes** | 🟢 unlimited | 🟠 1.7 M | 🟢 2.1 B | 🟢 unlimited | 🟢 2.1 B | 🟢 unlimited | 🟢 2.1 B |
-| **Tree kept correct by the database** | ✅ PostgreSQL: SQL trigger<br>❌ SQLite, MySQL, Oracle: in Python | ❌ in Python | ❌ in Python | ❌ in Python | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python + cache |
-| **Survives bulk writes / `update()` / raw SQL** | ✅ PostgreSQL<br>🟡 SQLite, MySQL, Oracle: bulk/`update()` yes, raw SQL no | ❌ Python API only | ❌ Python API only | ❌ Python API only | ❌ | ✅ | ❌ manual resync |
-| **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__child_of` | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 cached properties |
-| **Admin integration** | ❌ form field only | ✅ drag-and-drop | ✅ drag-and-drop | ✅ drag-and-drop | ✅ drag-and-drop | ✅ cut/paste | ✅ |
-| **Template tags to render trees** | ❌ | 🟡 | 🟡 | 🟡 | ✅ `{% recursetree %}` | ✅ `{% recursetree %}` | 🟡 |
-| **Production-ready** | ✅ | ✅ | ✅ | ✅ | 🟡 works, unmaintained | ✅ | ✅ |
+| **Tree kept correct by the database** | 🟢 PostgreSQL: SQL trigger<br>🔴 SQLite, MySQL, Oracle: in Python | 🔴 in Python | 🔴 in Python | 🔴 in Python | 🔴 in Python | 🟢 FK only, nothing denormalized | 🔴 in Python + cache |
+| **Survives bulk writes / `update()` / raw SQL** | 🟢 PostgreSQL<br>🟡 SQLite, MySQL, Oracle: bulk/`update()` yes, raw SQL no | 🔴 Python API only | 🔴 Python API only | 🔴 Python API only | 🔴 | 🟢 | 🔴 manual resync |
+| **Tree filters as composable ORM lookups** | 🟢 `__descendant_of`, `__child_of` | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 cached properties |
+| **Admin integration** | 🔴 form field only | 🟢 drag-and-drop | 🟢 drag-and-drop | 🟢 drag-and-drop | 🟢 drag-and-drop | 🟢 cut/paste | 🟢 |
+| **Template tags to render trees** | 🔴 | 🟡 | 🟡 | 🟡 | 🟢 `{% recursetree %}` | 🟢 `{% recursetree %}` | 🟡 |
+| **Production-ready** | 🟢 | 🟢 | 🟢 | 🟢 | 🟡 works, unmaintained | 🟢 | 🟢 |
 
-✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
+🟢 yes / good · 🟡 partial or depends on the variant · 🔴 no / poor.
 
 **Maximum number of root nodes** counts how many siblings a single level can
 hold before the encoding runs out (django-tree uses fractional indexing, so it
