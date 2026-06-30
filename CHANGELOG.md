@@ -11,10 +11,14 @@ scaling limit, and changes the type of `path.value` (see Upgrading below).
   stays consistent even under raw SQL); on the other backends, where no portable
   trigger is possible, the path is computed in Python on the ORM save cycle
   (`save()`, `delete()`, `QuerySet.update()`, `bulk_create`/`bulk_update`),
-  producing an identical tree. Limitations off PostgreSQL: raw-SQL writes are not
-  observed and need a manual `Model.rebuild_paths()`; sibling order follows the
-  database's collation; MySQL stores the path as `VARBINARY(768)`, capping tree
-  depth. Oracle is unsupported.
+  producing an identical tree. Off PostgreSQL the navigation is fully portable
+  with no per-connection UDFs (the lookups use only `length`/`substr`/`instr` and
+  path ranges). Limitations off PostgreSQL: raw-SQL writes are not observed and
+  need a manual `Model.rebuild_paths()`; sibling order follows the database's
+  collation; MySQL stores the path as `VARBINARY(768)`, capping tree depth; the
+  `__level` query filter and the functional `(level, path)` index are
+  PostgreSQL-only (other backends use a plain path index, and `get_level()` /
+  `is_root()` still work everywhere). Oracle is unsupported.
 - `PathField` is now a `BinaryField` subclass, and `path.value` is raw `bytes`
   instead of a list of `Decimal`s. If you read `path.value` directly, update your
   code; the `TreeModelMixin`/`Path` helpers (`get_ancestors`, `get_descendants`,

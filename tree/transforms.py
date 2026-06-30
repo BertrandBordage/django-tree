@@ -4,8 +4,6 @@ from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import IntegerField, Transform
 from django.db.models.sql.compiler import SQLCompiler
 
-from .sql.base import path_level_sql
-
 
 class Level(Transform):
     lookup_name = 'level'
@@ -36,9 +34,12 @@ class Level(Transform):
                 arg_joiner=arg_joiner,
                 **extra_context,
             )
-        # SQLite reuses the `tree_level` name (a per-connection Python UDF); MySQL
-        # counts the 0x00 bytes inline. Both back the functional `(level, path)`
-        # index used by the same `Index` definition.
-        lhs, params = compiler.compile(self.lhs)
-        sql, repeats = path_level_sql(connection, lhs)
-        return sql, list(params) * repeats
+        # Counting the 0x00 delimiters has no portable, NUL-safe SQL form (SQLite's
+        # `replace`/string functions mishandle embedded 0x00), so `__level` as a
+        # query filter is PostgreSQL-only. The depth-free `child_of`/`sibling_of`
+        # lookups (see `tree.lookups`) and the Python-side `Path.get_level()` /
+        # `is_root()` cover the rest off PostgreSQL.
+        raise NotImplementedError(
+            'The `__level` lookup/transform is only available on PostgreSQL. '
+            'Use `get_level()` / `is_root()` on a loaded instance instead.'
+        )

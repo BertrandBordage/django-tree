@@ -141,8 +141,13 @@ class TreeQuerySetMixin(_QuerySetBase):
         return result
 
     def filter_roots(self, path_field: str | None = None) -> QuerySet:
-        attname = self._get_path_field_attname(path_field)
-        return self.filter(**{f'{attname}__level': 1})
+        field = _get_path_field(self.model, path_field)
+        if is_trigger_backend(self.db):
+            # PostgreSQL seeks the functional `(level, path)` index.
+            return self.filter(**{f'{field.attname}__level': 1})
+        # Off PostgreSQL `__level` has no portable SQL form; a root is exactly a
+        # node with no parent, which is equivalent and uses the parent FK index.
+        return self.filter(**{f'{field.parent_field.name}__isnull': True})
 
     def get_descendants(
         self, include_self: bool = False, path_field: str | None = None

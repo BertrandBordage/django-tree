@@ -91,36 +91,16 @@ def _register_tree_path_dumper(connection: BaseDatabaseWrapper) -> None:
         adapters.register_dumper(Path, Path._psycopg3_dumper(fmt))
 
 
-def _register_sqlite_functions(connection: BaseDatabaseWrapper) -> None:
-    """Register the ``tree_*`` helpers as SQLite UDFs on a connection.
-
-    Without a trigger SQLite still needs ``tree_level`` for the ``__level``
-    lookup and the functional ``(level, path)`` index; ``tree_upper`` /
-    ``tree_parent_prefix`` back the rare column-operand lookup paths. They are the
-    same pure-Python helpers used to maintain the path, registered as
-    deterministic so they may appear in an index expression.
-    """
-    if connection.vendor != 'sqlite' or connection.connection is None:
-        return
-    from tree.sql.helpers import tree_level, tree_parent_prefix, tree_upper
-
-    raw = connection.connection
-    raw.create_function('tree_level', 1, tree_level, deterministic=True)
-    raw.create_function('tree_upper', 1, tree_upper, deterministic=True)
-    raw.create_function('tree_parent_prefix', 1, tree_parent_prefix, deterministic=True)
-
-
 def _setup_connection(connection: BaseDatabaseWrapper) -> None:
     _register_tree_path_dumper(connection)
-    _register_sqlite_functions(connection)
 
 
 @receiver(connection_created)
 def setup_tree_connection(
     sender: Any, connection: BaseDatabaseWrapper, **kwargs: Any
 ) -> None:
-    # Register on every newly-opened connection (the idiomatic place for custom
-    # psycopg types and SQLite functions).
+    # Register on every newly-opened connection (the idiomatic place for the
+    # custom psycopg `Path` type).
     _setup_connection(connection)
 
 

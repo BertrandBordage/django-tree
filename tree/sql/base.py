@@ -1,26 +1,7 @@
 import re
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from django.db.backends.base.base import BaseDatabaseWrapper
-
 
 UNNECESSARY_QUOTE_RE = re.compile(r'^[a-z_]+$')
-
-
-def path_level_sql(connection: 'BaseDatabaseWrapper', expr: str) -> tuple[str, int]:
-    """SQL counting the path's depth (number of ``0x00`` delimiters) and the
-    number of times ``expr`` (and thus its params) is repeated in it.
-
-    PostgreSQL and SQLite use the ``tree_level`` function -- a PL/pgSQL helper on
-    PostgreSQL, a Python UDF registered per connection on SQLite (see
-    ``tree.signals``). MySQL has no usable UDF, so it counts the ``0x00`` bytes
-    inline; ``REPLACE`` over a ``VARBINARY`` is byte-wise there.
-    """
-    if connection.vendor == 'mysql':
-        return f"(length({expr}) - length(replace({expr}, x'00', x'')))", 3
-    return f'tree_level({expr})', 1
 
 
 def quote_ident(identifier: str) -> str:

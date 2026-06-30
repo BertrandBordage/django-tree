@@ -4,8 +4,7 @@ from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Lookup
 from django.db.models.sql.compiler import SQLCompiler
 
-from .sql.base import path_level_sql
-from .sql.helpers import tree_level, tree_parent_prefix, tree_upper
+from .sql.helpers import tree_parent_prefix, tree_upper
 
 
 # The descendant/child/sibling lookups are expressed as range comparisons on the
@@ -29,15 +28,44 @@ from .sql.helpers import tree_level, tree_parent_prefix, tree_upper
 # backend there is no trigger and no such function: when the right-hand operand is
 # a constant path (the case for the whole tree-navigation API) the helper is
 # precomputed in Python and bound as a parameter, which is just as index-friendly
-# and works identically on SQLite and MySQL. The depth predicate of `child_of` /
-# `sibling_of` uses `path_level_sql` (a `tree_level` UDF on SQLite, an inline byte
-# count on MySQL).
+# and works identically on SQLite and MySQL.
+#
+# `child_of` / `sibling_of` additionally need to keep only *direct* children of a
+# prefix Q (depth Q+1), not deeper descendants. Off PostgreSQL this avoids any
+# delimiter *count* (which has no portable, NUL-safe SQL form -- SQLite's `replace`
+# mishandles `0x00` bytes): a row is a direct child of Q iff it falls in Q's
+# descendant range and the only delimiter past Q is its own trailing one, i.e.
+# `instr(substr(path, len(Q) + 1), x'00') = length(path) - len(Q)`. `instr`,
+# `substr` and `length` are all byte-correct on SQLite BLOBs and MySQL VARBINARY.
 
 
 def _as_bytes(value: Any) -> bytes:
     # `get_prep_lookup` has already applied `PathField.get_prep_value`, so `value`
     # is the raw bytes (or empty/None for the virtual root above all roots).
     return bytes(value) if value else b''
+
+
+def _children_of_prefix(
+    lhs: str, lhs_params: list[Any], prefix: bytes
+) -> tuple[str, list[Any]]:
+    """Portable SQL selecting the direct children of the constant ``prefix``.
+
+    The descendant range of ``prefix``, restricted to rows whose only delimiter
+    past it is their own trailing one (so deeper descendants drop out) -- using
+    only byte-correct ``length``/``substr``/``instr`` (SQLite, MySQL). For the
+    empty prefix (the virtual root) the upper bound is dropped, selecting every
+    root.
+    """
+    upper = tree_upper(prefix)
+    n = len(prefix)
+    sql = '%s > %%s' % lhs
+    params: list[Any] = [*lhs_params, prefix]
+    if upper is not None:
+        sql += ' AND %s < %%s' % lhs
+        params += [*lhs_params, upper]
+    sql += " AND instr(substr(%s, %%s), x'00') = length(%s) - %%s" % (lhs, lhs)
+    params += [*lhs_params, n + 1, *lhs_params, n]
+    return sql, params
 
 
 class AncestorOf(Lookup):
@@ -123,19 +151,8 @@ class ChildOf(Lookup):
             raise NotImplementedError(
                 'The `child_of` lookup only supports a constant path off PostgreSQL.'
             )
-        path = _as_bytes(self.rhs)
-        upper = tree_upper(path)
-        level = tree_level(path)
-        assert level is not None
-        level_sql, repeats = path_level_sql(connection, lhs)
-        sql = '%s > %%s' % lhs
-        params = [*lhs_params, path]
-        if upper is not None:
-            sql += ' AND %s < %%s' % lhs
-            params += [*lhs_params, upper]
-        sql += ' AND %s = %%s' % level_sql
-        params += [*(lhs_params * repeats), level + 1]
-        return sql, params
+        # Direct children of P are the children of the prefix P itself.
+        return _children_of_prefix(lhs, lhs_params, _as_bytes(self.rhs))
 
 
 class SiblingOf(Lookup):
@@ -171,16 +188,7 @@ class SiblingOf(Lookup):
             raise NotImplementedError(
                 'The `sibling_of` lookup only supports a constant path off PostgreSQL.'
             )
-        path = _as_bytes(self.rhs)
-        parent_path = tree_parent_prefix(path)
-        upper = tree_upper(parent_path)
-        level = tree_level(path)
-        level_sql, repeats = path_level_sql(connection, lhs)
-        sql = '%s > %%s' % lhs
-        params = [*lhs_params, parent_path]
-        if upper is not None:
-            sql += ' AND %s < %%s' % lhs
-            params += [*lhs_params, upper]
-        sql += ' AND %s = %%s' % level_sql
-        params += [*(lhs_params * repeats), level]
-        return sql, params
+        # The siblings of P are the children of its parent prefix (P itself
+        # included; the navigation API excludes self separately).
+        parent_path = tree_parent_prefix(_as_bytes(self.rhs))
+        return _children_of_prefix(lhs, lhs_params, parent_path)
