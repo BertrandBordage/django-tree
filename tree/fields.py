@@ -16,12 +16,18 @@ from .types import Path
 # Backends django-tree knows how to maintain a tree on. PostgreSQL uses a
 # database trigger; the others compute the path in Python (see `tree.sql` and
 # `tree.maintenance`).
-SUPPORTED_VENDORS = frozenset({'postgresql', 'sqlite', 'mysql'})
+SUPPORTED_VENDORS = frozenset({'postgresql', 'sqlite', 'mysql', 'oracle'})
 
 # MySQL cannot fully index a `BLOB` without a prefix length, so the path is a
 # bounded `VARBINARY` there -- byte-comparable and fully indexable. 768 bytes is
 # hundreds of levels deep; deeper trees would need a wider column.
 MYSQL_PATH_BYTES = 768
+
+# Oracle's `BinaryField` default is `BLOB`, which cannot back a btree index nor
+# be range-compared byte-wise -- both of which the path lookups need. `RAW` is
+# byte-ordered, indexable and range-comparable, but capped at 2000 bytes (about
+# a thousand levels deep; raise `MAX_STRING_SIZE=EXTENDED` for more).
+ORACLE_PATH_BYTES = 2000
 
 
 class PathIndex(Index):
@@ -124,12 +130,13 @@ class PathField(BinaryField):
     ) -> Path:
         if isinstance(value, Path):
             return value
-        if value is not None:
-            # psycopg3 already returns `bytes` for `bytea` (so this is a no-op),
-            # but psycopg2 returns a `memoryview`, which can't be ordered, hashed,
-            # split or `startswith`-ed -- all things `Path` relies on -- so coerce
-            # to `bytes` either way.
-            value = bytes(value)
+        # A stored path is either NULL (no path yet) or a non-empty key. psycopg3
+        # already returns `bytes` for `bytea` (so this is a no-op), but psycopg2
+        # returns a `memoryview`, which can't be ordered, hashed, split or
+        # `startswith`-ed -- all things `Path` relies on -- so coerce to `bytes`.
+        # Oracle can't store an empty `RAW` and reads a NULL one back as `b''`
+        # (Django's `convert_empty_bytes`), so treat empty as "no path".
+        value = bytes(value) if value else None
         return Path(self, value)
 
     def to_python(self, value: 'bytes | memoryview | Path | None') -> Path:
@@ -152,6 +159,8 @@ class PathField(BinaryField):
     def db_type(self, connection: Any) -> str | None:
         if connection.vendor == 'mysql':
             return 'varbinary(%d)' % MYSQL_PATH_BYTES
+        if connection.vendor == 'oracle':
+            return 'RAW(%d)' % ORACLE_PATH_BYTES
         return super().db_type(connection)
 
     def _check_database_backend(self, db_alias: str) -> None:

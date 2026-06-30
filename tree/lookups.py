@@ -5,7 +5,7 @@ from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.models import Lookup
 from django.db.models.sql.compiler import SQLCompiler
 
-from .sql.helpers import tree_parent_prefix, tree_upper
+from .sql.helpers import tree_level, tree_parent_prefix, tree_upper
 
 
 # The descendant/child/sibling lookups are expressed as range comparisons on the
@@ -32,12 +32,19 @@ from .sql.helpers import tree_parent_prefix, tree_upper
 # and works identically on SQLite and MySQL.
 #
 # `child_of` / `sibling_of` additionally need to keep only *direct* children of a
-# prefix Q (depth Q+1), not deeper descendants. Off PostgreSQL this avoids any
+# prefix Q (depth Q+1), not deeper descendants. On SQLite and MySQL this avoids any
 # delimiter *count* (which has no portable, NUL-safe SQL form -- SQLite's `replace`
 # mishandles `0x00` bytes): a row is a direct child of Q iff it falls in Q's
 # descendant range and the only delimiter past Q is its own trailing one, i.e.
 # `instr(substr(path, len(Q) + 1), x'00') = length(path) - len(Q)`. `instr`,
 # `substr` and `length` are all byte-correct on SQLite BLOBs and MySQL VARBINARY.
+#
+# Oracle is the exception: `substr`/`length`/`instr` operate on the hex text of a
+# `RAW`, not its bytes (so `instr` would match a `00` straddling two bytes), and
+# `UTL_RAW` has no `instr`. There the depth is taken straight from the installed
+# `tree_level` helper (see `tree.sql.oracle`): `tree_level(path) = tree_level(Q) + 1`,
+# with `tree_level(Q)` precomputed in Python. `UTL_RAW.SUBSTR`/`UTL_RAW.LENGTH` give
+# the byte-correct prefix slice the `ancestor_of` lookup needs.
 
 
 def _as_bytes(value: Any) -> bytes:
@@ -46,27 +53,48 @@ def _as_bytes(value: Any) -> bytes:
     return bytes(value) if value else b''
 
 
-def _children_of_prefix(
-    lhs: str, lhs_params: Sequence[Any], prefix: bytes
-) -> tuple[str, list[Any]]:
-    """Portable SQL selecting the direct children of the constant ``prefix``.
+def _binds_empty_as_null(connection: BaseDatabaseWrapper, value: bytes) -> bool:
+    # Oracle stores a zero-length `RAW` as NULL, so an empty-path bound (the
+    # virtual root above all roots) can't drive a `>`/`>=`/`<` comparison there --
+    # it would bind as NULL and match nothing. Such a bound always means "no
+    # bound" (every stored path is non-empty), so callers drop it on Oracle.
+    return connection.vendor == 'oracle' and not value
 
-    The descendant range of ``prefix``, restricted to rows whose only delimiter
-    past it is their own trailing one (so deeper descendants drop out) -- using
-    only byte-correct ``length``/``substr``/``instr`` (SQLite, MySQL). For the
-    empty prefix (the virtual root) the upper bound is dropped, selecting every
-    root.
+
+def _children_of_prefix(
+    lhs: str,
+    lhs_params: Sequence[Any],
+    prefix: bytes,
+    connection: BaseDatabaseWrapper,
+) -> tuple[str, list[Any]]:
+    """SQL selecting the direct children of the constant ``prefix``.
+
+    The descendant range of ``prefix``, restricted to rows one level below it (so
+    deeper descendants drop out). On SQLite/MySQL this uses byte-correct
+    ``length``/``substr``/``instr``; on Oracle it uses the installed ``tree_level``
+    helper against a Python-precomputed target depth. For the empty prefix (the
+    virtual root) the upper bound is dropped, selecting every root.
     """
     upper = tree_upper(prefix)
     n = len(prefix)
-    sql = '%s > %%s' % lhs
-    params: list[Any] = [*lhs_params, prefix]
+    clauses: list[str] = []
+    params: list[Any] = []
+    # The empty virtual-root prefix binds as NULL on Oracle (see
+    # `_binds_empty_as_null`); `> ''` matches every row anyway, so drop it there.
+    if not _binds_empty_as_null(connection, prefix):
+        clauses.append('%s > %%s' % lhs)
+        params += [*lhs_params, prefix]
     if upper is not None:
-        sql += ' AND %s < %%s' % lhs
+        clauses.append('%s < %%s' % lhs)
         params += [*lhs_params, upper]
-    sql += " AND instr(substr(%s, %%s), x'00') = length(%s) - %%s" % (lhs, lhs)
-    params += [*lhs_params, n + 1, *lhs_params, n]
-    return sql, params
+    if connection.vendor == 'oracle':
+        target_level = (tree_level(prefix) or 0) + 1
+        clauses.append('tree_level(%s) = %%s' % lhs)
+        params += [*lhs_params, target_level]
+    else:
+        clauses.append("instr(substr(%s, %%s), x'00') = length(%s) - %%s" % (lhs, lhs))
+        params += [*lhs_params, n + 1, *lhs_params, n]
+    return ' AND '.join(clauses), params
 
 
 class AncestorOf(Lookup):
@@ -77,6 +105,17 @@ class AncestorOf(Lookup):
     ) -> tuple[str, list[Any]]:
         lhs, lhs_params = self.process_lhs(compiler, connection)
         rhs, rhs_params = self.process_rhs(compiler, connection)
+        if connection.vendor == 'oracle':
+            # `substr`/`length` slice the hex text of a `RAW`, not its bytes;
+            # `UTL_RAW` is the byte-correct equivalent. Works with a column RHS too
+            # (the `OuterRef` used by `QuerySet.get_descendants`). `UTL_RAW.SUBSTR`
+            # raises when the length exceeds the buffer, so cap it: a candidate
+            # longer than the target simply can't be its ancestor.
+            return (
+                '%s = UTL_RAW.SUBSTR(%s, 1, '
+                'LEAST(UTL_RAW.LENGTH(%s), UTL_RAW.LENGTH(%s)))' % (lhs, rhs, lhs, rhs),
+                [*lhs_params, *rhs_params, *lhs_params, *rhs_params],
+            )
         # `length` returns the byte count for bytea/BLOB/VARBINARY alike, so this
         # works on every backend (also with a column right-hand operand, e.g. the
         # `OuterRef` used by `QuerySet.get_descendants`).
@@ -109,6 +148,11 @@ class DescendantOf(Lookup):
             )
         path = _as_bytes(self.rhs)
         upper = tree_upper(path)
+        if _binds_empty_as_null(connection, path):
+            # Virtual root: every stored row is a (strict) descendant. The empty
+            # bound binds as NULL on Oracle, so express the unbounded range as a
+            # plain non-NULL test instead of `>= ''`.
+            return '%s IS NOT NULL' % lhs, [*lhs_params]
         if upper is None:
             return '%s %s %%s' % (lhs, operator), [*lhs_params, path]
         return (
@@ -153,7 +197,7 @@ class ChildOf(Lookup):
                 'The `child_of` lookup only supports a constant path off PostgreSQL.'
             )
         # Direct children of P are the children of the prefix P itself.
-        return _children_of_prefix(lhs, lhs_params, _as_bytes(self.rhs))
+        return _children_of_prefix(lhs, lhs_params, _as_bytes(self.rhs), connection)
 
 
 class SiblingOf(Lookup):
@@ -192,4 +236,4 @@ class SiblingOf(Lookup):
         # The siblings of P are the children of its parent prefix (P itself
         # included; the navigation API excludes self separately).
         parent_path = tree_parent_prefix(_as_bytes(self.rhs))
-        return _children_of_prefix(lhs, lhs_params, parent_path)
+        return _children_of_prefix(lhs, lhs_params, parent_path, connection)
