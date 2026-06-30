@@ -334,7 +334,13 @@ class Benchmark:
             if model is MPTTPlace:
                 qs = qs.filter(level=1)
             elif model is TreePlace:
-                qs = qs.filter(path__level=2)
+                # `path__level` is a PostgreSQL-only filter; off PostgreSQL a
+                # level-2 node is equivalently a child of a root (its parent has
+                # no parent). Untimed selection, so this does not affect results.
+                if connections[self.current_db_alias].vendor == 'postgresql':
+                    qs = qs.filter(path__level=2)
+                else:
+                    qs = qs.filter(parent__isnull=False, parent__parent__isnull=True)
             elif model in (TreebeardALPlace, TreeQueriesPlace):
                 qs = qs.filter(parent__isnull=False, parent__parent__isnull=True)
             elif model is TreeNodePlace:
@@ -427,11 +433,23 @@ class Benchmark:
         )
 
     def force_update_db_stats_and_indexes(self, model: Type[Model]):
-        with connections[self.current_db_alias].cursor() as cursor:
-            # This makes sure the table statistics and disk usage are optimised.
-            # VACUUM FULL rewrites the table into a fresh file and rebuilds every
-            # index as part of that rewrite, so a separate REINDEX is redundant.
-            cursor.execute('VACUUM FULL ANALYZE "%s";' % model._meta.db_table)
+        connection = connections[self.current_db_alias]
+        table = model._meta.db_table
+        with connection.cursor() as cursor:
+            # Make sure the table statistics and disk usage are optimised before
+            # measuring, so every checkpoint is taken on a freshly compacted table.
+            if connection.vendor == 'postgresql':
+                # VACUUM FULL rewrites the table into a fresh file and rebuilds
+                # every index as part of that rewrite, so a separate REINDEX is
+                # redundant.
+                cursor.execute('VACUUM FULL ANALYZE "%s";' % table)
+            elif connection.vendor == 'mysql':
+                # OPTIMIZE rebuilds the InnoDB table and refreshes its statistics.
+                cursor.execute('OPTIMIZE TABLE `%s`;' % table)
+            else:
+                # SQLite cannot VACUUM a single table (it is whole-database and
+                # cannot run inside a transaction), so just refresh statistics.
+                cursor.execute('ANALYZE "%s";' % table)
 
     def run(self):
         self.create_databases()
@@ -656,11 +674,26 @@ class BenchmarkWriteTest(BenchmarkTest):
 @Benchmark.register_test('Table disk usage (including indexes)', y_label=DISK_USAGE)
 class TestDiskUsage(BenchmarkTest):
     def run(self):
-        with connections[self.benchmark.current_db_alias].cursor() as cursor:
-            cursor.execute(
-                "SELECT pg_total_relation_size('%s');" % self.model._meta.db_table
-            )
-            return cursor.fetchone()[0]
+        connection = connections[self.benchmark.current_db_alias]
+        table = self.model._meta.db_table
+        with connection.cursor() as cursor:
+            if connection.vendor == 'postgresql':
+                cursor.execute("SELECT pg_total_relation_size('%s');" % table)
+                return cursor.fetchone()[0]
+            if connection.vendor == 'mysql':
+                cursor.execute(
+                    'SELECT data_length + index_length '
+                    'FROM information_schema.tables '
+                    'WHERE table_schema = DATABASE() AND table_name = %s;',
+                    [table],
+                )
+                return cursor.fetchone()[0]
+            # SQLite: whole-database page bytes. In --run-django-tree-only mode
+            # only this table holds data, so the file size reflects it.
+            cursor.execute('PRAGMA page_count;')
+            pages = cursor.fetchone()[0]
+            cursor.execute('PRAGMA page_size;')
+            return pages * cursor.fetchone()[0]
 
 
 class GetRootMixin:
