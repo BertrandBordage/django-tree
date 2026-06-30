@@ -48,6 +48,7 @@ computed in Python on the ORM save cycle (`save()`, `delete()`,
 | **Drop-in (no model/manager subclassing)** | ✅ add one field | ❌ subclass `MP_Node` | ❌ subclass `NS_Node` | ❌ subclass `AL_Node` | ❌ subclass `MPTTModel` | ❌ subclass `TreeNode` | ❌ subclass `TreeNodeModel` |
 | **Build & move with plain `parent` + `save()`** | ✅ | ❌ API | ❌ API | ❌ API | ✅ | ✅ | ✅ |
 | **Several independent trees per model** | ✅ multiple `PathField`s | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy | ❌ one hierarchy |
+| **Maximum number of root nodes** | 🟢 unlimited | 🟠 1.7 M | 🟢 2.1 B | 🟢 unlimited | 🟢 2.1 B | 🟢 unlimited | 🟢 2.1 B |
 | **Tree kept correct by the database** | ✅ PostgreSQL: SQL trigger<br>❌ SQLite, MySQL, Oracle: in Python | ❌ in Python | ❌ in Python | ❌ in Python | ❌ in Python | ✅ FK only, nothing denormalized | ❌ in Python + cache |
 | **Survives bulk writes / `update()` / raw SQL** | ✅ PostgreSQL<br>🟡 SQLite, MySQL, Oracle: bulk/`update()` yes, raw SQL no | ❌ Python API only | ❌ Python API only | ❌ Python API only | ❌ | ✅ | ❌ manual resync |
 | **Tree filters as composable ORM lookups** | ✅ `__descendant_of`, `__child_of` | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 manager methods | 🟡 `with_tree_fields()` | 🟡 cached properties |
@@ -56,6 +57,12 @@ computed in Python on the ORM save cycle (`save()`, `delete()`,
 | **Production-ready** | ✅ | ✅ | ✅ | ✅ | 🟡 works, unmaintained | ✅ | ✅ |
 
 ✅ yes / good · 🟡 partial or depends on the variant · ❌ no / poor.
+
+**Maximum number of root nodes** counts how many siblings a single level can
+hold before the encoding runs out (django-tree uses fractional indexing, so it
+never does; the `tree_id`-based ones cap at a `PositiveIntegerField`, ≈2.1 B;
+treebeard MP caps at `alphabet`<sup>`steplen`</sup> = 36⁴): 🟢 over 100 M · 🟠
+over 1 M · 🔴 otherwise.
 
 ### Performance
 
@@ -66,12 +73,12 @@ measurement; below it, the rank in that row (`#n`) and a marker.
 
 | | django-tree | treebeard MP | treebeard NS | treebeard AL | django-mptt | django-tree-queries | django-treenode |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| **Reads · best** | 83 µs<br>🟢 #7 | 0.5 µs<br>🟢 #1 👑 | 0.7 µs<br>🟢 #3 | 10 µs<br>🟢 #5 | 1.7 µs<br>🟢 #4 | 75 µs<br>🟢 #6 | 0.5 µs<br>🟢 #1 👑 |
-| **Reads · typical** | 410 µs<br>🟢 #3 | 250 µs<br>🟢 #1 👑 | 393 µs<br>🟢 #3 | 1.6 ms<br>🟢 #6 | 300 µs<br>🟢 #2 | 1.1 ms<br>🟢 #5 | 1.9 ms<br>🟢 #7 |
-| **Reads · worst** | 62 ms<br>🟠 #1 👑 | 344 ms<br>🔴 #3 | 518 ms<br>🔴 #4 | 853 ms<br>🔴 #6 | 118 ms<br>🔴 #2 | 627 ms<br>🔴 #5 | 5 min<br>💩 #7 |
-| **Writes · best** | 223 µs<br>🟢 #4 | 235 µs<br>🟢 #5 | 205 µs<br>🟢 #3 | 193 µs<br>🟢 #2 | 307 µs<br>🟢 #6 | 183 µs<br>🟢 #1 👑 | 390 ms<br>🔴 #7 |
-| **Writes · typical** | 2.2 ms<br>🟢 #3 | 5.7 ms<br>🟠 #4 | 6.1 ms<br>🟠 #5 | 969 µs<br>🟢 #1 👑 | 13 ms<br>🟠 #6 | 1.0 ms<br>🟢 #2 | 837 ms<br>🔴 #7 |
-| **Writes · worst** | 2.1 s<br>💩 #3 | 9.0 s<br>💩 #4 | 21.8 s<br>💩 #6 | 926 ms<br>🔴 #2 | 19.0 s<br>💩 #5 | 829 ms<br>🔴 #1 👑 | 25 min<br>💩 #7 |
+| **Reads · best** | 77 µs<br>🟢 #6 | 0.5 µs<br>🟢 #1 👑 | 0.7 µs<br>🟢 #3 | 10 µs<br>🟢 #5 | 1.7 µs<br>🟢 #4 | 75 µs<br>🟢 #6 | 0.5 µs<br>🟢 #1 👑 |
+| **Reads · typical** | 511 µs<br>🟢 #4 | 250 µs<br>🟢 #1 👑 | 393 µs<br>🟢 #3 | 1.6 ms<br>🟢 #6 | 300 µs<br>🟢 #2 | 1.1 ms<br>🟢 #5 | 1.9 ms<br>🟢 #7 |
+| **Reads · worst** | 72 ms<br>🟠 #1 👑 | 344 ms<br>🔴 #3 | 518 ms<br>🔴 #4 | 853 ms<br>🔴 #6 | 118 ms<br>🔴 #2 | 627 ms<br>🔴 #5 | 5 min<br>💩 #7 |
+| **Writes · best** | 441 µs<br>🟢 #6 | 235 µs<br>🟢 #4 | 205 µs<br>🟢 #3 | 193 µs<br>🟢 #2 | 307 µs<br>🟢 #5 | 183 µs<br>🟢 #1 👑 | 390 ms<br>🔴 #7 |
+| **Writes · typical** | 2.8 ms<br>🟢 #3 | 5.7 ms<br>🟠 #4 | 6.1 ms<br>🟠 #5 | 969 µs<br>🟢 #1 👑 | 13 ms<br>🟠 #6 | 1.0 ms<br>🟢 #2 | 837 ms<br>🔴 #7 |
+| **Writes · worst** | 2.4 s<br>💩 #3 | 9.0 s<br>💩 #4 | 21.8 s<br>💩 #6 | 926 ms<br>🔴 #2 | 19.0 s<br>💩 #5 | 829 ms<br>🔴 #1 👑 | 25 min<br>💩 #7 |
 | **Storage** | 0.91 MB<br>🟢 #5 | 0.97 MB<br>🟢 #6 | 0.79 MB<br>🟢 #3 | 0.57 MB<br>🟢 #1 👑 | 0.85 MB<br>🟢 #4 | 0.57 MB<br>🟢 #1 👑 | 0.98 MB<br>🟢 #6 |
 
 Two results within 5 % share a rank. Markers use the same thresholds for reads
