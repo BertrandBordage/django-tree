@@ -19,7 +19,13 @@ from typing import TYPE_CHECKING, Any, cast
 from django.db import DEFAULT_DB_ALIAS, ProgrammingError
 from django.db.models import F, Field, Q
 
-from .sql.helpers import DELIMITER, seg_width, tree_int_to_seg, tree_mid
+from .sql.helpers import (
+    DELIMITER,
+    seg_width,
+    tree_int_to_seg,
+    tree_mid,
+    tree_parent_prefix,
+)
 
 if TYPE_CHECKING:
     from django.db.models import Model
@@ -113,55 +119,33 @@ class PathMaintainer:
         return tuple(getattr(instance, column) for column in self.columns)
 
     def capture_old(self, instance: 'Model') -> None:
-        """Stash the row's pre-save path/parent/order values on the instance.
+        """Stash the row's pre-save path on the instance.
 
-        Reads the current DB row so :meth:`on_save` has the trigger's ``OLD.*``.
-        For an insert (no row yet, even when the pk is client-generated) nothing
-        is stashed.
+        Reads the current DB row so :meth:`on_save` has the trigger's ``OLD`` path
+        (the old parent and depth are recovered from it). For an insert (no row
+        yet, even when the pk is client-generated) nothing is stashed.
         """
         if instance.pk is None:
             return
-        columns = self._select_columns()
-        row = self._base.filter(pk=instance.pk).values(*columns).first()
+        row = self._base.filter(pk=instance.pk).values(self.path_attname).first()
         if row is None:
             return
-        store = instance.__dict__.setdefault('_tree_old', {})
-        store[self.path_attname] = (
-            _to_bytes(row[self.path_attname]),
-            row[self.parent_attname],
-            tuple(row[column] for column in self.columns),
+        instance.__dict__.setdefault('_tree_old', {})[self.path_attname] = _to_bytes(
+            row[self.path_attname]
         )
 
-    def capture_old_many(
-        self, pks: list[Any]
-    ) -> dict[Any, tuple[bytes | None, Any, tuple[Any, ...]]]:
-        """Pre-write path/parent/order values for a set of rows, in one query.
+    def capture_old_many(self, pks: list[Any]) -> dict[Any, bytes | None]:
+        """Pre-write path of a set of rows, in one query.
 
         Lets a bulk ``update()`` replay :meth:`on_save` per affected row with the
-        right ``OLD.*`` -- a targeted move that leaves every other path untouched,
-        like the PostgreSQL trigger (a full :meth:`rebuild` would renumber the
-        whole tree and invalidate paths the caller still holds).
+        right ``OLD`` path -- a targeted move that leaves every other path
+        untouched, like the PostgreSQL trigger (a full :meth:`rebuild` would
+        renumber the whole tree and invalidate paths the caller still holds).
         """
-        rows = self._base.filter(pk__in=pks).values(*self._select_columns())
-        return {
-            row[self.pk_attname]: (
-                _to_bytes(row[self.path_attname]),
-                row[self.parent_attname],
-                tuple(row[column] for column in self.columns),
-            )
-            for row in rows
-        }
+        rows = self._base.filter(pk__in=pks).values(self.pk_attname, self.path_attname)
+        return {row[self.pk_attname]: _to_bytes(row[self.path_attname]) for row in rows}
 
-    def _select_columns(self) -> list[str]:
-        columns = [self.path_attname, self.parent_attname]
-        for column in self.columns:
-            if column not in columns:
-                columns.append(column)
-        return columns
-
-    def _old_state(
-        self, instance: 'Model'
-    ) -> tuple[bytes | None, Any, tuple[Any, ...]] | None:
+    def _old_path(self, instance: 'Model') -> bytes | None:
         return instance.__dict__.get('_tree_old', {}).get(self.path_attname)
 
     def _parent_path(self, parent_id: Any) -> bytes:
@@ -223,16 +207,7 @@ class PathMaintainer:
         parent_id = getattr(instance, self.parent_attname)
         new_parent_path = self._parent_path(parent_id)
         parent_len = len(new_parent_path)
-        old = self._old_state(instance)
-
-        if not created and old is not None:
-            old_path, old_parent_id, old_values = old
-            if (
-                old_path is not None
-                and old_parent_id == parent_id
-                and old_values == self._order_values(instance)
-            ):
-                return  # nothing the path depends on changed
+        old_path = None if created else self._old_path(instance)
 
         prev_seg = self._nearest_sibling_segment(
             parent_id, instance, parent_len, greater=False
@@ -241,18 +216,18 @@ class PathMaintainer:
             parent_id, instance, parent_len, greater=True
         )
 
-        if not created and old is not None:
-            old_path, old_parent_id, _ = old
-            if old_path is not None and old_parent_id == parent_id:
-                old_seg = old_path[parent_len:-1]
-                # Keep the current path when it is still between the neighbours,
-                # even if not exactly in the middle (avoids needless rewrites).
-                if (prev_seg is None or old_seg > prev_seg) and (
-                    next_seg is None or old_seg < next_seg
-                ):
-                    return
+        # The parent the row used to hang from is encoded in its old path's prefix,
+        # so an unchanged parent means that prefix still equals the new one.
+        if old_path is not None and tree_parent_prefix(old_path) == new_parent_path:
+            old_seg = old_path[parent_len:-1]
+            # Keep the current path when it is still between the neighbours, even if
+            # not exactly in the middle (avoids needless rewrites, and leaves an
+            # untouched row's path identical).
+            if (prev_seg is None or old_seg > prev_seg) and (
+                next_seg is None or old_seg < next_seg
+            ):
+                return
 
-        old_path = old[0] if old is not None else None
         if old_path and new_parent_path.startswith(old_path):
             # Same error the PL/pgSQL trigger raises, for cross-backend parity.
             raise ProgrammingError('Cannot set itself or a descendant as parent.')

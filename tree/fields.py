@@ -7,7 +7,7 @@ from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.db.models import BinaryField, Field, F, Index, Model
 from django.utils.translation import gettext_lazy as _
 
-from . import sql
+from .sql import is_trigger_backend
 from .types import Path
 
 
@@ -163,15 +163,36 @@ class PathField(BinaryField):
 
     def rebuild(self, db_alias: str = DEFAULT_DB_ALIAS) -> None:
         self._check_database_backend(db_alias)
-        sql.rebuild(self, db_alias=db_alias)
+        if is_trigger_backend(db_alias):
+            from .sql import postgresql
+
+            postgresql.rebuild(
+                self.model._meta.db_table, self.attname, db_alias=db_alias
+            )
+        else:
+            from .maintenance import PathMaintainer
+
+            PathMaintainer(self, db_alias).rebuild()
 
     def disable_trigger(self, db_alias: str = DEFAULT_DB_ALIAS) -> None:
-        self._check_database_backend(db_alias)
-        sql.disable_trigger(self, db_alias=db_alias)
+        self._set_trigger_enabled(db_alias, False)
 
     def enable_trigger(self, db_alias: str = DEFAULT_DB_ALIAS) -> None:
+        self._set_trigger_enabled(db_alias, True)
+
+    def _set_trigger_enabled(self, db_alias: str, enabled: bool) -> None:
         self._check_database_backend(db_alias)
-        sql.enable_trigger(self, db_alias=db_alias)
+        if is_trigger_backend(db_alias):
+            from .sql import postgresql
+
+            toggle = (
+                postgresql.enable_trigger if enabled else postgresql.disable_trigger
+            )
+            toggle(self.model._meta.db_table, self.attname, db_alias=db_alias)
+        else:
+            from .maintenance import set_trigger_disabled
+
+            set_trigger_disabled(self, db_alias, not enabled)
 
     @contextmanager
     @transaction.atomic
