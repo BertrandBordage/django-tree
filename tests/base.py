@@ -2861,28 +2861,56 @@ class PathFieldTest(CommonTest):
         for row in rows:
             self.assertEqual(set(row['fields']), {'name', 'parent'})
 
-    def test_deserialized_object_gets_its_path_from_the_database(self):
+    # The three tests below assert the tree's shape, not literal path values, so
+    # they hold however the path gets filled in: rebuilt, restored or computed.
+
+    def test_saving_a_deserialized_object_without_a_path(self):
+        # As when a snapshot is restored over the live row: the object comes
+        # back with no path, and saving it must leave the tree intact.
+        self.create_all_test_places()
+        for name in ('France', 'Poitiers'):
+            with self.subTest(name):
+                place = Place.objects.get(name=name)
+                [restored] = serializers.deserialize(
+                    'json', serializers.serialize('json', [place])
+                )
+                self.assertIsNone(restored.object.path.value)
+                restored.save()
+                self.assertPlaces(self.correct_places_data)
+
+    def test_deserialized_new_object_gets_a_path(self):
+        # No stored value can be kept for a new row, so the path must be computed.
         self.create_all_test_places()
         france = Place.objects.get(name='France')
-        order = list(Place.objects.values_list('name', flat=True))
-        data = serializers.serialize('json', [france])
+        data = json.loads(serializers.serialize('json', [france]))
+        data[0]['pk'] = france.pk + 10000
+        data[0]['fields'].update(name='Alsace', parent=france.pk)
+        [alsace] = serializers.deserialize('json', json.dumps(data))
+        alsace.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Alsace'),
+                (path(0, 1), 'Normandie'),
+                (path(0, 1, 0), 'Eure'),
+                (path(0, 1, 1), 'Manche'),
+                (path(0, 1, 2), 'Seine-Maritime'),
+                (path(0, 2), 'Poitou-Charentes'),
+                (path(0, 2, 0), 'Vienne'),
+                (path(0, 2, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
 
-        # An existing object rebuilt without a path is saved with a NULL path,
-        # which the database fills in again by rebuilding the tree. The values
-        # may be renumbered, but the tree keeps its order.
-        [restored] = serializers.deserialize('json', data)
-        self.assertIsNone(restored.object.path.value)
-        restored.save()
-        self.assertIsNotNone(Place.objects.get(name='France').path.value)
-        self.assertEqual(list(Place.objects.values_list('name', flat=True)), order)
-
-        # A new object is given a path on insert.
-        row = json.loads(data)
-        row[0]['pk'] = france.pk + 10000
-        row[0]['fields']['name'] = 'Spain'
-        [copy] = serializers.deserialize('json', json.dumps(row))
-        copy.save()
-        self.assertIsNotNone(Place.objects.get(name='Spain').path.value)
+    def test_deleted_leaf_loaded_back_gets_its_path(self):
+        # What `loaddata` does into a table that lacks the row.
+        self.create_all_test_places()
+        poitiers = Place.objects.get(name='Poitiers')
+        data = serializers.serialize('json', [poitiers])
+        poitiers.delete()
+        for restored in serializers.deserialize('json', data):
+            restored.save()
+        self.assertPlaces(self.correct_places_data)
 
     def test_unsupported_backend_raises(self):
         field = Place._meta.get_field('path')
