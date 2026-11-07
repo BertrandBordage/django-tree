@@ -226,6 +226,15 @@ class PathMaintainer:
             if (prev_seg is None or old_seg > prev_seg) and (
                 next_seg is None or old_seg < next_seg
             ):
+                # An instance rebuilt from a snapshot or a fixture has no path,
+                # as `PathField` is not serialized, so Django just saved it as
+                # NULL. PostgreSQL's trigger fills that in again; do the same.
+                if (
+                    self.path_attname in instance.__dict__
+                    and _to_bytes(instance.__dict__[self.path_attname]) is None
+                ):
+                    self._write(instance.pk, old_path)
+                    instance.__dict__[self.path_attname] = old_path
                 return
 
         if old_path and new_parent_path.startswith(old_path):

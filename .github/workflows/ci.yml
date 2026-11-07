@@ -32,11 +32,13 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Ruff 0.16 widened its default rules, which the current code does not
+      # follow yet. Stay below it until the code is migrated.
       - name: Ruff lint
-        run: uvx ruff check .
+        run: uvx --from 'ruff<0.16' ruff check .
 
       - name: Ruff format
-        run: uvx ruff format --check .
+        run: uvx --from 'ruff<0.16' ruff format --check .
 
       - name: Mypy
         run: uv run python -m mypy

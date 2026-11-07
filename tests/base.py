@@ -10,6 +10,7 @@ from importlib import import_module
 from unittest import mock, skipIf, skipUnless
 
 from django.apps import apps
+from django.core import serializers
 from django.core.exceptions import (
     FieldDoesNotExist,
     ImproperlyConfigured,
@@ -2838,6 +2839,78 @@ class PathFieldTest(CommonTest):
     def test_value_to_string_unsaved(self):
         field = Place._meta.get_field('path')
         self.assertIsNone(field.value_to_string(Place(name='unsaved')))
+
+    def test_deconstruct_omits_serialize(self):
+        # Keeps `serialize=False` out of consumers' migrations.
+        field = PathField(order_by=['name'])
+        self.assertFalse(field.serialize)
+        self.assertNotIn('serialize', field.deconstruct()[3])
+
+    def test_serialize_can_be_enabled(self):
+        field = PathField(serialize=True)
+        self.assertTrue(field.serialize)
+        self.assertIs(field.deconstruct()[3]['serialize'], True)
+
+    def test_not_serialized(self):
+        # The database computes the path and rewrites it on save, so a
+        # snapshot or a dump (django-reversion, Wagtail revisions, `dumpdata`)
+        # must not carry it.
+        self.create_all_test_places()
+        rows = json.loads(serializers.serialize('json', Place.objects.all()))
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(set(row['fields']), {'name', 'parent'})
+
+    # The three tests below assert the tree's shape, not literal path values, so
+    # they hold however the path gets filled in: rebuilt, restored or computed.
+
+    def test_saving_a_deserialized_object_without_a_path(self):
+        # As when a snapshot is restored over the live row: the object comes
+        # back with no path, and saving it must leave the tree intact.
+        self.create_all_test_places()
+        for name in ('France', 'Poitiers'):
+            with self.subTest(name):
+                place = Place.objects.get(name=name)
+                [restored] = serializers.deserialize(
+                    'json', serializers.serialize('json', [place])
+                )
+                self.assertIsNone(restored.object.path.value)
+                restored.save()
+                self.assertPlaces(self.correct_places_data)
+
+    def test_deserialized_new_object_gets_a_path(self):
+        # No stored value can be kept for a new row, so the path must be computed.
+        self.create_all_test_places()
+        france = Place.objects.get(name='France')
+        data = json.loads(serializers.serialize('json', [france]))
+        data[0]['pk'] = france.pk + 10000
+        data[0]['fields'].update(name='Alsace', parent=france.pk)
+        [alsace] = serializers.deserialize('json', json.dumps(data))
+        alsace.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Alsace'),
+                (path(0, 1), 'Normandie'),
+                (path(0, 1, 0), 'Eure'),
+                (path(0, 1, 1), 'Manche'),
+                (path(0, 1, 2), 'Seine-Maritime'),
+                (path(0, 2), 'Poitou-Charentes'),
+                (path(0, 2, 0), 'Vienne'),
+                (path(0, 2, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+
+    def test_deleted_leaf_loaded_back_gets_its_path(self):
+        # What `loaddata` does into a table that lacks the row.
+        self.create_all_test_places()
+        poitiers = Place.objects.get(name='Poitiers')
+        data = serializers.serialize('json', [poitiers])
+        poitiers.delete()
+        for restored in serializers.deserialize('json', data):
+            restored.save()
+        self.assertPlaces(self.correct_places_data)
 
     def test_unsupported_backend_raises(self):
         field = Place._meta.get_field('path')

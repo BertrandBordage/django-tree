@@ -95,6 +95,10 @@ class PathField(BinaryField):
 
         kwargs['default'] = lambda: Path(self, None)
         kwargs.setdefault('editable', False)
+        # The database computes the path and rewrites it on every save, so a
+        # snapshot or a dump has no use for it: restoring a stored value could
+        # only be overwritten, or be stale.
+        kwargs.setdefault('serialize', False)
         kwargs['null'] = True
 
         self.order_by: list[str] = list(kwargs.pop('order_by', []))
@@ -117,6 +121,11 @@ class PathField(BinaryField):
         name, path, args, kwargs = super(PathField, self).deconstruct()
         del kwargs['default']
         del kwargs['null']
+        # `serialize=False` is this field's own default (see `__init__`), so
+        # keeping it out of migrations avoids a pointless `AlterField`. Django
+        # only reports `serialize` when it is False.
+        if kwargs.pop('serialize', True):
+            kwargs['serialize'] = True
         if self.order_by:
             kwargs['order_by'] = self.order_by
         if self.parent_field_name != 'parent':
