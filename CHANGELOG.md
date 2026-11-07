@@ -1,3 +1,15 @@
+# Unreleased
+
+`PathField` is no longer serialized. The database computes the path and rewrites
+it on every save, so snapshots (django-reversion, Wagtail revisions) and dumps
+(`dumpdata`) have no use for it. Before, the string written by
+`value_to_string()` could not be read back by `to_python()` when a snapshot was
+loaded. No migration changes.
+
+An instance rebuilt without a path is saved with a NULL path. PostgreSQL's
+trigger fills it in again, and the other backends now restore it too instead of
+leaving it NULL.
+
 # 1.0.1 (2026-07-01)
 
 Fixes `PathField.value_to_string()` for serializers like django-reversion.

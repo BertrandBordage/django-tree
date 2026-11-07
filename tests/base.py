@@ -10,6 +10,7 @@ from importlib import import_module
 from unittest import mock, skipIf, skipUnless
 
 from django.apps import apps
+from django.core import serializers
 from django.core.exceptions import (
     FieldDoesNotExist,
     ImproperlyConfigured,
@@ -2838,6 +2839,50 @@ class PathFieldTest(CommonTest):
     def test_value_to_string_unsaved(self):
         field = Place._meta.get_field('path')
         self.assertIsNone(field.value_to_string(Place(name='unsaved')))
+
+    def test_deconstruct_omits_serialize(self):
+        # Keeps `serialize=False` out of consumers' migrations.
+        field = PathField(order_by=['name'])
+        self.assertFalse(field.serialize)
+        self.assertNotIn('serialize', field.deconstruct()[3])
+
+    def test_serialize_can_be_enabled(self):
+        field = PathField(serialize=True)
+        self.assertTrue(field.serialize)
+        self.assertIs(field.deconstruct()[3]['serialize'], True)
+
+    def test_not_serialized(self):
+        # The database computes the path and rewrites it on save, so a
+        # snapshot or a dump (django-reversion, Wagtail revisions, `dumpdata`)
+        # must not carry it.
+        self.create_all_test_places()
+        rows = json.loads(serializers.serialize('json', Place.objects.all()))
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(set(row['fields']), {'name', 'parent'})
+
+    def test_deserialized_object_gets_its_path_from_the_database(self):
+        self.create_all_test_places()
+        france = Place.objects.get(name='France')
+        order = list(Place.objects.values_list('name', flat=True))
+        data = serializers.serialize('json', [france])
+
+        # An existing object rebuilt without a path is saved with a NULL path,
+        # which the database fills in again by rebuilding the tree. The values
+        # may be renumbered, but the tree keeps its order.
+        [restored] = serializers.deserialize('json', data)
+        self.assertIsNone(restored.object.path.value)
+        restored.save()
+        self.assertIsNotNone(Place.objects.get(name='France').path.value)
+        self.assertEqual(list(Place.objects.values_list('name', flat=True)), order)
+
+        # A new object is given a path on insert.
+        row = json.loads(data)
+        row[0]['pk'] = france.pk + 10000
+        row[0]['fields']['name'] = 'Spain'
+        [copy] = serializers.deserialize('json', json.dumps(row))
+        copy.save()
+        self.assertIsNotNone(Place.objects.get(name='Spain').path.value)
 
     def test_unsupported_backend_raises(self):
         field = Place._meta.get_field('path')
