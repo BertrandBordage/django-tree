@@ -1,4 +1,4 @@
-# Unreleased
+# 1.0.2 (2026-11-08)
 
 `PathField` is no longer serialized. The database computes the path and rewrites
 it on every save, so snapshots (django-reversion, Wagtail revisions) and dumps
