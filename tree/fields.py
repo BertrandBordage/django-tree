@@ -134,7 +134,7 @@ class PathField(BinaryField):
 
     def from_db_value(
         self,
-        value: 'bytes | memoryview | Path | None',
+        value: 'bytes | memoryview | str | Path | None',
         expression: Any,
         connection: Any,
     ) -> Path:
@@ -146,6 +146,11 @@ class PathField(BinaryField):
         # `startswith`-ed -- all things `Path` relies on -- so coerce to `bytes`.
         # Oracle can't store an empty `RAW` and reads a NULL one back as `b''`
         # (Django's `convert_empty_bytes`), so treat empty as "no path".
+        if isinstance(value, str):
+            # Oracle hands a `RAW` column back as hex text from `UPDATE ...
+            # RETURNING`, which Django 6.0 runs to refresh the `F('path')` that
+            # `pre_save()` returns for an unset path.
+            value = bytes.fromhex(value)
         value = bytes(value) if value else None
         return Path(self, value)
 

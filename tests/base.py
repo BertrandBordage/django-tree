@@ -2902,6 +2902,18 @@ class PathFieldTest(CommonTest):
             ]
         )
 
+    def test_from_db_value_accepts_hex_text(self):
+        # Oracle returns a RAW column as hex text from `UPDATE ... RETURNING`,
+        # which Django 6.0 uses to refresh the `F('path')` that `pre_save()` gives.
+        field = Place._meta.get_field('path')
+        self.assertEqual(
+            field.from_db_value('0200', None, connection).value, b'\x02\x00'
+        )
+        self.assertEqual(
+            field.from_db_value('ab0c', None, connection).value, b'\xab\x0c'
+        )
+        self.assertIsNone(field.from_db_value('', None, connection).value)
+
     def test_pre_save_keeps_the_stored_path_of_an_unset_one(self):
         field = Place._meta.get_field('path')
         unset = Place(name='unset')
