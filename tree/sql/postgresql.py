@@ -286,19 +286,14 @@ def get_update_paths_function_creation(
             parent_len integer;
         BEGIN
             IF TG_OP = 'UPDATE' THEN
-                -- The empty path is the explicit request sent by the rebuild
-                -- function: renumber the whole tree.
+                -- Full rebuild, as requested by the rebuild function.
                 IF NEW.{path} = ''::bytea THEN
                     {rebuild};
                     RETURN NEW;
                 END IF;
 
-                -- A NULL path only says that the path is unknown (an instance
-                -- rebuilt without it, say). Keep the stored one when the row and
-                -- its parent both have a path: the checks below then recompute it
-                -- for this row alone if its parent or ordering columns changed.
-                -- Without a path to keep, as in a tree whose paths were never
-                -- built, fall back to the full rebuild.
+                -- NULL means "unknown": keep the stored path when the row and its
+                -- parent have one, else fall back to the full rebuild.
                 IF NEW.{path} IS NULL THEN
                     IF OLD.{path} IS NOT NULL AND (
                         NEW.{parent} IS NULL
@@ -373,9 +368,8 @@ def get_update_paths_function_creation(
     )
 
 
-# Asks the trigger for a full rebuild by giving one root an empty path, which no real
-# path is (a path always holds a segment and its delimiter). NULL cannot be the
-# request: it only means that a row's path is unknown.
+# An empty path, which no real path is, asks for a full rebuild. NULL cannot: it
+# means "unknown".
 CREATE_REBUILD_FUNCTION_QUERY = """
     CREATE OR REPLACE FUNCTION {rebuild_function}() RETURNS void AS $$
     BEGIN

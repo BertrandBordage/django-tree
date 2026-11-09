@@ -150,14 +150,6 @@ class DeleteTreeTrigger(CreateTreeTrigger):
 
 
 class UpdateTreeTrigger(CreateTreeTrigger):
-    """
-    Replaces the functions of an existing trigger with those of the installed
-    django-tree, for when a release changes the SQL. The trigger and the unique
-    constraint stay in place, and no path is touched.
-
-    Reversing it does nothing: the previous function bodies are not kept.
-    """
-
     def database_forwards(
         self,
         app_label: str,
@@ -190,6 +182,7 @@ class UpdateTreeTrigger(CreateTreeTrigger):
         from_state: ProjectState,
         to_state: ProjectState,
     ) -> None:
+        # The previous functions are not kept, so there is nothing to restore.
         self.check_database_backend(schema_editor)
 
     def describe(self) -> str:

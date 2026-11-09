@@ -2907,12 +2907,6 @@ class PathFieldTest(CommonTest):
             ]
         )
 
-    # NULL on an UPDATE says that the path is unknown. The trigger keeps the stored
-    # one when the row and its parent have a path, recomputes it for this row alone
-    # when its parent or ordering columns changed, and rebuilds the whole tree only
-    # when there is nothing to keep. The tests below are PostgreSQL-only, as the
-    # other backends maintain the path in Python.
-
     def paths(self):
         return {p.pk: p.path.value for p in Place.objects.all()}
 
@@ -2927,7 +2921,6 @@ class PathFieldTest(CommonTest):
 
     @requires_db_trigger
     def test_null_path_on_every_row_keeps_every_path(self):
-        # With the trigger on, each row keeps its path in turn, parents first or not.
         self.create_all_test_places()
         before = self.paths()
         Place.objects.update(path=None)
@@ -3015,7 +3008,6 @@ class PathFieldTest(CommonTest):
 
     @requires_db_trigger
     def test_null_path_in_an_unbuilt_tree_rebuilds_it(self):
-        # Nothing to keep: fall back to the full rebuild.
         self.create_all_test_places()
         with Place.disabled_tree_trigger():
             Place.objects.update(path=None)
@@ -3024,7 +3016,6 @@ class PathFieldTest(CommonTest):
 
     @requires_db_trigger
     def test_null_path_on_a_row_that_never_had_one_rebuilds_the_tree(self):
-        # The parent has a path but this row had none: still nothing to keep.
         self.create_all_test_places()
         with Place.disabled_tree_trigger():
             Place.objects.filter(name='Manche').update(path=None)
@@ -3041,7 +3032,6 @@ class PathFieldTest(CommonTest):
 
     @requires_db_trigger
     def test_empty_path_asks_for_a_rebuild_from_any_row(self):
-        # The request that `rebuild_paths()` sends, here from a row that is not a root.
         self.create_all_test_places()
         with Place.disabled_tree_trigger():
             Place.objects.filter(name='Manche').update(path=None)
@@ -3164,7 +3154,6 @@ class OperationsTest(TransactionTestCase):
             )
 
     def test_update_trigger_runs_on_every_backend(self):
-        # A no-op off PostgreSQL; there, it installs the same functions again.
         state = ProjectState.from_apps(apps)
         with connection.schema_editor(atomic=True) as editor:
             UpdateTreeTrigger('tests.Place').database_forwards(
@@ -3184,7 +3173,7 @@ class OperationsTest(TransactionTestCase):
             with connection.schema_editor(atomic=True) as editor:
                 op.database_forwards('tests', editor, state, state)
 
-        # Whatever happens below, leave the table with the right functions.
+        # Restore the functions even if the test fails.
         self.addCleanup(apply)
 
         def count(cursor, sql):
@@ -3214,7 +3203,7 @@ class OperationsTest(TransactionTestCase):
             Place.rebuild_paths()
 
         apply()
-        apply()  # Replacing twice is harmless.
+        apply()  # Must be idempotent.
 
         with connection.cursor() as cursor:
             self.assertEqual(
@@ -3222,7 +3211,7 @@ class OperationsTest(TransactionTestCase):
             )
         france = Place.objects.create(name='France')
         Place.objects.create(name='Normandie', parent=france)
-        # The new rebuild function repairs a row, not only a root.
+        # The rebuild must repair a non-root row too.
         with Place.disabled_tree_trigger():
             Place.objects.filter(name='Normandie').update(path=None)
         Place.rebuild_paths()

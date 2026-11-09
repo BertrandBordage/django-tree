@@ -1439,10 +1439,8 @@ class TestSaveLeafWithoutChange(GetLeafMixin, BenchmarkWriteTest):
 #
 # Save raw
 #
-# What `loaddata` does to a row that already exists: a raw save skips `save()` and
-# so every library's own tree bookkeeping. The other implementations dump their
-# tree columns and write them back as they were; django-tree does not dump its
-# path, so the database has to compute it.
+# What `loaddata` does to an existing row. A raw save skips `save()`; django-tree
+# does not dump its path, so the database computes it.
 #
 
 
