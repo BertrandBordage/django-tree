@@ -2914,16 +2914,16 @@ class PathFieldTest(CommonTest):
         )
         self.assertIsNone(field.from_db_value('', None, connection).value)
 
-    def test_pre_save_keeps_the_stored_path_of_an_unset_one(self):
+    def test_pre_save_only_keeps_the_column_of_an_unset_path_on_update(self):
         field = Place._meta.get_field('path')
         unset = Place(name='unset')
-        # An existing row keeps its column...
-        self.assertIsInstance(field.pre_save(unset, False), F)
-        # ...while a new row is left to the database to compute.
+        given = Place(name='given', path=Path(field, b'\x02\x00'))
+        # Updating an unset path leaves the stored column alone...
+        self.assertEqual(field.pre_save(unset, False), F('path'))
+        # ...but a path that was set is still written as given...
+        self.assertEqual(field.pre_save(given, False).value, b'\x02\x00')
+        # ...and inserting an unset path sends NULL, as before.
         self.assertIsNone(field.pre_save(unset, True).value)
-        self.create_all_test_places()
-        france = Place.objects.get(name='France')
-        self.assertIs(field.pre_save(france, False), france.path)
 
     def test_saving_an_object_without_a_path_keeps_every_path(self):
         # An instance rebuilt without a path (e.g. restored from a revision) is
