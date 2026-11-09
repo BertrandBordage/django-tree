@@ -1,3 +1,9 @@
+# Unreleased
+
+Saving an instance with no path, such as one restored from a snapshot, no longer
+makes PostgreSQL rebuild the whole tree: the stored path is kept. `loaddata` is not
+covered, as it saves raw.
+
 # 1.0.2 (2026-11-08)
 
 `PathField` is no longer serialized. The database computes the path and rewrites
