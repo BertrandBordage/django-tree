@@ -2902,6 +2902,61 @@ class PathFieldTest(CommonTest):
             ]
         )
 
+    def test_pre_save_keeps_the_stored_path_of_an_unset_one(self):
+        field = Place._meta.get_field('path')
+        unset = Place(name='unset')
+        # An existing row keeps its column...
+        self.assertIsInstance(field.pre_save(unset, False), F)
+        # ...while a new row is left to the database to compute.
+        self.assertIsNone(field.pre_save(unset, True).value)
+        self.create_all_test_places()
+        france = Place.objects.get(name='France')
+        self.assertIs(field.pre_save(france, False), france.path)
+
+    def test_saving_an_object_without_a_path_keeps_every_path(self):
+        # An instance rebuilt without a path (e.g. restored from a revision) is
+        # unknown, not a request to rebuild: a NULL path would make PostgreSQL
+        # renumber the whole tree, however large.
+        self.create_all_test_places()
+        before = {p.pk: p.path.value for p in Place.objects.all()}
+        for place in Place.objects.all():
+            restored = Place(pk=place.pk, name=place.name, parent_id=place.parent_id)
+            self.assertIsNone(restored.path.value)
+            restored.save()
+        after = {p.pk: p.path.value for p in Place.objects.all()}
+        self.assertEqual(after, before)
+
+    def test_saving_an_object_without_a_path_after_a_move(self):
+        # The path is still recomputed when the parent changed, and only for the
+        # moved row.
+        self.create_all_test_places()
+        before = {p.pk: p.path.value for p in Place.objects.all()}
+        manche = Place.objects.get(name='Manche')
+        restored = Place(
+            pk=manche.pk,
+            name=manche.name,
+            parent=Place.objects.get(name='Poitou-Charentes'),
+        )
+        restored.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Eure'),
+                (path(0, 0, 1), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Manche'),
+                (path(0, 1, 1), 'Vienne'),
+                (path(0, 1, 1, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        after = {p.pk: p.path.value for p in Place.objects.all()}
+        self.assertEqual(
+            {pk: v for pk, v in after.items() if pk != manche.pk},
+            {pk: v for pk, v in before.items() if pk != manche.pk},
+        )
+
     def test_deleted_leaf_loaded_back_gets_its_path(self):
         # What `loaddata` does into a table that lacks the row.
         self.create_all_test_places()

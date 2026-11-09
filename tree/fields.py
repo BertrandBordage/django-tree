@@ -161,6 +161,19 @@ class PathField(BinaryField):
             value = bytes.fromhex(value)
         return Path(self, value)
 
+    def pre_save(self, model_instance: Model, add: bool) -> Any:
+        value = super().pre_save(model_instance, add)
+        # On an UPDATE, a NULL path is how `rebuild()` asks PostgreSQL's trigger
+        # to renumber the whole tree. An instance rebuilt without its path (from
+        # a snapshot, say) is only unaware of it, so leave the stored value alone
+        # (`SET path = path`): the trigger still recomputes it for this row when
+        # the parent or an ordering column changed.
+        if not add and (
+            value is None or (isinstance(value, Path) and value.value is None)
+        ):
+            return F(self.name)
+        return value
+
     def get_prep_value(
         self, value: 'Path | bytes | bytearray | memoryview | None'
     ) -> bytes | None:
