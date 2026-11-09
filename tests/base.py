@@ -2907,6 +2907,65 @@ class PathFieldTest(CommonTest):
             ]
         )
 
+    def test_from_db_value_accepts_hex_text(self):
+        # Oracle returns RAW as hex text from `UPDATE ... RETURNING`.
+        field = Place._meta.get_field('path')
+        self.assertEqual(
+            field.from_db_value('0200', None, connection).value, b'\x02\x00'
+        )
+        self.assertEqual(
+            field.from_db_value('ab0c', None, connection).value, b'\xab\x0c'
+        )
+        self.assertIsNone(field.from_db_value('', None, connection).value)
+
+    def test_pre_save_only_keeps_the_column_of_an_unset_path_on_update(self):
+        field = Place._meta.get_field('path')
+        unset = Place(name='unset')
+        given = Place(name='given', path=Path(field, b'\x02\x00'))
+        self.assertEqual(field.pre_save(unset, False), F('path'))
+        self.assertEqual(field.pre_save(given, False).value, b'\x02\x00')
+        self.assertIsNone(field.pre_save(unset, True).value)
+
+    def test_saving_an_object_without_a_path_keeps_every_path(self):
+        # A NULL path would make PostgreSQL renumber the whole tree.
+        self.create_all_test_places()
+        before = {p.pk: p.path.value for p in Place.objects.all()}
+        for place in Place.objects.all():
+            restored = Place(pk=place.pk, name=place.name, parent_id=place.parent_id)
+            self.assertIsNone(restored.path.value)
+            restored.save()
+        after = {p.pk: p.path.value for p in Place.objects.all()}
+        self.assertEqual(after, before)
+
+    def test_saving_an_object_without_a_path_after_a_move(self):
+        self.create_all_test_places()
+        before = {p.pk: p.path.value for p in Place.objects.all()}
+        manche = Place.objects.get(name='Manche')
+        restored = Place(
+            pk=manche.pk,
+            name=manche.name,
+            parent=Place.objects.get(name='Poitou-Charentes'),
+        )
+        restored.save()
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Eure'),
+                (path(0, 0, 1), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Manche'),
+                (path(0, 1, 1), 'Vienne'),
+                (path(0, 1, 1, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        after = {p.pk: p.path.value for p in Place.objects.all()}
+        self.assertEqual(
+            {pk: v for pk, v in after.items() if pk != manche.pk},
+            {pk: v for pk, v in before.items() if pk != manche.pk},
+        )
+
     def paths(self):
         return {p.pk: p.path.value for p in Place.objects.all()}
 

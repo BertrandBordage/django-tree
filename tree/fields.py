@@ -134,7 +134,7 @@ class PathField(BinaryField):
 
     def from_db_value(
         self,
-        value: 'bytes | memoryview | Path | None',
+        value: 'bytes | memoryview | str | Path | None',
         expression: Any,
         connection: Any,
     ) -> Path:
@@ -146,6 +146,10 @@ class PathField(BinaryField):
         # `startswith`-ed -- all things `Path` relies on -- so coerce to `bytes`.
         # Oracle can't store an empty `RAW` and reads a NULL one back as `b''`
         # (Django's `convert_empty_bytes`), so treat empty as "no path".
+        if isinstance(value, str):
+            # Oracle returns RAW as hex text from the `UPDATE ... RETURNING` that
+            # Django 6.0 runs for the `F()` of `pre_save()`.
+            value = bytes.fromhex(value)
         value = bytes(value) if value else None
         return Path(self, value)
 
@@ -160,6 +164,16 @@ class PathField(BinaryField):
             # deserializers (e.g. django-reversion, `loaddata`).
             value = bytes.fromhex(value)
         return Path(self, value)
+
+    def pre_save(self, model_instance: Model, add: bool) -> Any:
+        value = super().pre_save(model_instance, add)
+        # A NULL path on an UPDATE makes PostgreSQL's trigger rebuild the whole
+        # tree, so keep the stored one.
+        if not add and (
+            value is None or (isinstance(value, Path) and value.value is None)
+        ):
+            return F(self.name)
+        return value
 
     def get_prep_value(
         self, value: 'Path | bytes | bytearray | memoryview | None'
