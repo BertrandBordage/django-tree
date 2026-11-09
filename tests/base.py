@@ -2903,8 +2903,7 @@ class PathFieldTest(CommonTest):
         )
 
     def test_from_db_value_accepts_hex_text(self):
-        # Oracle returns a RAW column as hex text from `UPDATE ... RETURNING`,
-        # which Django 6.0 uses to refresh the `F('path')` that `pre_save()` gives.
+        # Oracle returns RAW as hex text from `UPDATE ... RETURNING`.
         field = Place._meta.get_field('path')
         self.assertEqual(
             field.from_db_value('0200', None, connection).value, b'\x02\x00'
@@ -2918,17 +2917,12 @@ class PathFieldTest(CommonTest):
         field = Place._meta.get_field('path')
         unset = Place(name='unset')
         given = Place(name='given', path=Path(field, b'\x02\x00'))
-        # Updating an unset path leaves the stored column alone...
         self.assertEqual(field.pre_save(unset, False), F('path'))
-        # ...but a path that was set is still written as given...
         self.assertEqual(field.pre_save(given, False).value, b'\x02\x00')
-        # ...and inserting an unset path sends NULL, as before.
         self.assertIsNone(field.pre_save(unset, True).value)
 
     def test_saving_an_object_without_a_path_keeps_every_path(self):
-        # An instance rebuilt without a path (e.g. restored from a revision) is
-        # unknown, not a request to rebuild: a NULL path would make PostgreSQL
-        # renumber the whole tree, however large.
+        # A NULL path would make PostgreSQL renumber the whole tree.
         self.create_all_test_places()
         before = {p.pk: p.path.value for p in Place.objects.all()}
         for place in Place.objects.all():
@@ -2939,8 +2933,6 @@ class PathFieldTest(CommonTest):
         self.assertEqual(after, before)
 
     def test_saving_an_object_without_a_path_after_a_move(self):
-        # The path is still recomputed when the parent changed, and only for the
-        # moved row.
         self.create_all_test_places()
         before = {p.pk: p.path.value for p in Place.objects.all()}
         manche = Place.objects.get(name='Manche')

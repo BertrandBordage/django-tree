@@ -147,9 +147,8 @@ class PathField(BinaryField):
         # Oracle can't store an empty `RAW` and reads a NULL one back as `b''`
         # (Django's `convert_empty_bytes`), so treat empty as "no path".
         if isinstance(value, str):
-            # Oracle hands a `RAW` column back as hex text from `UPDATE ...
-            # RETURNING`, which Django 6.0 runs to refresh the `F('path')` that
-            # `pre_save()` returns for an unset path.
+            # Oracle returns RAW as hex text from the `UPDATE ... RETURNING` that
+            # Django 6.0 runs for the `F()` of `pre_save()`.
             value = bytes.fromhex(value)
         value = bytes(value) if value else None
         return Path(self, value)
@@ -168,11 +167,8 @@ class PathField(BinaryField):
 
     def pre_save(self, model_instance: Model, add: bool) -> Any:
         value = super().pre_save(model_instance, add)
-        # On an UPDATE, a NULL path is how `rebuild()` asks PostgreSQL's trigger
-        # to renumber the whole tree. An instance rebuilt without its path (from
-        # a snapshot, say) is only unaware of it, so leave the stored value alone
-        # (`SET path = path`): the trigger still recomputes it for this row when
-        # the parent or an ordering column changed.
+        # A NULL path on an UPDATE makes PostgreSQL's trigger rebuild the whole
+        # tree, so keep the stored one.
         if not add and (
             value is None or (isinstance(value, Path) and value.value is None)
         ):
