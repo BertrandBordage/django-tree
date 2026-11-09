@@ -149,6 +149,53 @@ class DeleteTreeTrigger(CreateTreeTrigger):
         return 'Deletes the trigger that automatically updates a `PathField`'
 
 
+class UpdateTreeTrigger(CreateTreeTrigger):
+    """
+    Replaces the functions of an existing trigger with those of the installed
+    django-tree, for when a release changes the SQL. The trigger and the unique
+    constraint stay in place, and no path is touched.
+
+    Reversing it does nothing: the previous function bodies are not kept.
+    """
+
+    def database_forwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
+        self.check_database_backend(schema_editor)
+        if not self.uses_trigger(schema_editor):
+            return
+        model = self.get_model(app_label, to_state)
+        schema_editor.execute(
+            postgresql.get_update_paths_function_creation(
+                model=model,
+                path_field_lookup=self.path_field_lookup,
+            ),
+            params=None,
+        )
+        schema_editor.execute(
+            postgresql.CREATE_REBUILD_FUNCTION_QUERY.format(
+                **self.get_pre_params(model=model)
+            ),
+            params=None,
+        )
+
+    def database_backwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
+        self.check_database_backend(schema_editor)
+
+    def describe(self) -> str:
+        return 'Replaces the functions of the trigger that updates a `PathField`'
+
+
 class RebuildPaths(Operation, GetModelMixin, CheckDatabaseMixin):
     reversible = True
     atomic = True

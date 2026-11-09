@@ -1,3 +1,21 @@
+# Unreleased
+
+On PostgreSQL, a NULL path in an UPDATE no longer makes the trigger renumber the
+whole tree. NULL now only means that the path is unknown: the trigger keeps the
+stored path when the row and its parent have one, and recomputes it for that row
+alone (and its descendants) if its parent or ordering columns changed. The full
+rebuild stays as the fallback when there is no path to keep, as in a tree whose
+paths were never built. That rebuild took about 5 minutes and rewrote 76,000 rows on
+a table of 77,000 nodes. When the same UPDATE also changed the parent, it left the
+row's path under its previous parent.
+
+`rebuild_paths()` now asks for the rebuild with an empty path instead of NULL.
+
+**This changes the SQL of the trigger.** A table keeps its previous functions
+until a migration replaces them, so nothing changes until then. Add
+`UpdateTreeTrigger('YourModel')` to a migration (see "Upgrading the trigger" in the
+README). The new operation replaces the two functions in place and touches no path.
+
 # 1.0.2 (2026-11-08)
 
 `PathField` is no longer serialized. The database computes the path and rewrites

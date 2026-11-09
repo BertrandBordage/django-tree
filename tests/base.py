@@ -25,7 +25,12 @@ from django.test import SimpleTestCase, TransactionTestCase
 
 from tree.fields import PathField
 from tree.forms import TreeChoiceField
-from tree.operations import CreateTreeTrigger, DeleteTreeTrigger, RebuildPaths
+from tree.operations import (
+    CreateTreeTrigger,
+    DeleteTreeTrigger,
+    RebuildPaths,
+    UpdateTreeTrigger,
+)
 from tree.query import _get_path_field
 from tree.sql import base as sql_base
 from tree.types import Path
@@ -2902,6 +2907,167 @@ class PathFieldTest(CommonTest):
             ]
         )
 
+    # NULL on an UPDATE says that the path is unknown. The trigger keeps the stored
+    # one when the row and its parent have a path, recomputes it for this row alone
+    # when its parent or ordering columns changed, and rebuilds the whole tree only
+    # when there is nothing to keep. The tests below are PostgreSQL-only, as the
+    # other backends maintain the path in Python.
+
+    def paths(self):
+        return {p.pk: p.path.value for p in Place.objects.all()}
+
+    @requires_db_trigger
+    def test_null_path_update_keeps_every_path(self):
+        self.create_all_test_places()
+        before = self.paths()
+        for name in ('France', 'Normandie', 'Manche', 'Poitiers', 'Österreich'):
+            with self.subTest(name):
+                Place.objects.filter(name=name).update(path=None)
+                self.assertEqual(self.paths(), before)
+
+    @requires_db_trigger
+    def test_null_path_on_every_row_keeps_every_path(self):
+        # With the trigger on, each row keeps its path in turn, parents first or not.
+        self.create_all_test_places()
+        before = self.paths()
+        Place.objects.update(path=None)
+        self.assertEqual(self.paths(), before)
+
+    @requires_db_trigger
+    def test_null_path_with_a_new_parent_moves_only_that_row(self):
+        self.create_all_test_places()
+        before = self.paths()
+        manche = Place.objects.get(name='Manche')
+        parent = Place.objects.get(name='Poitou-Charentes')
+        Place.objects.filter(pk=manche.pk).update(path=None, parent=parent)
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Eure'),
+                (path(0, 0, 1), 'Seine-Maritime'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Manche'),
+                (path(0, 1, 1), 'Vienne'),
+                (path(0, 1, 1, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        after = self.paths()
+        self.assertEqual(
+            {pk: v for pk, v in after.items() if pk != manche.pk},
+            {pk: v for pk, v in before.items() if pk != manche.pk},
+        )
+
+    @requires_db_trigger
+    def test_null_path_with_a_new_name_reorders_only_that_row(self):
+        self.create_all_test_places()
+        before = self.paths()
+        renamed = Place.objects.get(name='Seine-Maritime')
+        Place.objects.filter(pk=renamed.pk).update(path=None, name='Aube')
+        self.assertPlaces(
+            [
+                (path(0), 'France'),
+                (path(0, 0), 'Normandie'),
+                (path(0, 0, 0), 'Aube'),
+                (path(0, 0, 1), 'Eure'),
+                (path(0, 0, 2), 'Manche'),
+                (path(0, 1), 'Poitou-Charentes'),
+                (path(0, 1, 0), 'Vienne'),
+                (path(0, 1, 0, 0), 'Poitiers'),
+                (path(1), 'Österreich'),
+            ]
+        )
+        after = self.paths()
+        self.assertEqual(
+            {pk: v for pk, v in after.items() if pk != renamed.pk},
+            {pk: v for pk, v in before.items() if pk != renamed.pk},
+        )
+
+    @requires_db_trigger
+    def test_null_path_with_no_parent_makes_the_row_a_root(self):
+        self.create_all_test_places()
+        before = self.paths()
+        vienne = Place.objects.get(name='Vienne')
+        Place.objects.filter(pk=vienne.pk).update(path=None, parent=None)
+        vienne = Place.objects.get(pk=vienne.pk)
+        poitiers = Place.objects.get(name='Poitiers')
+        self.assertTrue(vienne.path.is_root())
+        self.assertTrue(poitiers.path.is_descendant_of(vienne.path))
+        self.assertEqual(poitiers.path.get_level(), 2)
+        after = self.paths()
+        moved = {vienne.pk, poitiers.pk}
+        self.assertEqual(
+            {pk: v for pk, v in after.items() if pk not in moved},
+            {pk: v for pk, v in before.items() if pk not in moved},
+        )
+
+    @requires_db_trigger
+    def test_null_path_with_a_descendant_as_parent_is_refused(self):
+        self.create_all_test_places()
+        normandie = Place.objects.get(name='Normandie')
+        manche = Place.objects.get(name='Manche')
+        with self.assertRaisesMessage(
+            ProgrammingError, 'Cannot set itself or a descendant as parent.'
+        ):
+            with transaction.atomic():
+                Place.objects.filter(pk=normandie.pk).update(path=None, parent=manche)
+
+    @requires_db_trigger
+    def test_null_path_in_an_unbuilt_tree_rebuilds_it(self):
+        # Nothing to keep: fall back to the full rebuild.
+        self.create_all_test_places()
+        with Place.disabled_tree_trigger():
+            Place.objects.update(path=None)
+        Place.objects.filter(name='Manche').update(path=None)
+        self.assertPlaces(self.correct_places_data)
+
+    @requires_db_trigger
+    def test_null_path_on_a_row_that_never_had_one_rebuilds_the_tree(self):
+        # The parent has a path but this row had none: still nothing to keep.
+        self.create_all_test_places()
+        with Place.disabled_tree_trigger():
+            Place.objects.filter(name='Manche').update(path=None)
+        Place.objects.filter(name='Manche').update(path=None)
+        self.assertPlaces(self.correct_places_data)
+
+    @requires_db_trigger
+    def test_null_path_under_an_unbuilt_parent_rebuilds_the_tree(self):
+        self.create_all_test_places()
+        with Place.disabled_tree_trigger():
+            Place.objects.filter(name='Normandie').update(path=None)
+        Place.objects.filter(name='Manche').update(path=None)
+        self.assertPlaces(self.correct_places_data)
+
+    @requires_db_trigger
+    def test_empty_path_asks_for_a_rebuild_from_any_row(self):
+        # The request that `rebuild_paths()` sends, here from a row that is not a root.
+        self.create_all_test_places()
+        with Place.disabled_tree_trigger():
+            Place.objects.filter(name='Manche').update(path=None)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE %s SET path = ''::bytea WHERE name = 'Poitiers'"
+                % Place._meta.db_table
+            )
+        self.assertPlaces(self.correct_places_data)
+
+    @requires_db_trigger
+    def test_rebuild_leaves_no_empty_path(self):
+        self.create_all_test_places()
+        Place.rebuild_paths()
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM %s WHERE path = ''::bytea" % Place._meta.db_table
+            )
+            self.assertEqual(cursor.fetchone()[0], 0)
+        self.assertPlaces(self.correct_places_data)
+
+    @requires_db_trigger
+    def test_rebuild_paths_on_an_empty_table(self):
+        Place.rebuild_paths()
+        self.assertEqual(Place.objects.count(), 0)
+
     def test_deleted_leaf_loaded_back_gets_its_path(self):
         # What `loaddata` does into a table that lacks the row.
         self.create_all_test_places()
@@ -2965,7 +3131,11 @@ class OperationsTest(TransactionTestCase):
             connection = FakeConnection()
 
         editor = FakeEditor()
-        for op in (CreateTreeTrigger('place'), RebuildPaths('place')):
+        for op in (
+            CreateTreeTrigger('place'),
+            UpdateTreeTrigger('place'),
+            RebuildPaths('place'),
+        ):
             with self.assertRaises(NotImplementedError):
                 op.check_database_backend(editor)
 
@@ -2982,6 +3152,81 @@ class OperationsTest(TransactionTestCase):
         self.assertEqual(
             WeirdTableNamePlace.objects.get(pk=child.pk).path.get_level(), 2
         )
+
+    def test_update_trigger_describe(self):
+        self.assertIn('functions', UpdateTreeTrigger('place').describe())
+
+    def test_update_trigger_backwards_is_noop(self):
+        state = ProjectState.from_apps(apps)
+        with connection.schema_editor(atomic=True) as editor:
+            UpdateTreeTrigger('tests.Place').database_backwards(
+                'tests', editor, state, state
+            )
+
+    def test_update_trigger_runs_on_every_backend(self):
+        # A no-op off PostgreSQL; there, it installs the same functions again.
+        state = ProjectState.from_apps(apps)
+        with connection.schema_editor(atomic=True) as editor:
+            UpdateTreeTrigger('tests.Place').database_forwards(
+                'tests', editor, state, state
+            )
+        Place.objects.create(name='after')
+        self.assertTrue(Place.objects.get(name='after').path.is_root())
+
+    @requires_db_trigger
+    def test_update_trigger_replaces_both_functions(self):
+        op = UpdateTreeTrigger('tests.Place')
+        state = ProjectState.from_apps(apps)
+        params = CreateTreeTrigger('tests.Place').get_pre_params(Place)
+        table = Place._meta.db_table
+
+        def apply():
+            with connection.schema_editor(atomic=True) as editor:
+                op.database_forwards('tests', editor, state, state)
+
+        # Whatever happens below, leave the table with the right functions.
+        self.addCleanup(apply)
+
+        def count(cursor, sql):
+            cursor.execute(sql, [table])
+            return cursor.fetchone()[0]
+
+        triggers = (
+            'SELECT count(*) FROM pg_trigger '
+            'WHERE tgrelid = %s::regclass AND NOT tgisinternal'
+        )
+        constraints = (
+            'SELECT count(*) FROM pg_constraint '
+            "WHERE conrelid = %s::regclass AND contype = 'u'"
+        )
+        with connection.cursor() as cursor:
+            before = (count(cursor, triggers), count(cursor, constraints))
+            # Stand-ins for the functions of an older release.
+            cursor.execute(
+                'CREATE OR REPLACE FUNCTION {function}() RETURNS trigger AS $$ '
+                'BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql'.format(**params)
+            )
+            cursor.execute(
+                'CREATE OR REPLACE FUNCTION {rebuild_function}() RETURNS void AS $$ '
+                "BEGIN RAISE EXCEPTION 'old'; END; $$ LANGUAGE plpgsql".format(**params)
+            )
+        with self.assertRaises(Exception):
+            Place.rebuild_paths()
+
+        apply()
+        apply()  # Replacing twice is harmless.
+
+        with connection.cursor() as cursor:
+            self.assertEqual(
+                (count(cursor, triggers), count(cursor, constraints)), before
+            )
+        france = Place.objects.create(name='France')
+        Place.objects.create(name='Normandie', parent=france)
+        # The new rebuild function repairs a row, not only a root.
+        with Place.disabled_tree_trigger():
+            Place.objects.filter(name='Normandie').update(path=None)
+        Place.rebuild_paths()
+        self.assertEqual(Place.objects.get(name='Normandie').path.get_level(), 2)
 
     def test_rebuild_paths_backwards_is_noop(self):
         state = ProjectState.from_apps(apps)

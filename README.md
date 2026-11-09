@@ -316,6 +316,35 @@ class Migration(migrations.Migration):
     ]
 ```
 
+### Upgrading the trigger
+
+A release that changes the SQL of the trigger says so in the changelog. A table
+keeps the functions it was given until a migration replaces them, so nothing
+changes, and nothing breaks, until you add one. One operation per `PathField`:
+
+```python
+from django.db import migrations
+from tree.operations import UpdateTreeTrigger
+
+class Migration(migrations.Migration):
+    dependencies = [
+        ('tree', '0003_tree_functions'),
+    ]
+
+    operations = [
+        UpdateTreeTrigger('YourModel'),
+    ]
+```
+
+It replaces the functions in place. The trigger, its unique constraint and every
+stored path stay as they are, so there is nothing to rebuild. Reversing it does
+nothing, as the previous functions are not kept.
+
+On PostgreSQL, a `NULL` path in an `UPDATE` means that the path is unknown, not
+that the tree must be rebuilt: the stored path is kept when the row and its parent
+have one, and it is recomputed for that row alone if its parent or ordering columns
+changed. `rebuild_paths()` is the explicit request for a full rebuild.
+
 > [!NOTE]
 > You can also use `PathField` without adding a `CreateTreeTrigger`
 > operation. However, the field will not automatically be updated, you
