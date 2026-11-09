@@ -1,8 +1,13 @@
 # Unreleased
 
 Saving an instance with no path, such as one restored from a snapshot, no longer
-makes PostgreSQL rebuild the whole tree: the stored path is kept. `loaddata` is not
-covered, as it saves raw.
+makes PostgreSQL rebuild the whole tree: the stored path is kept.
+
+Other ways of setting a path to NULL (`update()`, `loaddata`) no longer do either:
+the path is kept, and recomputed for that row only if its parent or ordering columns
+changed. `rebuild_paths()` now sends an empty path instead of NULL. This needs
+`UpdateTreeTrigger('YourModel')` in a migration. Until then, only the first case is
+fixed.
 
 # 1.0.2 (2026-11-08)
 

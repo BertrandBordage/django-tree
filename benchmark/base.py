@@ -5,6 +5,7 @@ import os
 from time import time
 from typing import Type, List, Optional, Iterable
 
+from django.core import serializers
 from django.db import connections, router, transaction
 from django.db.models import Max, F, Model
 import matplotlib.pyplot as plt
@@ -1433,6 +1434,26 @@ class TestSaveBranchWithoutChange(GetBranchMixin, BenchmarkWriteTest):
 class TestSaveLeafWithoutChange(GetLeafMixin, BenchmarkWriteTest):
     def run(self):
         self.leaf.save()
+
+
+#
+# Save raw
+#
+# What `loaddata` does to an existing row. A raw save skips `save()`; django-tree
+# does not dump its path, so the database computes it.
+#
+
+
+@Benchmark.register_test('Save raw [branch]', y_label=WRITE_LATENCY)
+class TestSaveBranchRaw(GetBranchMixin, BenchmarkWriteTest):
+    def setup(self):
+        super().setup()
+        [self.deserialized] = serializers.deserialize(
+            'json', serializers.serialize('json', [self.branch])
+        )
+
+    def run(self):
+        self.deserialized.save()
 
 
 #

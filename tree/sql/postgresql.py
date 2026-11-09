@@ -286,9 +286,25 @@ def get_update_paths_function_creation(
             parent_len integer;
         BEGIN
             IF TG_OP = 'UPDATE' THEN
-                IF NEW.{path} IS NULL THEN
+                -- Full rebuild, as requested by the rebuild function.
+                IF NEW.{path} = ''::bytea THEN
                     {rebuild};
                     RETURN NEW;
+                END IF;
+
+                -- NULL means "unknown": keep the stored path when the row and its
+                -- parent have one, else fall back to the full rebuild.
+                IF NEW.{path} IS NULL THEN
+                    IF OLD.{path} IS NOT NULL AND (
+                        NEW.{parent} IS NULL
+                        OR (SELECT {path} FROM {table} WHERE {pk} = NEW.{parent})
+                            IS NOT NULL
+                    ) THEN
+                        NEW.{path} := OLD.{path};
+                    ELSE
+                        {rebuild};
+                        RETURN NEW;
+                    END IF;
                 END IF;
 
                 IF {row_unchanged} THEN
@@ -352,6 +368,22 @@ def get_update_paths_function_creation(
     )
 
 
+# An empty path, which no real path is, asks for a full rebuild. NULL cannot: it
+# means "unknown".
+CREATE_REBUILD_FUNCTION_QUERY = """
+    CREATE OR REPLACE FUNCTION {rebuild_function}() RETURNS void AS $$
+    BEGIN
+        UPDATE {table} SET {path} = ''::bytea FROM (
+            SELECT * FROM {table}
+            WHERE {parent} IS NULL
+            LIMIT 1
+            FOR UPDATE
+        ) AS t
+        WHERE {table}.{pk} = t.{pk};
+    END;
+    $$ LANGUAGE plpgsql;
+"""
+
 CREATE_TRIGGER_QUERIES = (
     """
     CREATE TRIGGER "update_{path}_before"
@@ -361,19 +393,7 @@ CREATE_TRIGGER_QUERIES = (
     WHEN (pg_trigger_depth() = 0)
     EXECUTE FUNCTION {function}();
     """,
-    """
-    CREATE OR REPLACE FUNCTION {rebuild_function}() RETURNS void AS $$
-    BEGIN
-        UPDATE {table} SET {path} = NULL FROM (
-            SELECT * FROM {table}
-            WHERE {parent} IS NULL
-            LIMIT 1
-            FOR UPDATE
-        ) AS t
-        WHERE {table}.{pk} = t.{pk};
-    END;
-    $$ LANGUAGE plpgsql;
-    """,
+    CREATE_REBUILD_FUNCTION_QUERY,
     # The path uniqueness constraint is created here (alongside the trigger)
     # rather than via Django's `unique=True`/`Index` machinery because it must be
     # `INITIALLY DEFERRED`: a reparent or rebuild shifts many rows' paths within a
