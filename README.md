@@ -380,7 +380,7 @@ can be at a different depth than a child of another root, like in real life.
 To run the `run_tests.py` and `run_benchmark.py` scripts:
 - Make sure you have `uv` installed
 - `uv sync --group benchmark`
-- `docker run --rm -e POSTGRES_DB=tree -e POSTGRES_USER=tree -e POSTGRES_PASSWORD=test-only -p 5432:5432 postgres:latest -d`
+- `docker run --rm -e POSTGRES_DB=tree -e POSTGRES_USER=tree -e POSTGRES_PASSWORD=test-only -p 5432:5432 -d postgres:latest`
 - `uv run run_tests.py` to run regression tests
 - `uv run run_benchmark.py` to run the full benchmark against other tree solutions (very long)
 
