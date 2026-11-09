@@ -1,16 +1,8 @@
 # Unreleased
 
-Saving an instance that has no path no longer makes PostgreSQL renumber the
-whole tree. That is the instance a snapshot gives back when it is restored
-(django-reversion, Wagtail revisions), since `PathField` is no longer serialized.
-Its NULL path was read as a request to rebuild: about 5 minutes and 76,000
-rewritten rows on a table of 77,000 nodes. `PathField` now leaves the stored path
-alone in that case. The trigger still recomputes it for the row when its parent
-or ordering columns changed. No migration changes.
-
-Only `Model.save()` is covered: fixtures loaded with `loaddata` are saved raw,
-bypassing `PathField.pre_save()`, so a row without a path in a fixture still
-triggers the rebuild.
+Saving an instance with no path, such as one restored from a snapshot, no longer
+makes PostgreSQL rebuild the whole tree: the stored path is kept. `loaddata` is not
+covered, as it saves raw.
 
 # 1.0.2 (2026-11-08)
 
