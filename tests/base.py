@@ -19,7 +19,7 @@ from django.core.exceptions import (
 from django.db import transaction, connection
 from django.db.migrations.recorder import MigrationRecorder
 from django.db.migrations.state import ProjectState
-from django.db.models import F, ProtectedError, QuerySet
+from django.db.models import Exists, F, OuterRef, ProtectedError, QuerySet
 from django.db.utils import IntegrityError, ProgrammingError
 from django.test import SimpleTestCase, TransactionTestCase
 
@@ -2464,6 +2464,73 @@ class QuerySetTest(CommonTest):
             ],
             places.get_descendants(include_self=True),
         )
+
+    def test_get_descendants_lists_each_row_once_for_nested_members(self):
+        self.create_all_test_places()
+
+        places = Place.objects.filter(name__in=('France', 'Normandie', 'Eure'))
+        self.assertListEqual(
+            sorted(places.get_descendants().values_list('name', flat=True)),
+            ['Manche', 'Poitiers', 'Poitou-Charentes', 'Seine-Maritime', 'Vienne'],
+        )
+        self.assertListEqual(
+            sorted(
+                places.get_descendants(include_self=True).values_list('name', flat=True)
+            ),
+            [
+                'Eure',
+                'France',
+                'Manche',
+                'Normandie',
+                'Poitiers',
+                'Poitou-Charentes',
+                'Seine-Maritime',
+                'Vienne',
+            ],
+        )
+
+    def test_get_descendants_without_members(self):
+        self.create_all_test_places()
+
+        with self.assertNumQueries(0):
+            self.assertListEqual(list(Place.objects.none().get_descendants()), [])
+        with self.assertNumQueries(1):
+            self.assertListEqual(
+                list(Place.objects.filter(name='Atlantis').get_descendants()), []
+            )
+
+    def test_get_descendants_matches_the_correlated_exists(self):
+        # PostgreSQL seeks the path index once per member, whereas the other
+        # backends compare each row with each member through a correlated `EXISTS`.
+        # Both forms have to select the same rows.
+        self.create_all_test_places()
+
+        for names in (
+            ('France',),
+            ('Normandie', 'Österreich'),
+            ('France', 'Normandie', 'Eure'),
+            ('Poitiers', 'Seine-Maritime'),
+            ('Atlantis',),
+        ):
+            members = Place.objects.filter(name__in=names)
+            expected = Place.objects.filter(
+                Exists(members.filter(path__ancestor_of=OuterRef('path')))
+            )
+            self.assertSetEqual(
+                set(
+                    members.get_descendants(include_self=True).values_list(
+                        'pk', flat=True
+                    )
+                ),
+                set(expected.values_list('pk', flat=True)),
+                names,
+            )
+
+    @skipUnless(connection.vendor == 'postgresql', 'PostgreSQL only')
+    def test_get_descendants_seeks_the_path_index_once_per_member(self):
+        members = Place.objects.filter(name__in=('Normandie', 'Österreich'))
+        sql, _ = members.get_descendants().query.sql_with_params()
+        self.assertIn('LATERAL', sql)
 
 
 class Issue17Test(CommonTest):

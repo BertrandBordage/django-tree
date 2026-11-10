@@ -17,6 +17,11 @@ to find its descendants; rebuilding paths is also faster. This needs
 Performance. `TreeModelMixin.delete()` deletes a subtree with a single query when
 no signal listens to the deletion and no other model points at it.
 
+Performance, PostgreSQL. `QuerySet.get_descendants()` no longer compares every row
+with every member of the queryset: each member becomes one seek in the path index,
+so the cost follows the number of members and of results, not the size of the table
+times the number of members.
+
 Fixes the `DeleteTreeTrigger` reverse queries, which ran two statements as one.
 
 # 1.0.2 (2026-11-08)

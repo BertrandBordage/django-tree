@@ -1,7 +1,17 @@
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
-from django.core.exceptions import FieldDoesNotExist
-from django.db.models import Exists, Field, Model, OuterRef, QuerySet
+from django.core.exceptions import EmptyResultSet, FieldDoesNotExist
+from django.db.models import (
+    BooleanField,
+    Exists,
+    Expression,
+    F,
+    Field,
+    Model,
+    OuterRef,
+    QuerySet,
+)
 from django.db.models.manager import Manager
 
 from .fields import PathField
@@ -50,6 +60,74 @@ def _get_path_field(model: type[Model], name: str | None) -> PathField:
         'You need to specify which `PathField` to use for this query '
         'among these values: %s' % [f.name for f in path_fields]
     )
+
+
+class DescendantsOfMembers(Expression):
+    """Whether the row is one of ``members`` or a descendant of one of them.
+
+    On PostgreSQL this is rendered as ``pk IN (SELECT d.pk FROM (members) m
+    CROSS JOIN LATERAL (descendant range of m.path) d)``: every member becomes
+    one range seek in the path index, so the cost follows the number of members
+    and results instead of ``rows x members``. The equivalent correlated
+    ``EXISTS`` (kept as the ``fallback``, used on every other backend and for
+    members that cannot be compiled on their own) compares every table row with
+    every member, and PostgreSQL cannot plan an index probe for a range join
+    between two columns: it estimates the join as unselective and filters.
+    """
+
+    conditional = True
+
+    def __init__(self, members: QuerySet, path_attname: str, fallback: Exists) -> None:
+        super().__init__(output_field=BooleanField())
+        self.members = members
+        self.path_attname = path_attname
+        self.fallback = fallback
+        self.pk_ref = F('pk')
+
+    def get_source_expressions(self) -> list:
+        return [self.pk_ref, self.fallback]
+
+    def set_source_expressions(self, exprs: Sequence[Any]) -> None:
+        self.pk_ref, self.fallback = exprs
+
+    def as_sql(self, compiler: Any, connection: Any) -> tuple[str, list]:
+        if connection.vendor != 'postgresql':
+            return compiler.compile(self.fallback)
+        model = self.members.model
+        meta = model._meta
+        quote = connection.ops.quote_name
+        members = self.members.values_list(self.path_attname).order_by()
+        try:
+            members_sql, members_params = members.query.get_compiler(
+                connection=connection
+            ).as_sql()
+        except EmptyResultSet:
+            raise
+        except ValueError:
+            # The members reference an outer query (`OuterRef`), so they cannot
+            # run as a standalone derived table.
+            return compiler.compile(self.fallback)
+        pk_sql, pk_params = compiler.compile(self.pk_ref)
+        table = quote(meta.db_table)
+        pk = quote(meta.pk.column)
+        path = quote(cast(Field, meta.get_field(self.path_attname)).column)
+        sql = (
+            '%s IN (SELECT tree_d.%s FROM (%s) AS tree_m(tree_path) '
+            'CROSS JOIN LATERAL (SELECT %s AS %s FROM %s AS tree_x '
+            'WHERE tree_x.%s >= tree_m.tree_path '
+            'AND tree_x.%s < tree_upper(tree_m.tree_path)) AS tree_d)'
+            % (
+                pk_sql,
+                pk,
+                members_sql,
+                'tree_x.' + pk,
+                pk,
+                table,
+                path,
+                path,
+            )
+        )
+        return sql, [*pk_params, *members_params]
 
 
 # TODO: Implement a faster `QuerySet.delete` and add it to the benchmark.
@@ -158,7 +236,8 @@ class TreeQuerySetMixin(_QuerySetBase):
         # against the members, instead of fetching every member path and OR-ing
         # one range clause per member (which also needed an extra query).
         members = self.filter(**{f'{attname}__ancestor_of': OuterRef(attname)})
-        result = self.model._default_manager.filter(Exists(members))
+        condition = DescendantsOfMembers(self, attname, Exists(members))
+        result = self.model._default_manager.filter(condition)
         if not include_self:
             result = result.exclude(pk__in=self.values('pk'))
         return result
