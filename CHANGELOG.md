@@ -9,6 +9,11 @@ changed. `rebuild_paths()` now sends an empty path instead of NULL. This needs
 `UpdateTreeTrigger('YourModel')` in a migration. Until then, only the first case is
 fixed.
 
+Performance, PostgreSQL. Inserting or moving a node no longer scans the whole path
+index to find its neighbours, and moving a subtree no longer scans the whole table
+to find its descendants; rebuilding paths is also faster. This needs
+`UpdateTreeTrigger('YourModel')` in a migration.
+
 Fixes the `DeleteTreeTrigger` reverse queries, which ran two statements as one.
 
 # 1.0.2 (2026-11-08)

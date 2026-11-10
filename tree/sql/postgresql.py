@@ -168,11 +168,9 @@ def get_update_paths_function_creation(
     pk = quote_ident(pk_field.attname)
     parent = quote_ident(parent_field.attname)
     path = quote_ident(path_field.attname)
-    # Both the rebuild's recursive CTE and the sibling lookups order by the path;
-    # the latter as `ORDER BY path ... LIMIT 1` to read a single neighbour.
-    sql_t2_order_by = ', '.join(
-        [f't2.{ordered_column}' for ordered_column in sql_order_by]
-    )
+    # The sibling lookups order by the path, as `ORDER BY path ... LIMIT 1`, to read
+    # a single neighbour.
+    sql_order_by_columns = ', '.join(sql_order_by)
 
     # All three statements below are emitted as *static* SQL in the trigger
     # function body (not `EXECUTE`d dynamic strings): the table and column names
@@ -187,34 +185,42 @@ def get_update_paths_function_creation(
         -- (`row_number()` / `count(*) OVER`), which PostgreSQL forbids together
         -- with row-level locking. A different rebuild shape would be needed to
         -- close this race.
-        WITH RECURSIVE generate_paths(pk, path) AS ((
-                SELECT {parent}, ''::bytea
-                FROM {table}
-                WHERE {parent} IS NULL
-                LIMIT 1
-            ) UNION ALL (
+        --
+        -- Every sibling's rank and sibling count is computed once, in a single
+        -- pass over the table (`tree_ranked`); the recursion then only joins that
+        -- set to the paths found so far with a plain equality (`parent = pk`),
+        -- which PostgreSQL can hash-join. The roots are the recursion's seed.
+        WITH RECURSIVE tree_ranked AS (
+            SELECT
+                {pk} AS tree_pk,
+                {parent} AS tree_parent,
+                (row_number() OVER (
+                    PARTITION BY {parent} ORDER BY {sql_order_by_columns}
+                ) - 1)::integer AS tree_rank,
+                -- Minimal segment width (base-254 digits) for this parent's child
+                -- count, so rebuilt paths stay as compact as inserted ones
+                -- instead of a fixed 4 bytes.
+                CASE
+                    WHEN count(*) OVER (PARTITION BY {parent}) <= 254 THEN 1
+                    WHEN count(*) OVER (PARTITION BY {parent}) <= 64516 THEN 2
+                    WHEN count(*) OVER (PARTITION BY {parent}) <= 16387064 THEN 3
+                    ELSE 4
+                END AS tree_width
+            FROM {table}
+        ), generate_paths(pk, path) AS (
                 SELECT
-                    t2.{pk},
-                    t1.path || tree_int_to_seg(
-                        (row_number() OVER (
-                            PARTITION BY t1.pk ORDER BY {sql_t2_order_by}
-                        ) - 1)::integer,
-                        -- Minimal segment width (base-254 digits) for this
-                        -- parent's child count, so rebuilt paths stay as compact
-                        -- as inserted ones instead of a fixed 4 bytes.
-                        CASE
-                            WHEN count(*) OVER (PARTITION BY t1.pk) <= 254 THEN 1
-                            WHEN count(*) OVER (PARTITION BY t1.pk) <= 64516 THEN 2
-                            WHEN count(*) OVER (PARTITION BY t1.pk) <= 16387064
-                                THEN 3
-                            ELSE 4
-                        END
-                    ) || '\\x00'::bytea
+                    r.tree_pk,
+                    tree_int_to_seg(r.tree_rank, r.tree_width) || '\\x00'::bytea
+                FROM tree_ranked AS r
+                WHERE r.tree_parent IS NULL
+            UNION ALL
+                SELECT
+                    r.tree_pk,
+                    t1.path
+                        || tree_int_to_seg(r.tree_rank, r.tree_width)
+                        || '\\x00'::bytea
                 FROM generate_paths AS t1
-                INNER JOIN {table} AS t2 ON (
-                    t2.{parent} = t1.pk
-                    OR (t1.pk IS NULL AND t2.{parent} IS NULL))
-            )
+                INNER JOIN tree_ranked AS r ON r.tree_parent = t1.pk
         ), updated AS (
             UPDATE {table} AS t2 SET {path} = t1.path
             FROM generate_paths AS t1
@@ -228,15 +234,22 @@ def get_update_paths_function_creation(
         LIMIT 1
     """
 
-    # Three scalar subqueries yield the parent's path and both neighbouring
-    # siblings' full paths. A path's own segment is strictly monotonic with
-    # `order_by` among siblings (the same invariant the read side relies on, e.g.
-    # `get_prev_sibling` ordering by `path`), and siblings share the parent prefix,
-    # so the previous sibling is the greatest path among those ordered before us
-    # and the next is the smallest among those ordered after. `ORDER BY path
-    # LIMIT 1` reads just that one neighbour with a top-1 pass instead of sorting
-    # and materialising the whole sibling set (the portable stand-in for the
-    # PostgreSQL-18-only `min`/`max(bytea)`).
+    # The parent's path, then both neighbouring siblings' full paths. A path's own
+    # segment is strictly monotonic with `order_by` among siblings (the same
+    # invariant the read side relies on, e.g. `get_prev_sibling` ordering by
+    # `path`), and siblings share the parent prefix, so the previous sibling is the
+    # greatest path among those ordered before us and the next is the smallest
+    # among those ordered after. `ORDER BY path LIMIT 1` reads just that one
+    # neighbour with a top-1 pass instead of sorting and materialising the whole
+    # sibling set (the portable stand-in for the PostgreSQL-18-only
+    # `min`/`max(bytea)`).
+    #
+    # The siblings are also bounded by their level and by the parent's descendant
+    # range, so the scan seeks `(tree_level(path), path)` (or the path index alone,
+    # without the level) and reads at most the siblings. Left unbounded, the
+    # planner walks the whole path index backwards from its end, filtering by
+    # parent as it goes (it expects a match early), which costs a scan of the table
+    # on every insert or move. The roots have no range, their level is enough.
     sibling_match = f'{compare_columns(parent, f"NEW.{parent}")} AND {pk} != NEW.{pk}'
     prev_sibling_where = get_prev_sibling_where_clause(
         where_columns, 'NEW', descending_flags
@@ -244,24 +257,42 @@ def get_update_paths_function_creation(
     next_sibling_where = get_next_sibling_where_clause(
         where_columns, 'NEW', descending_flags
     )
+
+    def neighbour(where: str, order: str, into: str, in_parent_range: bool) -> str:
+        bounds = (
+            f'AND {path} > new_parent_path AND {path} < tree_upper(new_parent_path)'
+            if in_parent_range
+            else ''
+        )
+        return f"""
+                SELECT {path} INTO {into} FROM {table}
+                WHERE tree_level({path}) = sibling_level {bounds}
+                    AND {sibling_match} AND {where}
+                ORDER BY {path} {order} LIMIT 1
+        """
+
     get_sibling_values = f"""
-        SELECT
-            (SELECT {path} FROM {table} WHERE {pk} = NEW.{parent}),
-            (SELECT {path} FROM {table}
-                WHERE {sibling_match} AND {prev_sibling_where}
-                ORDER BY {path} DESC LIMIT 1),
-            (SELECT {path} FROM {table}
-                WHERE {sibling_match} AND {next_sibling_where}
-                ORDER BY {path} ASC LIMIT 1)
-        INTO new_parent_path, prev_sibling_path, next_sibling_path
+            SELECT {path} INTO new_parent_path FROM {table} WHERE {pk} = NEW.{parent};
+            new_parent_path := coalesce(new_parent_path, ''::bytea);
+            parent_len := octet_length(new_parent_path);
+            sibling_level := tree_level(new_parent_path) + 1;
+            IF parent_len = 0 THEN
+                {neighbour(prev_sibling_where, 'DESC', 'prev_sibling_path', False)};
+                {neighbour(next_sibling_where, 'ASC', 'next_sibling_path', False)};
+            ELSE
+                {neighbour(prev_sibling_where, 'DESC', 'prev_sibling_path', True)};
+                {neighbour(next_sibling_where, 'ASC', 'next_sibling_path', True)};
+            END IF
     """
 
     # When a node moves, rewrite every descendant's stored prefix (the moved node's
-    # old path) to its new path, preserving the descendant-local suffix.
+    # old path) to its new path, preserving the descendant-local suffix. The
+    # descendants are the whole-path range `[OLD.path, tree_upper(OLD.path))`, so
+    # the btree behind the path is seeked instead of slicing every row's path.
     update_descendants = f"""
         UPDATE {table}
         SET {path} = NEW.{path} || substr({path}, octet_length(OLD.{path}) + 1)
-        WHERE substr({path}, 1, octet_length(OLD.{path})) = OLD.{path}
+        WHERE {path} >= OLD.{path} AND {path} < tree_upper(OLD.{path})
             AND {pk} != OLD.{pk}
     """
 
@@ -284,6 +315,7 @@ def get_update_paths_function_creation(
             old_sibling_seg bytea := NULL;
             new_parent_path bytea;
             parent_len integer;
+            sibling_level integer;
         BEGIN
             IF TG_OP = 'UPDATE' THEN
                 -- Full rebuild, as requested by the rebuild function.
@@ -313,8 +345,6 @@ def get_update_paths_function_creation(
             END IF;
 
             {get_sibling_values};
-            new_parent_path := coalesce(new_parent_path, ''::bytea);
-            parent_len := octet_length(new_parent_path);
 
             IF prev_sibling_path IS NOT NULL THEN
                 prev_sibling_seg := substr(
