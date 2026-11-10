@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import DEFAULT_DB_ALIAS, router, transaction
 from django.db.models import CASCADE, DO_NOTHING, Model, QuerySet, signals
-from django.db.models.deletion import get_candidate_relations_to_delete
+from django.db.models.deletion import Collector, get_candidate_relations_to_delete
 
 from .fields import PathField
 from .query import _get_path_fields, _get_path_field, TreeManager
@@ -20,6 +20,21 @@ if TYPE_CHECKING:
     _ModelBase = Model
 else:
     _ModelBase = object
+
+
+class _SubtreeCollector(Collector):
+    """A deletion collector that does not look for the children of its rows."""
+
+    def __init__(self, *args: Any, parent_field: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._parent_field = parent_field
+
+    def related_objects(
+        self, related_model: Any, related_fields: Any, objs: Any
+    ) -> Any:
+        if self._parent_field in related_fields:
+            return related_model._base_manager.using(self.using).none()
+        return super().related_objects(related_model, related_fields, objs)
 
 
 class TreeModelMixin(_ModelBase):
@@ -200,7 +215,41 @@ class TreeModelMixin(_ModelBase):
             qs = qs.using(using)
         if not keep_parents and self._can_delete_subtree_in_one_query():
             return self._delete_subtree_in_one_query(qs, using)
+        if not keep_parents and self._can_skip_children_lookup():
+            return self._delete_subtree_with_collector(qs)
         return qs.delete()
+
+    def _can_skip_children_lookup(self) -> bool:
+        # Only a `CASCADE` parent foreign key is covered by the subtree itself.
+        model = type(self)
+        parent_field = self._get_path_field(None).parent_field
+        return (
+            getattr(parent_field.remote_field, 'on_delete', None) is CASCADE
+            and not (model._meta.concrete_model or model)._meta.parents
+        )
+
+    def _delete_subtree_with_collector(
+        self, qs: QuerySet
+    ) -> tuple[int, dict[str, int]]:
+        """`QuerySet.delete()` through a collector that does not look for the
+        children of the rows it collects. The whole subtree is collected already, so
+        that lookup would load every row a second time. Signals, other relations and
+        the returned counts are the regular ones."""
+        del_query = qs.all()
+        del_query._for_write = True  # type: ignore[attr-defined]
+        del_query.query.select_for_update = False
+        del_query.query.select_related = False
+        del_query.query.clear_ordering(force=True)
+        collector = _SubtreeCollector(
+            using=del_query.db,
+            origin=qs,
+            parent_field=self._get_path_field(None).parent_field,
+        )
+        collector.collect(del_query)
+        deleted, rows_count = collector.delete()
+        # Clear the result cache, in case this queryset gets reused.
+        qs._result_cache = None
+        return deleted, rows_count
 
     def _can_delete_subtree_in_one_query(self) -> bool:
         """Whether deleting the whole subtree needs nothing from Django's

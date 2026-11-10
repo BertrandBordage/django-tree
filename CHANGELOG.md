@@ -17,6 +17,10 @@ to find its descendants; rebuilding paths is also faster. This needs
 Performance. `TreeModelMixin.delete()` deletes a subtree with a single query when
 no signal listens to the deletion and no other model points at it.
 
+Performance. When a signal listens to the deletion, `TreeModelMixin.delete()` no
+longer makes Django look for the children of the rows it collected: they are in the
+subtree already, so that lookup loaded every row a second time.
+
 Performance, PostgreSQL. `QuerySet.get_descendants()` no longer compares every row
 with every member of the queryset: each member becomes one seek in the path index,
 so the cost follows the number of members and of results, not the size of the table

@@ -22,6 +22,7 @@ from django.db.migrations.state import ProjectState
 from django.db.models import Exists, F, OuterRef, ProtectedError, QuerySet
 from django.db.utils import IntegrityError, ProgrammingError
 from django.test import SimpleTestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 
 from tree.fields import PathField
 from tree.forms import TreeChoiceField
@@ -3776,6 +3777,76 @@ class SubtreeDeleteTest(CommonTest):
         self.assertFalse(
             SetNullPlace.objects.create(name='x')._can_delete_subtree_in_one_query()
         )
+
+    def test_children_lookup_is_only_skipped_for_a_cascade_parent(self):
+        self.assertTrue(Place.objects.create(name='a')._can_skip_children_lookup())
+        self.assertFalse(
+            ProtectPlace.objects.create(name='b')._can_skip_children_lookup()
+        )
+        self.assertFalse(
+            SetNullPlace.objects.create(name='c')._can_skip_children_lookup()
+        )
+
+    def test_signals_and_counts_with_listeners(self):
+        from django.db.models.signals import post_delete, pre_delete
+
+        self.create_all_test_places()
+        before, after = [], []
+
+        def on_pre_delete(sender, instance, **kwargs):
+            before.append(instance.name)
+
+        def on_post_delete(sender, instance, **kwargs):
+            after.append(instance.name)
+
+        pre_delete.connect(on_pre_delete, sender=Place)
+        post_delete.connect(on_post_delete, sender=Place)
+        try:
+            count, per_model = Place.objects.get(name='Normandie').delete()
+        finally:
+            pre_delete.disconnect(on_pre_delete, sender=Place)
+            post_delete.disconnect(on_post_delete, sender=Place)
+        self.assertEqual(count, 4)
+        self.assertEqual(per_model, {'tests.Place': 4})
+        # Each row of the subtree is announced once, not once per way of finding it.
+        expected = ['Eure', 'Manche', 'Normandie', 'Seine-Maritime']
+        self.assertListEqual(sorted(before), expected)
+        self.assertListEqual(sorted(after), expected)
+        self.assertEqual(Place.objects.count(), 5)
+        self.assertEqual(tree_problems(Place), [])
+
+    def test_children_are_not_looked_up_again_with_listeners(self):
+        # Django's collector selects the table a second time for the children of the
+        # rows it just collected, which are rows it already has.
+        from django.db.models.signals import pre_delete
+
+        def selects(context):
+            return [
+                query['sql']
+                for query in context.captured_queries
+                if query['sql'].lstrip().upper().startswith('SELECT')
+            ]
+
+        self.create_all_test_places()
+        normandie = Place.objects.get(name='Normandie')
+        subtree = normandie.get_descendants(include_self=True)
+
+        def listener(sender, instance, **kwargs):
+            pass
+
+        pre_delete.connect(listener, sender=Place)
+        try:
+            with transaction.atomic():
+                with CaptureQueriesContext(connection) as regular:
+                    subtree.delete()
+                transaction.set_rollback(True)
+            self.assertEqual(Place.objects.count(), 9)
+            with CaptureQueriesContext(connection) as shortcut:
+                normandie.delete()
+        finally:
+            pre_delete.disconnect(listener, sender=Place)
+        self.assertEqual(Place.objects.count(), 5)
+        self.assertLess(len(selects(shortcut)), len(selects(regular)))
 
 
 def load_tests(loader, tests, pattern):

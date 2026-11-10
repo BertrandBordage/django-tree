@@ -74,12 +74,12 @@ measurement; below it, the rank in that row (`#n`) and a marker.
 
 | | django-tree | treebeard MP | treebeard NS | treebeard AL | django-mptt | django-tree-queries | django-treenode |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| **Reads · best** | 12 µs<br>🟢 #5 | 1.2 µs<br>🟢 #3 | 1.0 µs<br>🟢 #2 | 13 µs<br>🟢 #6 | 1.9 µs<br>🟢 #4 | 74 µs<br>🟢 #7 | 0.2 µs<br>🟢 #1 👑 |
-| **Reads · typical** | 425 µs<br>🟢 #4 | 305 µs<br>🟢 #1 👑 | 357 µs<br>🟢 #3 | 1.3 ms<br>🟢 #6 | 311 µs<br>🟢 #1 👑 | 1.0 ms<br>🟢 #5 | 1.5 ms<br>🟢 #7 |
-| **Reads · worst** | 9.5 ms<br>🟠 #1 👑 | 352 ms<br>🔴 #3 | 525 ms<br>🔴 #4 | 895 ms<br>🔴 #6 | 95 ms<br>🟠 #2 | 644 ms<br>🔴 #5 | 2 min<br>💩 #7 |
-| **Writes · best** | 225 µs<br>🟢 #4 | 191 µs<br>🟢 #1 👑 | 205 µs<br>🟢 #3 | 187 µs<br>🟢 #1 👑 | 284 µs<br>🟢 #5 | 282 µs<br>🟢 #5 | 329 ms<br>🔴 #7 |
-| **Writes · typical** | 1.6 ms<br>🟢 #3 | 3.3 ms<br>🟠 #4 | 6.5 ms<br>🟠 #5 | 855 µs<br>🟢 #1 👑 | 11 ms<br>🟠 #6 | 1.0 ms<br>🟢 #2 | 695 ms<br>🔴 #7 |
-| **Writes · worst** | 1.1 s<br>💩 #3 | 9.1 s<br>💩 #4 | 21.0 s<br>💩 #6 | 971 ms<br>🔴 #2 | 18.1 s<br>💩 #5 | 811 ms<br>🔴 #1 👑 | 22 min<br>💩 #7 |
+| **Reads · best** | 8.1 µs<br>🟢 #5 | 1.2 µs<br>🟢 #3 | 1.0 µs<br>🟢 #2 | 13 µs<br>🟢 #6 | 1.9 µs<br>🟢 #4 | 74 µs<br>🟢 #7 | 0.2 µs<br>🟢 #1 👑 |
+| **Reads · typical** | 377 µs<br>🟢 #4 | 305 µs<br>🟢 #1 👑 | 357 µs<br>🟢 #3 | 1.3 ms<br>🟢 #6 | 311 µs<br>🟢 #1 👑 | 1.0 ms<br>🟢 #5 | 1.5 ms<br>🟢 #7 |
+| **Reads · worst** | 10 ms<br>🟠 #1 👑 | 352 ms<br>🔴 #3 | 525 ms<br>🔴 #4 | 895 ms<br>🔴 #6 | 95 ms<br>🟠 #2 | 644 ms<br>🔴 #5 | 2 min<br>💩 #7 |
+| **Writes · best** | 446 µs<br>🟢 #6 | 191 µs<br>🟢 #1 👑 | 205 µs<br>🟢 #3 | 187 µs<br>🟢 #1 👑 | 284 µs<br>🟢 #4 | 282 µs<br>🟢 #4 | 329 ms<br>🔴 #7 |
+| **Writes · typical** | 2.0 ms<br>🟢 #3 | 3.3 ms<br>🟠 #4 | 6.5 ms<br>🟠 #5 | 855 µs<br>🟢 #1 👑 | 11 ms<br>🟠 #6 | 1.0 ms<br>🟢 #2 | 695 ms<br>🔴 #7 |
+| **Writes · worst** | 1.2 s<br>💩 #3 | 9.1 s<br>💩 #4 | 21.0 s<br>💩 #6 | 971 ms<br>🔴 #2 | 18.1 s<br>💩 #5 | 811 ms<br>🔴 #1 👑 | 22 min<br>💩 #7 |
 | **Storage** | 0.91 MB<br>🟢 #5 | 0.97 MB<br>🟢 #6 | 0.79 MB<br>🟢 #3 | 0.57 MB<br>🟢 #1 👑 | 0.85 MB<br>🟢 #4 | 0.57 MB<br>🟢 #1 👑 | 0.98 MB<br>🟢 #6 |
 
 Two results within 5 % share a rank. Markers use the same thresholds for reads
