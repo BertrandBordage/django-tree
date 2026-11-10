@@ -9,6 +9,8 @@ changed. `rebuild_paths()` now sends an empty path instead of NULL. This needs
 `UpdateTreeTrigger('YourModel')` in a migration. Until then, only the first case is
 fixed.
 
+Fixes the `DeleteTreeTrigger` reverse queries, which ran two statements as one.
+
 # 1.0.2 (2026-11-08)
 
 `PathField` is no longer serialized. The database computes the path and rewrites

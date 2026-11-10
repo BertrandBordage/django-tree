@@ -412,7 +412,7 @@ CREATE_TRIGGER_QUERIES = (
 DROP_TRIGGER_QUERIES = (
     # Dropped here for symmetry with its creation above (see the deferred-constraint
     # rationale in `CREATE_TRIGGER_QUERIES`).
-    'ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint};'
+    'ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint};',
     'DROP TRIGGER IF EXISTS "update_{path}_before" ON {table};',
     'DROP FUNCTION IF EXISTS {function}();',
 )

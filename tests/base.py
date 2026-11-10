@@ -3552,6 +3552,14 @@ class WatchedNamesTest(SimpleTestCase):
         self.assertNotIn('pk', names)
 
 
+class DropTriggerQueriesTest(SimpleTestCase):
+    def test_every_query_is_a_single_statement(self):
+        from tree.sql import postgresql
+
+        for query in postgresql.DROP_TRIGGER_QUERIES:
+            self.assertEqual(query.count(';'), 1, query)
+
+
 def load_tests(loader, tests, pattern):
     # The SQL-building helpers in `tree.sql.base` are specified by doctests; run
     # them as part of the suite so they are covered and verified.
