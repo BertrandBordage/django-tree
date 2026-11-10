@@ -1,4 +1,4 @@
-# Unreleased
+# 1.1.0 (2026-11-10)
 
 Saving an instance with no path, such as one restored from a snapshot, no longer
 makes PostgreSQL rebuild the whole tree: the stored path is kept.
