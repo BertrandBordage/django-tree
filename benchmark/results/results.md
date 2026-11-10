@@ -11,12 +11,12 @@ absolute latency, the same for reads and writes: laggy above 3 ms, very laggy ab
 100 ms, horrible above 1 s.
 
 The worst-case rows are where deal-breakers show up. django-treenode rebuilds the
-whole tree in Python on every write, so its worst write is ~25 minutes — and its
-worst *read* balloons to ~5 minutes too, since it has no set-level descendants query
+whole tree in Python on every write, so its worst write is ~22 minutes — and its
+worst *read* balloons to ~2 minutes too, since it has no set-level descendants query
 and the unofficial equivalent walks the tree node by node. treebeard NS and MPTT
-reach ~19–22 s on their worst write. The adjacency-based readers (treebeard AL,
+reach ~18–21 s on their worst write. The adjacency-based readers (treebeard AL,
 django-tree-queries) climb to ~0.6–0.9 s on the heaviest read traversal, where
-django-tree stays at ~62 ms.
+django-tree stays at ~61 ms.
 
 Note as well that despite django-tree being middle-of-the-pack on storage, it is
 absolutely not a deal breaker — and the amount of indexes is a per-field parameter
