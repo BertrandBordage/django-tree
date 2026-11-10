@@ -1535,6 +1535,41 @@ class PathTest(CommonTest):
                 ['France', 'Normandie'],
             )
 
+    def test_get_ancestors_of_a_root_is_an_empty_queryset(self):
+        self.create_all_test_places()
+        Person.objects.create(last_name='Bach')
+        roots = [
+            Place.objects.get(name='France'),
+            Place.objects.get(name='Österreich'),
+            Person.objects.get(last_name='Bach'),
+        ]
+
+        with self.assertNumQueries(0):
+            for root in roots:
+                ancestors = root.get_ancestors()
+                self.assertIsInstance(ancestors, QuerySet)
+                self.assertIs(ancestors.model, type(root))
+                self.assertListEqual(list(ancestors), [])
+                self.assertEqual(ancestors.count(), 0)
+                self.assertFalse(ancestors.exists())
+                # Chaining gives another empty queryset and leaves this one alone.
+                chained = ancestors.filter(pk=root.pk).order_by('-pk')
+                self.assertIsNot(chained, ancestors)
+                self.assertListEqual(list(chained), [])
+                self.assertListEqual(list(root.get_ancestors()), [])
+
+        # The empty queryset of a root does not stand in for anything else.
+        normandie = Place.objects.get(name='Normandie')
+        with self.assertNumQueries(1):
+            self.assertListEqual(
+                list(normandie.get_ancestors().values_list('name', flat=True)),
+                ['France'],
+            )
+
+    def test_get_ancestors_without_a_path(self):
+        with self.assertNumQueries(0):
+            self.assertListEqual(list(Place(name='Atlantis').get_ancestors()), [])
+
     def test_get_descendants(self):
         self.create_all_test_places()
 
@@ -2701,6 +2736,22 @@ class MultiplePathFieldsTest(TransactionTestCase):
             ),
             ['A'],
         )
+
+    def test_ancestors_of_a_root_still_need_a_path_field_when_ambiguous(self):
+        with self.assertRaises(ValueError):
+            self.root.get_ancestors()
+        for path_field in ('name_path', 'code_path'):
+            self.assertListEqual(
+                list(self.root.get_ancestors(path_field=path_field)), []
+            )
+            self.assertListEqual(
+                list(
+                    self.root.get_ancestors(
+                        include_self=True, path_field=path_field
+                    ).values_list('name', flat=True)
+                ),
+                ['root'],
+            )
 
 
 class NonIntegerPrimaryKeyTest(TransactionTestCase):

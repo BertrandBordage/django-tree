@@ -22,6 +22,9 @@ with every member of the queryset: each member becomes one seek in the path inde
 so the cost follows the number of members and of results, not the size of the table
 times the number of members.
 
+Performance. `get_ancestors()` of a root returns an empty queryset at once, without
+building a query.
+
 Fixes the `DeleteTreeTrigger` reverse queries, which ran two statements as one.
 
 # 1.0.2 (2026-11-08)

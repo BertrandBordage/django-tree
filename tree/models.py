@@ -10,6 +10,7 @@ from django.db.models.deletion import get_candidate_relations_to_delete
 
 from .fields import PathField
 from .query import _get_path_fields, _get_path_field, TreeManager
+from .sql.helpers import DELIMITER
 from .types import Path
 
 if TYPE_CHECKING:
@@ -22,6 +23,11 @@ else:
 
 
 class TreeModelMixin(_ModelBase):
+    # Per-class caches of `get_ancestors()`, kept in each class's own `__dict__` so
+    # that a subclass never reads the one of its parent.
+    _tree_default_path_info: tuple[str, ...]
+    _tree_empty_qs: QuerySet
+
     @classmethod
     def _get_path_fields(cls, name: str | None = None) -> list[PathField]:
         return _get_path_fields(cls, name)
@@ -36,9 +42,40 @@ class TreeModelMixin(_ModelBase):
     def get_children(self, path_field: str | None = None) -> QuerySet:
         return self._get_path_value(path_field).get_children()
 
+    @classmethod
+    def _tree_default_path_attname(cls) -> str | None:
+        # The attname of the model's only `PathField` (None with several), resolved
+        # once per class because `get_ancestors()` sits on a very hot path.
+        info = cls.__dict__.get('_tree_default_path_info')
+        if info is None:
+            fields = _get_path_fields(cls)
+            info = cls._tree_default_path_info = (
+                (fields[0].attname,) if len(fields) == 1 else ()
+            )
+        return info[0] if info else None
+
+    @classmethod
+    def _tree_empty_queryset(cls) -> QuerySet:
+        # One empty queryset per model class. It stays empty whatever is chained to
+        # it, and evaluating it caches the empty result, so the ancestors of a root
+        # cost neither a query nor a clone.
+        empty = cls.__dict__.get('_tree_empty_qs')
+        if empty is None:
+            empty = cls._tree_empty_qs = cls._default_manager.none()
+        return empty
+
     def get_ancestors(
         self, include_self: bool = False, path_field: str | None = None
     ) -> QuerySet:
+        if path_field is None and not include_self:
+            attname = type(self)._tree_default_path_attname()
+            if attname is not None:
+                # Read from `__dict__` so that a deferred path is loaded by the
+                # regular code below instead of here.
+                value = getattr(self.__dict__.get(attname), 'value', None)
+                # A root (one level delimiter) has no ancestors: no query to build.
+                if value and value.count(DELIMITER) == 1:
+                    return type(self)._tree_empty_queryset()
         return self._get_path_value(path_field).get_ancestors(include_self=include_self)
 
     def get_descendants(
