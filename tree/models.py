@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, cast
 from collections.abc import Iterator
 
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
-from django.db import DEFAULT_DB_ALIAS, router, transaction
+from django.db import DEFAULT_DB_ALIAS, connections, router, transaction
 from django.db.models import CASCADE, DO_NOTHING, Model, QuerySet, signals
 from django.db.models.deletion import Collector, get_candidate_relations_to_delete
 
@@ -213,11 +213,21 @@ class TreeModelMixin(_ModelBase):
         qs = self.get_descendants(include_self=True)
         if using is not None:
             qs = qs.using(using)
-        if not keep_parents and self._can_delete_subtree_in_one_query():
-            return self._delete_subtree_in_one_query(qs, using)
-        if not keep_parents and self._can_skip_children_lookup():
-            return self._delete_subtree_with_collector(qs)
+        if not keep_parents and self._can_defer_constraint_checks(using):
+            if self._can_delete_subtree_in_one_query():
+                return self._delete_subtree_in_one_query(qs, using)
+            if self._can_skip_children_lookup():
+                return self._delete_subtree_with_collector(qs)
         return qs.delete()
+
+    def _can_defer_constraint_checks(self, using: str | None) -> bool:
+        # Both shortcuts below delete a parent and its children together, which only
+        # works when the database waits for the end of the transaction to check
+        # foreign keys. MySQL and MariaDB check them row by row, so there Django's
+        # `CASCADE` first sets the foreign key of the children to NULL. The shortcuts
+        # do not, and would delete a parent before its children.
+        using = using or router.db_for_write(type(self), instance=self)
+        return connections[using].features.can_defer_constraint_checks
 
     def _can_skip_children_lookup(self) -> bool:
         # Only a `CASCADE` parent foreign key is covered by the subtree itself.

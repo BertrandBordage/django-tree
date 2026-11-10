@@ -3815,6 +3815,10 @@ class SubtreeDeleteTest(CommonTest):
         self.assertEqual(Place.objects.count(), 5)
         self.assertEqual(tree_problems(Place), [])
 
+    @skipUnless(
+        connection.features.can_defer_constraint_checks,
+        'MySQL and MariaDB keep the regular collector.',
+    )
     def test_children_are_not_looked_up_again_with_listeners(self):
         # Django's collector selects the table a second time for the children of the
         # rows it just collected, which are rows it already has.
@@ -3847,6 +3851,51 @@ class SubtreeDeleteTest(CommonTest):
             pre_delete.disconnect(listener, sender=Place)
         self.assertEqual(Place.objects.count(), 5)
         self.assertLess(len(selects(shortcut)), len(selects(regular)))
+
+    def _delete_normandie_with_row_by_row_checks(self):
+        # `can_defer_constraint_checks` is False on MySQL and MariaDB, which check
+        # foreign keys row by row.
+        self.create_all_test_places()
+        normandie = Place.objects.get(name='Normandie')
+        with mock.patch.object(
+            connection.features, 'can_defer_constraint_checks', False
+        ):
+            with CaptureQueriesContext(connection) as queries:
+                result = normandie.delete()
+        self.assertEqual(result, (4, {'tests.Place': 4}))
+        self.assertEqual(Place.objects.count(), 5)
+        self.assertEqual(tree_problems(Place), [])
+        return [query['sql'] for query in queries.captured_queries]
+
+    def assertDjangoCascadeWasKept(self, statements):
+        # Django's `CASCADE` first sets the foreign key of the children to NULL, so
+        # that a parent can go before its children when checks are not deferred.
+        self.assertTrue(
+            any(
+                sql.lstrip().upper().startswith('UPDATE')
+                and 'parent_id' in sql
+                and 'NULL' in sql.upper()
+                for sql in statements
+            ),
+            statements,
+        )
+
+    def test_one_query_delete_needs_deferred_constraint_checks(self):
+        statements = self._delete_normandie_with_row_by_row_checks()
+        self.assertDjangoCascadeWasKept(statements)
+
+    def test_collector_shortcut_needs_deferred_constraint_checks(self):
+        from django.db.models.signals import pre_delete
+
+        def listener(sender, instance, **kwargs):
+            pass
+
+        pre_delete.connect(listener, sender=Place)
+        try:
+            statements = self._delete_normandie_with_row_by_row_checks()
+        finally:
+            pre_delete.disconnect(listener, sender=Place)
+        self.assertDjangoCascadeWasKept(statements)
 
 
 def load_tests(loader, tests, pattern):
