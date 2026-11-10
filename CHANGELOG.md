@@ -14,6 +14,9 @@ index to find its neighbours, and moving a subtree no longer scans the whole tab
 to find its descendants; rebuilding paths is also faster. This needs
 `UpdateTreeTrigger('YourModel')` in a migration.
 
+Performance. `TreeModelMixin.delete()` deletes a subtree with a single query when
+no signal listens to the deletion and no other model points at it.
+
 Fixes the `DeleteTreeTrigger` reverse queries, which ran two statements as one.
 
 # 1.0.2 (2026-11-08)

@@ -1,11 +1,12 @@
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from collections.abc import Iterator
 
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
-from django.db import DEFAULT_DB_ALIAS, transaction
-from django.db.models import Model, QuerySet
+from django.db import DEFAULT_DB_ALIAS, router, transaction
+from django.db.models import CASCADE, DO_NOTHING, Model, QuerySet, signals
+from django.db.models.deletion import get_candidate_relations_to_delete
 
 from .fields import PathField
 from .query import _get_path_fields, _get_path_field, TreeManager
@@ -160,7 +161,56 @@ class TreeModelMixin(_ModelBase):
         qs = self.get_descendants(include_self=True)
         if using is not None:
             qs = qs.using(using)
+        if not keep_parents and self._can_delete_subtree_in_one_query():
+            return self._delete_subtree_in_one_query(qs, using)
         return qs.delete()
+
+    def _can_delete_subtree_in_one_query(self) -> bool:
+        """Whether deleting the whole subtree needs nothing from Django's
+        deletion ``Collector``.
+
+        The ``Collector`` fetches every row of the subtree, then walks the
+        self-referencing ``CASCADE`` foreign key to find the children it
+        already has. Deleting a subtree makes that walk pointless, as a node's
+        children are in the subtree by definition, so when nothing else could
+        observe or veto the deletion a single ranged ``DELETE`` is enough. This
+        is only true when no signal listens to the deletion, no other model
+        points at this one, there is no multi-table inheritance, and the parent
+        foreign key is ``CASCADE`` (``PROTECT`` must still refuse).
+        """
+        model = type(self)
+        opts = model._meta
+        path_field = self._get_path_field(None)
+        parent_field = path_field.parent_field
+        if (
+            (opts.concrete_model or model)._meta.parents
+            or any(hasattr(f, 'bulk_related_objects') for f in opts.private_fields)
+            or any(
+                signal.has_listeners(model)
+                for signal in (
+                    signals.pre_delete,
+                    signals.post_delete,
+                    signals.m2m_changed,
+                )
+            )
+        ):
+            return False
+        for related in get_candidate_relations_to_delete(opts):
+            related_field = cast(Any, related).field
+            on_delete = related_field.remote_field.on_delete
+            if on_delete is DO_NOTHING:
+                continue
+            if related_field is parent_field and on_delete is CASCADE:
+                continue
+            return False
+        return True
+
+    def _delete_subtree_in_one_query(
+        self, qs: QuerySet, using: str | None
+    ) -> tuple[int, dict[str, int]]:
+        using = using or router.db_for_write(type(self), instance=self)
+        count = qs._raw_delete(using=using)
+        return (count, {self._meta.label: count}) if count else (0, {})
 
     @classmethod
     def rebuild_paths(

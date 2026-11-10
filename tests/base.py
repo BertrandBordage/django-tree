@@ -336,7 +336,7 @@ class PathTest(CommonTest):
 
         # Leaf
         manche = Place.objects.get(name='Manche')
-        with self.assertNumQueries(5):
+        with self.assertNumQueries(1):
             manche.delete()
         self.assertPlaces(
             [
@@ -353,7 +353,7 @@ class PathTest(CommonTest):
 
         # Branch
         normandie = Place.objects.get(name='Normandie')
-        with self.assertNumQueries(5):
+        with self.assertNumQueries(1):
             normandie.delete()
         self.assertPlaces(
             [
@@ -367,7 +367,7 @@ class PathTest(CommonTest):
 
         # Root
         france = Place.objects.get(name='France')
-        with self.assertNumQueries(5):
+        with self.assertNumQueries(1):
             france.delete()
         self.assertPlaces(
             [
@@ -3552,12 +3552,112 @@ class WatchedNamesTest(SimpleTestCase):
         self.assertNotIn('pk', names)
 
 
+def tree_problems(model, path_field='path', parent_field='parent_id'):
+    """Everything wrong with the tree of ``model``, as readable strings."""
+    from tree.sql.helpers import tree_level
+
+    rows = {
+        pk: (parent, name, bytes(path.value) if path.value else None)
+        for pk, parent, name, path in model.objects.values_list(
+            'pk', parent_field, 'name', path_field
+        )
+    }
+    problems = []
+    if len({row[2] for row in rows.values()}) != len(rows):
+        problems.append('duplicate or NULL paths')
+    siblings = {}
+    for pk, (parent, name, path) in rows.items():
+        if path is None:
+            continue
+        if parent is None:
+            if tree_level(path) != 1:
+                problems.append('root %s is at level %s' % (pk, tree_level(path)))
+        else:
+            parent_path = rows[parent][2]
+            if not (
+                parent_path
+                and path.startswith(parent_path)
+                and tree_level(path) == tree_level(parent_path) + 1
+            ):
+                problems.append('%s is not under its parent %s' % (pk, parent))
+        siblings.setdefault(parent, []).append((name, pk, path))
+    for parent, members in siblings.items():
+        by_path = [pk for _, pk, path in sorted(members, key=lambda m: m[2])]
+        by_order = [pk for _, pk, path in sorted(members, key=lambda m: m[:2])]
+        if by_path != by_order:
+            problems.append('siblings of %s are not ordered by name' % parent)
+    return problems
+
+
 class DropTriggerQueriesTest(SimpleTestCase):
     def test_every_query_is_a_single_statement(self):
         from tree.sql import postgresql
 
         for query in postgresql.DROP_TRIGGER_QUERIES:
             self.assertEqual(query.count(';'), 1, query)
+
+
+class SubtreeDeleteTest(CommonTest):
+    """`TreeModelMixin.delete()` removes the subtree with one ranged `DELETE`
+    unless something needs Django's deletion `Collector`."""
+
+    def test_returns_django_style_counts(self):
+        self.create_all_test_places()
+        normandie = Place.objects.get(name='Normandie')
+        count, per_model = normandie.delete()
+        self.assertEqual(count, 4)
+        self.assertEqual(per_model, {'tests.Place': 4})
+        self.assertEqual(Place.objects.count(), 5)
+
+    def test_signal_listeners_still_run(self):
+        from django.db.models.signals import pre_delete
+
+        self.create_all_test_places()
+        deleted = []
+
+        def listener(sender, instance, **kwargs):
+            deleted.append(instance.name)
+
+        pre_delete.connect(listener, sender=Place)
+        try:
+            Place.objects.get(name='Normandie').delete()
+        finally:
+            pre_delete.disconnect(listener, sender=Place)
+        self.assertEqual(
+            sorted(deleted),
+            ['Eure', 'Manche', 'Normandie', 'Seine-Maritime'],
+        )
+        self.assertEqual(tree_problems(Place), [])
+
+    def test_protected_parent_is_still_refused(self):
+        root = ProtectPlace.objects.create(name='root')
+        ProtectPlace.objects.create(name='child', parent=root)
+        with self.assertRaises(ProtectedError):
+            root.delete()
+        self.assertEqual(ProtectPlace.objects.count(), 2)
+
+    def test_collector_path_is_used_with_listeners_only(self):
+        from django.db.models.signals import post_delete
+
+        place = Place.objects.create(name='alone')
+        self.assertTrue(place._can_delete_subtree_in_one_query())
+
+        def listener(sender, **kwargs):
+            pass
+
+        post_delete.connect(listener, sender=Place)
+        try:
+            self.assertFalse(place._can_delete_subtree_in_one_query())
+        finally:
+            post_delete.disconnect(listener, sender=Place)
+        self.assertTrue(
+            UUIDPlace.objects.create(name='uuid')._can_delete_subtree_in_one_query()
+        )
+        # `SET_NULL` parents keep Django's collector (nothing about them is wrong,
+        # but only `CASCADE` is known to be covered by the subtree itself).
+        self.assertFalse(
+            SetNullPlace.objects.create(name='x')._can_delete_subtree_in_one_query()
+        )
 
 
 def load_tests(loader, tests, pattern):
