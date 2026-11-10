@@ -1,50 +1,52 @@
 # 1.1.0 (2026-11-10)
 
-Saving an instance with no path, such as one restored from a snapshot, no longer
-makes PostgreSQL rebuild the whole tree: the stored path is kept.
+Faster on PostgreSQL, and faster deletes everywhere.
 
-Other ways of setting a path to NULL (`update()`, `loaddata`) no longer do either:
-the path is kept, and recomputed for that row only if its parent or ordering columns
-changed. `rebuild_paths()` now sends an empty path instead of NULL. This needs
-`UpdateTreeTrigger('YourModel')` in a migration. Until then, only the first case is
-fixed.
+## Upgrading
 
-Performance, PostgreSQL. Inserting or moving a node no longer scans the whole path
-index to find its neighbours, and moving a subtree no longer scans the whole table
-to find its descendants; rebuilding paths is also faster. This needs
-`UpdateTreeTrigger('YourModel')` in a migration.
+If you use PostgreSQL, add one migration for each model with a `PathField`.
+It depends on the latest `tree` migration and on your previous migration:
 
-Performance. `TreeModelMixin.delete()` deletes a subtree with a single query when
-no signal listens to the deletion and no other model points at it. MySQL and
-MariaDB keep Django's deletion, because they check foreign keys row by row, so a
-parent cannot be deleted before its children.
+```python
+from tree.operations import UpdateTreeTrigger
 
-Performance. When a signal listens to the deletion, `TreeModelMixin.delete()` no
-longer makes Django look for the children of the rows it collected: they are in the
-subtree already, so that lookup loaded every row a second time. Not on MySQL and
-MariaDB, for the same reason.
 
-Performance, PostgreSQL. `QuerySet.get_descendants()` no longer compares every row
-with every member of the queryset: each member becomes one seek in the path index,
-so the cost follows the number of members and of results, not the size of the table
-times the number of members.
+class Migration(migrations.Migration):
+    dependencies = [
+        ('tree', '0003_tree_functions'),
+        # ... your previous migration ...
+    ]
 
-Performance. `get_ancestors()` of a root returns an empty queryset at once, without
-building a query.
+    operations = [
+        UpdateTreeTrigger('YourModel'),
+    ]
+```
 
-Fixes the `DeleteTreeTrigger` reverse queries, which ran two statements as one.
+Without it, nothing breaks, but you only get the first fix below and the
+faster deletes. Other databases need nothing.
+
+## What changed
+
+- Saving an instance without a path (for example one restored from a
+  snapshot) no longer rebuilds the whole tree on PostgreSQL.
+- Setting a path to NULL with `update()` or `loaddata` no longer rebuilds the
+  tree either. `rebuild_paths()` now sends an empty path instead of NULL.
+- PostgreSQL: adding a node, moving a node and rebuilding paths are faster.
+- Deleting a subtree with `delete()` is faster, and uses a single query when
+  nothing listens to the deletion and no other model points at it. MySQL and
+  MariaDB keep Django's usual deletion.
+- PostgreSQL: `QuerySet.get_descendants()` is faster.
+- `get_ancestors()` of a root returns an empty queryset right away.
+- Fixes `DeleteTreeTrigger` when it is reversed.
 
 # 1.0.2 (2026-11-08)
 
-`PathField` is no longer serialized. The database computes the path and rewrites
-it on every save, so snapshots (django-reversion, Wagtail revisions) and dumps
-(`dumpdata`) have no use for it. Before, the string written by
-`value_to_string()` could not be read back by `to_python()` when a snapshot was
-loaded. No migration changes.
-
-An instance rebuilt without a path is saved with a NULL path. PostgreSQL's
-trigger fills it in again, and the other backends now restore it too instead of
-leaving it NULL.
+- `PathField` is no longer serialized, so snapshots (django-reversion, Wagtail
+  revisions) and `dumpdata` no longer include it. Loading a snapshot used to
+  fail because the saved path could not be read back.
+- Saving an instance without a path now works on every database, not only
+  PostgreSQL.
+- No migration needed.
 
 # 1.0.1 (2026-07-01)
 
